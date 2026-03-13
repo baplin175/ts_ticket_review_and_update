@@ -235,14 +235,11 @@ def _sync(
                 if verbose:
                     print(f"[ingest] [{idx}/{tickets_seen}] Ticket #{tnum} (id={tid})", flush=True)
 
-                if not dry_run:
-                    db.upsert_ticket(ticket_row, now=now)
-                    tickets_upserted += 1
-
-                # ── Fetch + upsert actions
+                # ── Fetch + clean actions
                 raw_actions = fetch_all_activities(tid_str)
                 actions_seen += len(raw_actions)
 
+                action_rows = []
                 for action_raw in raw_actions:
                     cleaned = clean_activity_dict(action_raw)
                     aid_str = cleaned.get("action_id", "")
@@ -251,14 +248,19 @@ def _sync(
 
                     action_row = _extract_action_row(action_raw, tid, cleaned)
                     if not dry_run:
-                        db.upsert_action(action_row, now=now)
-                        actions_upserted += 1
+                        action_rows.append(action_row)
                     elif verbose:
                         print(
                             f"  [dry-run] action {aid_str}: party={cleaned.get('party')}, "
                             f"visible={cleaned.get('is_visible')}",
                             flush=True,
                         )
+
+                # ── Batch upsert ticket + actions in a single transaction
+                if not dry_run:
+                    db.upsert_ticket_with_actions(ticket_row, action_rows, now=now)
+                    tickets_upserted += 1
+                    actions_upserted += len(action_rows)
 
             except Exception as exc:
                 msg = f"Error processing ticket #{tnum} (id={tid_str}): {exc}"
@@ -404,6 +406,9 @@ def main():
     if not db._is_enabled():
         print("ERROR: DATABASE_URL is not set.", file=sys.stderr)
         sys.exit(1)
+
+    # Ensure schema and tables exist before syncing
+    db.migrate()
 
     # Parse --ticket
     ticket_numbers = None

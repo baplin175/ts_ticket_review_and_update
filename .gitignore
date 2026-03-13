@@ -1,1 +1,16 @@
-Activities.csv
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# OS
+.DS_Store
+
+# Pipeline output (generated at runtime)
+output/
+
+# Environment
+.env
+.venv/
+venv/
+.pytest_cache/

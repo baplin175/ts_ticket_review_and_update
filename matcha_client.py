@@ -59,6 +59,15 @@ def call_matcha(
                 status=response.status_code,
                 response_body=reply_text,
             )
+            if response.status_code >= 500 and attempt < max_retries:
+                wait = retry_backoff * (2 ** (attempt - 1))
+                print(f"    [matcha] Attempt {attempt}/{max_retries} server error ({response.status_code})", flush=True)
+                print(f"    [matcha] Retrying in {wait}s ...", flush=True)
+                last_error = requests.exceptions.HTTPError(
+                    f"Server error {response.status_code}", response=response
+                )
+                time.sleep(wait)
+                continue
             response.raise_for_status()
             return reply_text
         except (

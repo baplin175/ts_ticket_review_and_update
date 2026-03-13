@@ -304,6 +304,7 @@ def main(activities_file: str | None = None, write_back: bool = True,
 
     # 6. Write back to TeamSupport (only when running standalone)
     updated = 0
+    deferred = 0
     if write_back:
         for tnum, data in ticket_fields.items():
             try:
@@ -313,10 +314,10 @@ def main(activities_file: str | None = None, write_back: bool = True,
             except Exception as e:
                 if hasattr(e, 'response') and getattr(e.response, 'status_code', None) == 403:
                     _log(f"  [ts] API rate-limited for {tnum}; payload saved to dry-run file.")
-                    updated += 1
+                    deferred += 1
                 else:
                     _log(f"  [ts] Failed to write back AI fields for {tnum}: {e}")
-        _log(f"[priority] Updated {updated}/{len(ticket_fields)} ticket(s) in TeamSupport.")
+        _log(f"[priority] Updated {updated}/{len(ticket_fields)} ticket(s) in TeamSupport, {deferred} deferred (rate-limited).")
     else:
         _log(f"[priority] Collected fields for {len(ticket_fields)} ticket(s) (write-back deferred).")
 
