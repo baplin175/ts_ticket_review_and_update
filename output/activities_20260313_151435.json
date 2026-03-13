@@ -4,7 +4,7 @@
     "ticket_number": "110554",
     "ticket_name": "log in",
     "date_created": "3/10/2026 9:41 AM",
-    "date_modified": "3/13/2026 9:36 AM",
+    "date_modified": "3/13/2026 10:02 AM",
     "days_opened": "0",
     "days_since_modified": "0",
     "status": "Closed",
@@ -19,7 +19,7 @@
         "action_type": "Comment",
         "creator_id": "5206266",
         "creator_name": "Tony Williams",
-        "party": "inh",
+        "party": "cust",
         "description": "Jen, Absolutely. Have a great rest of your day. - Tony"
       },
       {
@@ -37,7 +37,7 @@
         "action_type": "Comment",
         "creator_id": "5206266",
         "creator_name": "Tony Williams",
-        "party": "inh",
+        "party": "cust",
         "description": "Jen, If you are referring to a login for Impresa, that is done via your Active Directory according to which ICIS_xxxx group is appropriate for that user. They don't need a login for Impresa as it follows their PC/Laptop login on the network. - Tony"
       },
       {

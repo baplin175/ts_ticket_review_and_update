@@ -87,7 +87,7 @@ def _ticket_meta(ticket: dict) -> dict:
     }
 
 
-def main() -> None:
+def main() -> str:
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # 1. Fetch tickets (filtered at the API when TARGET_TICKETS is set)
@@ -156,6 +156,7 @@ def main() -> None:
         json.dump(all_tickets_data, fout, ensure_ascii=False, indent=2)
 
     _log(f"[run] Done. {total_activities} activity/ies across {len(all_tickets_data)} ticket(s) written to {out_path}")
+    return out_path
 
 
 if __name__ == "__main__":

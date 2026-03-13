@@ -106,13 +106,14 @@ def _parse_json_response(raw: str) -> dict | None:
     return None
 
 
-def main() -> None:
+def main(activities_file: str | None = None) -> None:
     if not TARGET_TICKETS:
         _log("[complexity] TARGET_TICKET is required. Set it as an env var.")
         sys.exit(1)
 
     # 1. Locate most recent activities file
-    activities_file = _latest_activities_file()
+    if not activities_file:
+        activities_file = _latest_activities_file()
     if not activities_file:
         _log(f"[complexity] No activities JSON found in {OUTPUT_DIR}. Run run_pull_activities.py first.")
         sys.exit(1)

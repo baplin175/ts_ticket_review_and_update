@@ -77,13 +77,14 @@ def _build_sentiment_input(ticket_number: str, activities: list[dict]) -> str:
     return json.dumps(input_obj, ensure_ascii=False, indent=2)
 
 
-def main() -> None:
+def main(activities_file: str | None = None) -> None:
     if not TARGET_TICKETS:
         _log("[sentiment] TARGET_TICKET is required. Set it as an env var.")
         sys.exit(1)
 
     # 1. Locate most recent activities file
-    activities_file = _latest_activities_file()
+    if not activities_file:
+        activities_file = _latest_activities_file()
     if not activities_file:
         _log(f"[sentiment] No activities JSON found in {OUTPUT_DIR}. Run run_pull_activities.py first.")
         sys.exit(1)
