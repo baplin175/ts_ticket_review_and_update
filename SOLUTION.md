@@ -629,3 +629,47 @@ Both modes coexist cleanly. The orchestrator (`run_all.py`) uses mode 1 for pull
 - **Python version**: SOLUTION.md states Python 3.13+ but the code uses `str | None` syntax which requires Python 3.10+. No functional issue.
 
 - **`run_all.py` uses JSON pipeline for pull**: The orchestrator calls `run_pull_activities.py` (JSON mode) and does not call `run_ingest.py`. This is intentional — the orchestrator serves the JSON-based workflow while `run_ingest.py` serves the DB-backed workflow.
+
+## Operational Failure Mode Fixes
+
+Red-team review of the pipeline identified and fixed the following production failure modes:
+
+### 1. inHANCE User Cache Poisoning (ts_client.py)
+
+**Problem:** When the `/Users?Organization=inHANCE` API call failed (timeout, 403, network error), `_INHANCE_IDS` was set to an empty set and cached permanently. All subsequent `is_inhance_user()` calls returned `False`, silently misclassifying every inHANCE support agent as a customer for the entire process lifetime.
+
+**Fix:** On API failure, return an empty set but do **not** cache it. The next call retries the API.
+
+### 2. COALESCE Masks Real NULL Updates (db.py)
+
+**Problem:** `upsert_ticket` used `COALESCE(EXCLUDED.assignee, tickets.assignee)` for all fields. If a ticket's assignee was genuinely removed in TeamSupport (set to NULL), the DB would silently retain the stale old value. Same for status, severity, customer, and other mutable fields.
+
+**Fix:** Mutable fields (status, severity, assignee, customer, ticket_name, product_name, date_modified, closed_at, days_opened, days_since_modified) now use `EXCLUDED.value` directly. COALESCE is only used for immutable fields (date_created, ticket_number) and externally-managed fields (action_class, source_payload). Same fix applied to `upsert_action`.
+
+### 3. Non-Atomic JSON File Writes (ts_client.py)
+
+**Problem:** `_log_api_call()` and `save_dry_run_payload()` performed read-modify-write on shared JSON files (`api_calls.json`, `api_payloads_dry_run.json`). If the process crashed mid-write or two processes ran concurrently, the file would be corrupted (truncated or partially written).
+
+**Fix:** Write to a temporary file (`.tmp` suffix) then atomically swap with `os.replace()`. On POSIX systems this is an atomic rename operation.
+
+### 4. Matcha Client Missing 5xx Retry (matcha_client.py)
+
+**Problem:** `call_matcha()` only retried on `ConnectionError` and `Timeout` exceptions. HTTP 500/502/503 server errors (common transient failures) were not retried — a single server hiccup would fail the entire enrichment run.
+
+**Fix:** Added 5xx status code check with exponential backoff retry, consistent with the existing retry logic for connection/timeout errors.
+
+### 5. Per-Ticket Transaction Batching (db.py, run_ingest.py)
+
+**Problem:** `run_ingest.py` called `upsert_ticket()` followed by `upsert_action()` for each action separately. Each was a separate DB transaction. If the process crashed after upserting 5 of 10 actions, the ticket would have partial data in the DB.
+
+**Fix:** Added `upsert_ticket_with_actions()` that executes the ticket upsert and all its action upserts within a single database transaction. If any action fails, the entire batch (including the ticket) is rolled back.
+
+### 6. Rate-Limited Write-Backs Counted as Successes (run_all.py, run_priority.py, run_complexity.py)
+
+**Problem:** When the TeamSupport API returned 403 (rate-limited), the write-back code incremented `updated += 1`, treating the rate-limited response as a successful update. This overstated success counts in logs and could mask systematic rate-limiting issues.
+
+**Fix:** Rate-limited responses are now tracked separately as `deferred` and reported distinctly in log output (e.g., "3/5 updated, 2 deferred (rate-limited)").
+
+### Tests
+
+All fixes are covered by `tests/test_operational_fixes.py` (11 tests).
