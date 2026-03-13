@@ -1,0 +1,3 @@
+- The file `reuse_instructions/powman.py` may be read for examples and reference patterns, but should never be referenced, imported, or used in any generated code.
+- Do not write or create any files in the `reuse_functions/` directory.
+- After completing any code changes, update `SOLUTION.md` at the project root as the final step to reflect the current state of the solution.
