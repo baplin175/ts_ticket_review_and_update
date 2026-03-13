@@ -37,3 +37,10 @@ RUN_COMPLEXITY = os.getenv("RUN_COMPLEXITY", "1").strip() == "1"
 # ── Logging / diagnostics ────────────────────────────────────────────
 LOG_TO_FILE = os.getenv("LOG_TO_FILE", "1").strip() == "1"
 LOG_API_CALLS = os.getenv("LOG_API_CALLS", "1").strip() == "1"
+
+# ── Database (Postgres) ──────────────────────────────────────────────
+# Optional. When empty/unset, the pipeline runs in JSON-only mode.
+# Local dev: DATABASE_URL=postgresql://user:pass@localhost:5432/Work
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+# All pipeline tables are created in this schema (not public).
+DATABASE_SCHEMA = os.getenv("DATABASE_SCHEMA", "tickets_ai")

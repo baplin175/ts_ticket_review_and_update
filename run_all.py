@@ -2,17 +2,24 @@
 Orchestrator — Run all pipeline stages in sequence.
 
 Stages:
-  1. Pull activities   (always runs)
+  1. Pull activities   (always runs — fetches from TS API + generates JSON)
   2. Sentiment analysis (RUN_SENTIMENT=1)
   3. AI priority        (RUN_PRIORITY=1)
   4. Complexity         (RUN_COMPLEXITY=1)
+  5. Consolidated write-back to TeamSupport (single API call per ticket)
+
+When DATABASE_URL is set, enrichment scripts also persist to DB and use
+hash-based skipping.  Use --force to override hash checks.
 
 Usage:
     python run_all.py
     TARGET_TICKET=29696 python run_all.py
+    TARGET_TICKET=29696 python run_all.py --force
     RUN_SENTIMENT=0 RUN_COMPLEXITY=0 python run_all.py
+    python run_all.py --no-writeback        # skip TS write-back (dry-run)
 """
 
+import argparse
 import os
 import sys
 from datetime import datetime, timezone
@@ -63,10 +70,14 @@ def _setup_log_file() -> None:
     sys.stderr = _Tee(sys.__stderr__, _log_fh)
 
 
-def main() -> None:
+def main(*, force: bool = False, no_writeback: bool = False) -> None:
     _setup_log_file()
     _log("=" * 60)
     _log("[orchestrator] Starting pipeline")
+    if force:
+        _log("[orchestrator] --force: hash-based skip checks disabled")
+    if no_writeback:
+        _log("[orchestrator] --no-writeback: TS write-back disabled")
     _log("=" * 60)
 
     # Part 1 — always runs
@@ -76,7 +87,7 @@ def main() -> None:
     # Part 2 — sentiment
     if RUN_SENTIMENT:
         _log("\n[orchestrator] Part 2: Sentiment analysis")
-        run_sentiment(activities_file=activities_file)
+        run_sentiment(activities_file=activities_file, force=force)
     else:
         _log("\n[orchestrator] Part 2: Sentiment — skipped (RUN_SENTIMENT=0)")
 
@@ -87,7 +98,7 @@ def main() -> None:
     # Part 3 — priority
     if RUN_PRIORITY:
         _log("\n[orchestrator] Part 3: AI priority scoring")
-        priority_results = run_priority(activities_file=activities_file, write_back=False)
+        priority_results = run_priority(activities_file=activities_file, write_back=False, force=force)
         for tnum, data in priority_results.items():
             entry = all_updates.setdefault(
                 tnum,
@@ -100,7 +111,7 @@ def main() -> None:
     # Part 4 — complexity
     if RUN_COMPLEXITY:
         _log("\n[orchestrator] Part 4: Complexity analysis")
-        complexity_results = run_complexity(activities_file=activities_file, write_back=False)
+        complexity_results = run_complexity(activities_file=activities_file, write_back=False, force=force)
         for tnum, data in complexity_results.items():
             entry = all_updates.setdefault(
                 tnum,
@@ -111,7 +122,7 @@ def main() -> None:
         _log("\n[orchestrator] Part 4: Complexity — skipped (RUN_COMPLEXITY=0)")
 
     # ── Consolidated write-back: one API call per ticket ──
-    if all_updates:
+    if all_updates and not no_writeback:
         _log(f"\n[orchestrator] Writing back {len(all_updates)} ticket(s) (single call each)...")
         updated = 0
         for tnum, data in all_updates.items():
@@ -126,6 +137,10 @@ def main() -> None:
                 else:
                     _log(f"  [ts] Failed to update ticket {tnum}: {e}")
         _log(f"[orchestrator] Write-back complete: {updated}/{len(all_updates)} ticket(s).")
+    elif all_updates and no_writeback:
+        _log(f"\n[orchestrator] {len(all_updates)} ticket(s) scored but write-back skipped (--no-writeback).")
+        for tnum, data in all_updates.items():
+            _log(f"  {tnum}: {list(data['fields'].keys())}")
 
     _log("\n" + "=" * 60)
     _log("[orchestrator] Pipeline complete")
@@ -133,4 +148,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Run the full pipeline.")
+    parser.add_argument("--force", action="store_true",
+                        help="Force enrichment rerun even if content hashes are unchanged.")
+    parser.add_argument("--no-writeback", action="store_true",
+                        help="Skip TeamSupport write-back (dry-run mode).")
+    args = parser.parse_args()
+    main(force=args.force, no_writeback=args.no_writeback)

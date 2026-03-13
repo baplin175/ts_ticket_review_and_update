@@ -2,11 +2,22 @@
 Part 4 — Read the activities JSON, build a prompt from complexity.md
 for each ticket, call Matcha for complexity scoring, and save results.
 
+When DATABASE_URL is set:
+  - Can read ticket data from DB (avoiding need for activities JSON)
+  - Checks technical_core_hash to skip unchanged tickets (unless --force)
+  - Persists full complexity results to ticket_complexity_scores table
+  - Still emits the JSON artifact and supports TS write-back
+
+When DATABASE_URL is not set:
+  - Falls back to JSON-only mode (existing behaviour)
+
 Usage:
     python run_complexity.py
     TARGET_TICKET=29696,110554 python run_complexity.py
+    TARGET_TICKET=29696 python run_complexity.py --force
 """
 
+import argparse
 import json
 import os
 import re
@@ -14,13 +25,17 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import OUTPUT_DIR, RUN_COMPLEXITY, TARGET_TICKETS
+from config import OUTPUT_DIR, RUN_COMPLEXITY, TARGET_TICKETS, MATCHA_MISSION_ID
 from matcha_client import call_matcha
 from ts_client import update_ticket
 
 PROMPT_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "prompts", "complexity.md"
 )
+
+PROMPT_NAME = "complexity"
+PROMPT_VERSION = "1"
+MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
 
 
 def _log(msg: str) -> None:
@@ -48,6 +63,21 @@ def _load_tickets(json_path: str, ticket_numbers: list[str] | None) -> list[dict
     if ticket_numbers:
         nums = set(ticket_numbers)
         tickets = [t for t in tickets if t.get("ticket_number") in nums]
+    return tickets
+
+
+def _load_tickets_from_db(ticket_numbers: list[str]) -> list[dict]:
+    """Load ticket data from DB in the same shape as JSON pipeline."""
+    import db
+    tid_map = db.ticket_ids_for_numbers(ticket_numbers)
+    tickets = []
+    for tnum in ticket_numbers:
+        tid = tid_map.get(tnum)
+        if not tid:
+            continue
+        t = db.load_ticket_with_actions(tid)
+        if t:
+            tickets.append(t)
     return tickets
 
 
@@ -107,7 +137,62 @@ def _parse_json_response(raw: str) -> dict | None:
     return None
 
 
-def main(activities_file: str | None = None, write_back: bool = True) -> dict:
+def _should_skip(ticket_id: int, force: bool) -> bool:
+    """Return True if the ticket's complexity is up-to-date (hash unchanged)."""
+    if force:
+        return False
+    import db
+    if not db._is_enabled():
+        return False
+    hashes = db.get_current_hashes(ticket_id)
+    current_hash = hashes.get("technical_core_hash")
+    if not current_hash:
+        return False
+    last_hash = db.get_latest_enrichment_hash(ticket_id, "complexity")
+    return last_hash == current_hash
+
+
+def _persist_to_db(ticket_id: int, technical_core_hash: str | None,
+                   result: dict, raw_reply: str) -> None:
+    """Insert complexity result into DB."""
+    import db
+    if not db._is_enabled():
+        return
+
+    def _safe_int(val):
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return None
+
+    def _safe_float(val):
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+
+    db.insert_complexity(
+        ticket_id,
+        technical_core_hash=technical_core_hash,
+        model_name=MODEL_NAME,
+        prompt_name=PROMPT_NAME,
+        prompt_version=PROMPT_VERSION,
+        intrinsic_complexity=_safe_int(result.get("intrinsic_complexity")),
+        coordination_load=_safe_int(result.get("coordination_load")),
+        elapsed_drag=_safe_int(result.get("elapsed_drag")),
+        overall_complexity=_safe_int(result.get("overall_complexity")),
+        confidence=_safe_float(result.get("confidence")),
+        primary_complexity_drivers=result.get("primary_complexity_drivers"),
+        complexity_summary=result.get("complexity_summary"),
+        evidence=result.get("evidence"),
+        noise_factors=result.get("noise_factors"),
+        duration_vs_complexity_note=result.get("duration_vs_complexity_note"),
+        raw_response={"parsed": result, "raw_text": raw_reply},
+    )
+
+
+def main(activities_file: str | None = None, write_back: bool = True,
+         *, force: bool = False) -> dict:
     """Run complexity scoring.  Returns a dict mapping ticket_number to
     ``{"ticket_id": ..., "fields": {...}, "activities": [...]}`` so the
     caller can merge fields with other stages before a single API call.
@@ -118,20 +203,54 @@ def main(activities_file: str | None = None, write_back: bool = True) -> dict:
         _log("[complexity] TARGET_TICKET is required. Set it as an env var.")
         sys.exit(1)
 
-    # 1. Locate most recent activities file
-    if not activities_file:
-        activities_file = _latest_activities_file()
-    if not activities_file:
-        _log(f"[complexity] No activities JSON found in {OUTPUT_DIR}. Run run_pull_activities.py first.")
-        sys.exit(1)
-    _log(f"[complexity] Using activities file: {activities_file}")
+    # Check if DB mode is available
+    try:
+        import db
+        db_enabled = db._is_enabled()
+    except Exception:
+        db_enabled = False
 
-    # 2. Load ticket data
-    tickets = _load_tickets(activities_file, TARGET_TICKETS)
+    # Resolve ticket_number → ticket_id map (for DB mode)
+    tid_map: dict[str, int] = {}
+    hash_map: dict[str, str | None] = {}  # ticket_number → technical_core_hash
+    if db_enabled:
+        tid_map = db.ticket_ids_for_numbers(TARGET_TICKETS)
+        for tnum, tid in tid_map.items():
+            hashes = db.get_current_hashes(tid)
+            hash_map[tnum] = hashes.get("technical_core_hash")
+
+    # Filter tickets by hash-based skip logic
+    tickets_to_score = []
+    skipped = []
+    for tnum in TARGET_TICKETS:
+        tid = tid_map.get(tnum)
+        if tid and _should_skip(tid, force):
+            _log(f"[complexity] Ticket {tnum} technical core unchanged (hash match). Skipping. Use --force to override.")
+            skipped.append(tnum)
+        else:
+            tickets_to_score.append(tnum)
+
+    if not tickets_to_score:
+        _log("[complexity] All tickets skipped (unchanged). Nothing to score.")
+        return {}
+
+    # 1. Load ticket data
+    if db_enabled and tid_map:
+        tickets = _load_tickets_from_db(tickets_to_score)
+        _log(f"[complexity] Loaded {len(tickets)} ticket(s) from DB.")
+    else:
+        if not activities_file:
+            activities_file = _latest_activities_file()
+        if not activities_file:
+            _log(f"[complexity] No activities JSON found in {OUTPUT_DIR}. Run run_pull_activities.py first.")
+            sys.exit(1)
+        _log(f"[complexity] Using activities file: {activities_file}")
+        tickets = _load_tickets(activities_file, tickets_to_score)
+
     if not tickets:
-        _log(f"[complexity] Ticket(s) {', '.join(TARGET_TICKETS)} not found in {activities_file}.")
+        _log(f"[complexity] Ticket(s) {', '.join(tickets_to_score)} not found.")
         sys.exit(1)
-    _log(f"[complexity] Loaded {len(tickets)} ticket(s).")
+    _log(f"[complexity] Scoring {len(tickets)} ticket(s).")
 
     prompt_template = _load_prompt()
     all_results = []
@@ -140,11 +259,11 @@ def main(activities_file: str | None = None, write_back: bool = True) -> dict:
         tnum = ticket.get("ticket_number", "?")
         _log(f"[complexity] Scoring ticket {tnum}...")
 
-        # 3. Build prompt with ticket history
+        # 2. Build prompt with ticket history
         ticket_history = _build_ticket_history(ticket)
         full_prompt = prompt_template.replace("{{TICKET_HISTORY}}", ticket_history)
 
-        # 4. Call Matcha
+        # 3. Call Matcha
         try:
             raw_reply = call_matcha(full_prompt, timeout=600)
         except Exception as e:
@@ -153,7 +272,7 @@ def main(activities_file: str | None = None, write_back: bool = True) -> dict:
 
         _log(f"[complexity] Matcha response for {tnum}:\n{raw_reply}")
 
-        # 5. Parse response
+        # 4. Parse response
         result = _parse_json_response(raw_reply)
         if not result:
             _log(f"[complexity] Could not parse response for ticket {tnum}.")
@@ -163,7 +282,13 @@ def main(activities_file: str | None = None, write_back: bool = True) -> dict:
         result["ticket_number"] = tnum
         all_results.append(result)
 
-    _log(f"[complexity] Scored {len(all_results)}/{len(tickets)} ticket(s).")
+        # 5. Persist to DB
+        tid_int = tid_map.get(tnum)
+        if tid_int and db_enabled:
+            _persist_to_db(tid_int, hash_map.get(tnum), result, raw_reply)
+            _log(f"  [complexity] Persisted to DB for ticket {tnum}.")
+
+    _log(f"[complexity] Scored {len(all_results)}/{len(tickets)} ticket(s). Skipped {len(skipped)}.")
 
     # 6. Build per-ticket field maps
     ticket_map = {t["ticket_number"]: t for t in tickets}
@@ -203,12 +328,14 @@ def main(activities_file: str | None = None, write_back: bool = True) -> dict:
     else:
         _log(f"[complexity] Collected fields for {len(ticket_fields)} ticket(s) (write-back deferred).")
 
-    # 8. Save results locally
+    # 8. Save results locally (JSON artifact)
     ts = _run_timestamp()
     out_path = os.path.join(OUTPUT_DIR, f"complexity_{ts}.json")
+    source = os.path.basename(activities_file) if activities_file else "db"
     output = {
-        "source_file": os.path.basename(activities_file),
+        "source_file": source,
         "tickets_scored": len(all_results),
+        "tickets_skipped": len(skipped),
         "writeback_count": updated,
         "results": all_results,
     }
@@ -223,4 +350,8 @@ if __name__ == "__main__":
     if not RUN_COMPLEXITY:
         print("[complexity] Skipped (RUN_COMPLEXITY=0).")
     else:
-        main()
+        parser = argparse.ArgumentParser(description="Complexity scoring with optional DB persistence.")
+        parser.add_argument("--force", action="store_true",
+                            help="Force rerun even if technical_core_hash is unchanged.")
+        args = parser.parse_args()
+        main(force=args.force)
