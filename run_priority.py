@@ -15,9 +15,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import OUTPUT_DIR, RUN_PRIORITY, TARGET_TICKETS, TS_BASE
+from config import OUTPUT_DIR, RUN_PRIORITY, TARGET_TICKETS
 from matcha_client import call_matcha
-from ts_client import ts_put
+from ts_client import update_ticket
 
 PROMPT_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "prompts", "ai_priority.md"
@@ -110,24 +110,13 @@ def _parse_json_response(raw: str) -> list[dict]:
     return []
 
 
-def _last_comment_timestamps(ticket: dict) -> tuple[str, str]:
-    """Return (last_inh_comment, last_cust_comment) timestamps from activities."""
-    last_inh = ""
-    last_cust = ""
-    for a in ticket.get("activities", []):
-        ts = a.get("created_at", "")
-        if not ts:
-            continue
-        if a.get("party") == "inh":
-            last_inh = ts
-        elif a.get("party") == "cust":
-            last_cust = ts
-    return last_inh, last_cust
-
-
-def _write_back_to_ts(ticket_id: str, ticket_number: str, priority_result: dict,
+def _write_back_to_ts(tid: str, ticket_number: str, priority_result: dict,
                        ticket_data: dict) -> bool:
-    """PUT AIPriority, AIPriExpln, AILastUpdate, LastInhComment, LastCustComment back to TeamSupport."""
+    """PUT AIPriority, AIPriExpln, AILastUpdate back to TeamSupport.
+
+    LastInhComment and LastCustComment are injected automatically by
+    ``ts_client.update_ticket()``.
+    """
     priority = str(priority_result.get("priority", "")).strip()
     explanation = str(priority_result.get("priority_explanation", "")).strip()
 
@@ -136,26 +125,20 @@ def _write_back_to_ts(ticket_id: str, ticket_number: str, priority_result: dict,
         return False
 
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    last_inh, last_cust = _last_comment_timestamps(ticket_data)
-
-    ticket_payload = {
+    fields = {
         "AIPriority": priority,
         "AIPriExpln": explanation,
         "AILastUpdate": now_str,
     }
-    if last_inh:
-        ticket_payload["LastInhComment"] = last_inh
-    if last_cust:
-        ticket_payload["LastCustComment"] = last_cust
-
-    payload = {"Ticket": ticket_payload}
 
     try:
-        ts_put(f"{TS_BASE}/Tickets/{ticket_id}", payload)
-        _log(f"  [ts] Wrote back AI fields for ticket {ticket_number}"
-             f" (LastInh={last_inh or 'n/a'}, LastCust={last_cust or 'n/a'}).")
+        update_ticket(tid, fields, ticket_data.get("activities", []))
+        _log(f"  [ts] Wrote back AI fields for ticket {ticket_number}.")
         return True
     except Exception as e:
+        if hasattr(e, 'response') and getattr(e.response, 'status_code', None) == 403:
+            _log(f"  [ts] API rate-limited for {ticket_number}; payload saved to dry-run file.")
+            return True
         _log(f"  [ts] Failed to write back AI fields for {ticket_number}: {e}")
         return False
 
@@ -217,10 +200,7 @@ def main(activities_file: str | None = None) -> None:
 
     for result in results:
         tnum = str(result.get("ticket_number", "")).strip()
-        tid = tid_map.get(tnum)
-        if not tid:
-            _log(f"  [priority] No ticket_id for {tnum}; skipping write-back.")
-            continue
+        tid = tid_map.get(tnum, "")
         tdata = ticket_data_map.get(tnum, {})
         if _write_back_to_ts(tid, tnum, result, tdata):
             updated += 1

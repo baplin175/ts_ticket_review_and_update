@@ -1,0 +1,313 @@
+[
+  {
+    "ticket_id": "",
+    "ticket_number": "108476",
+    "ticket_name": "Meter Id not found on recent MCO",
+    "date_created": "",
+    "date_modified": "",
+    "days_opened": "",
+    "days_since_modified": "",
+    "status": "",
+    "severity": "",
+    "product_name": "Impresa",
+    "assignee": "",
+    "customer": "Caddo Basin SUD",
+    "activities": [
+      {
+        "action_id": "",
+        "created_at": "3/11/2026 11:28 AM",
+        "action_type": "",
+        "creator_id": "",
+        "creator_name": "",
+        "party": "unknown",
+        "description": "Customer Added a Review on this ticket"
+      },
+      {
+        "action_id": "",
+        "created_at": "3/11/2026 10:24 AM",
+        "action_type": "Comment",
+        "creator_id": "",
+        "creator_name": "Chris Holloway",
+        "party": "unknown",
+        "description": "Hi Shelley, We were able to make changes to the layout for the import, to match what your new reading file will look like. This imported correctly."
+      },
+      {
+        "action_id": "",
+        "created_at": "3/11/2026 9:53 AM",
+        "action_type": "Email",
+        "creator_id": "",
+        "creator_name": "Shelley Shipp",
+        "party": "unknown",
+        "description": "Now will work."
+      },
+      {
+        "action_id": "",
+        "created_at": "3/11/2026 9:52 AM",
+        "action_type": "Comment",
+        "creator_id": "",
+        "creator_name": "Chris Holloway",
+        "party": "unknown",
+        "description": "Actually, if you are available now, I can give you a call?"
+      },
+      {
+        "action_id": "",
+        "created_at": "3/11/2026 9:50 AM",
+        "action_type": "Email",
+        "creator_id": "",
+        "creator_name": "Shelley Shipp",
+        "party": "unknown",
+        "description": "Yes please."
+      },
+      {
+        "action_id": "",
+        "created_at": "3/11/2026 9:47 AM",
+        "action_type": "Comment",
+        "creator_id": "",
+        "creator_name": "Chris Holloway",
+        "party": "unknown",
+        "description": "Hi Shelley, I can give you a call today around 10 am to help with this."
+      },
+      {
+        "action_id": "",
+        "created_at": "3/10/2026 12:28 PM",
+        "action_type": "Email",
+        "creator_id": "",
+        "creator_name": "Shelley Shipp",
+        "party": "unknown",
+        "description": "File is still not working. Shelley Shipp -----Original Message----- Case # : 01139122 Account Name: CADDO BASIN SPEC UTIL DIST-AM Subject : SUD 9 Digit Meter ID and SmartPoint issue Closing Comment: Hi Shelley, I have claimed your case for SUD 9 Digit Meter ID and SmartPoint issue. If you have any questions please do not hesitate to contact me. Demetrius Newsome TSE I | Sensus |Xylem Morrisville, NC 27560"
+      },
+      {
+        "action_id": "",
+        "created_at": "3/9/2026 3:15 PM",
+        "action_type": "Email",
+        "creator_id": "",
+        "creator_name": "Shelley Shipp",
+        "party": "unknown",
+        "description": "inHanceSupport@harriscomputer.com; todd.madrid@aqua-metric.com Case 1139079 has been logged for this request. Fransisca Foster Technical Support | Sensus | Xylem"
+      },
+      {
+        "action_id": "",
+        "created_at": "3/9/2026 2:06 PM",
+        "action_type": "Email",
+        "creator_id": "",
+        "creator_name": "Shelley Shipp",
+        "party": "unknown",
+        "description": "Case 1139079 has been logged for this request. Fransisca Foster Technical Support | Sensus | Xylem"
+      },
+      {
+        "action_id": "",
+        "created_at": "3/9/2026 11:49 AM",
+        "action_type": "Email",
+        "creator_id": "",
+        "creator_name": "Valued Customer",
+        "party": "unknown",
+        "description": "Case 1139079 has been logged for this request. Fransisca Foster Technical Support | Sensus | Xylem"
+      },
+      {
+        "action_id": "",
+        "created_at": "3/9/2026 11:30 AM",
+        "action_type": "Email",
+        "creator_id": "",
+        "creator_name": "Shelley Shipp",
+        "party": "unknown",
+        "description": "Cholloway@harricomputer.com Mr. Holloway is assisting Caddo Basin with the Inhance aspect of the extra digit issue. I need a representative from Sensus, Xylem, or Aquametric to help resolve the issue on the other side. Mr. Holloway's email is attached for further discussion on this matter, preferably before tomorrow, before we read the meters."
+      },
+      {
+        "action_id": "",
+        "created_at": "3/9/2026 10:49 AM",
+        "action_type": "Comment",
+        "creator_id": "",
+        "creator_name": "Chris Holloway",
+        "party": "unknown",
+        "description": "Hi Shelly, I am not seeing an email from todd.madrid@aqua-metric.com, or anyone else there. Please send them an email and include my email address on it as well if we need to help with anything. Cholloway@harricomputer.com"
+      },
+      {
+        "action_id": "",
+        "created_at": "3/6/2026 3:23 PM",
+        "action_type": "Email",
+        "creator_id": "",
+        "creator_name": "Shelley Shipp",
+        "party": "unknown",
+        "description": "Has anyone from Sensus contacted you? I emailed my Sensus representative after our conversation last week and forwarded the email outlining what was done."
+      },
+      {
+        "action_id": "",
+        "created_at": "3/6/2026 11:19 AM",
+        "action_type": "Comment",
+        "creator_id": "",
+        "creator_name": "Chris Holloway",
+        "party": "unknown",
+        "description": "Hi Shelly, We have had a few tickets about this issue from other companies and I am not certain if you and I ever worked on this directly. Were you able to use the layout that I provided previously to be able to import the readings?"
+      },
+      {
+        "action_id": "",
+        "created_at": "2/27/2026 3:12 PM",
+        "action_type": "Comment",
+        "creator_id": "",
+        "creator_name": "Chris Holloway",
+        "party": "unknown",
+        "description": "Hi Shelly, We looked at the file import layout and found that we needed to adjust the Genie for this. Here is the new layout for Sensus to use. The actual end of the file is 32, to allow for CR/LF at the end of the data in the file. Please let us know you or Sensus have any questions about this. My direct email is CHolloway@harriscomputer.com New:Original:"
+      },
+      {
+        "action_id": "",
+        "created_at": "2/16/2026 2:14 PM",
+        "action_type": "Comment",
+        "creator_id": "",
+        "creator_name": "Shelley Shipp",
+        "party": "unknown",
+        "description": "This tickets needs to be changed to High Priority and any contact about this is to be directed to Todd Madrid and myself. Email: todd.madrid@aqua-metric.com"
+      },
+      {
+        "action_id": "",
+        "created_at": "2/6/2026 1:21 PM",
+        "action_type": "Email",
+        "creator_id": "",
+        "creator_name": "Shelley Shipp",
+        "party": "unknown",
+        "description": "Todd from Aqua-Metric will be at the Caddo Basin office on Tuesday, February 10, 2026. Mr. Holloway, will you be available to discuss the last digit of the ID not carrying over issue with Todd during his visit?"
+      },
+      {
+        "action_id": "",
+        "created_at": "2/2/2026 4:50 PM",
+        "action_type": "Email",
+        "creator_id": "",
+        "creator_name": "Shelley Shipp",
+        "party": "unknown",
+        "description": "Touching base, Aquametric will be at our office on Tuesday, 2/2/2026, starting at 9 am. Sometime tomorrow, will you be available to discuss the issue?"
+      },
+      {
+        "action_id": "",
+        "created_at": "1/29/2026 3:13 PM",
+        "action_type": "Email",
+        "creator_id": "",
+        "creator_name": "Shelley Shipp",
+        "party": "unknown",
+        "description": "We have training with Aqua Metric on Tuesday, February 3rd at 9 AM. Will that date and time work for you to be able to speak with their representative?"
+      },
+      {
+        "action_id": "",
+        "created_at": "1/27/2026 10:09 AM",
+        "action_type": "Comment",
+        "creator_id": "",
+        "creator_name": "Chris Holloway",
+        "party": "unknown",
+        "description": "Hi Shelley, Please send out a meeting invite, or suggest some times available this week for a meeting and we can take a look at this. I think both options will cause a problem with our software. Getting a change made to the import process would affect all our customer's using the this import type, so it may be a difficult change to get implemented. Wednesday through Friday this week are my most open days."
+      },
+      {
+        "action_id": "",
+        "created_at": "1/16/2026 10:13 AM",
+        "action_type": "Email",
+        "creator_id": "",
+        "creator_name": "Shelley Shipp",
+        "party": "unknown",
+        "description": "I had a meeting with Sensus (Aqua-Metric) yesterday asked about the issue of the extra digit that is not being carried over when I upload the read file from Sensus to Inhance. The representative from Sensus concluded that it is likely an issue on their end, but she has some questions for Inhance. She is concerned that if they add the extra digit to the Excel file or insert a comma, our billing software may not recognize the change. A representative from Sensus will be in our office next week for some updates. While they are here, can we schedule a time for Inhance to speak with the Sensus representative? This will help clarify the issue and ensure that including the extra digit in the file does not cause any problems when uploading to Inhance for billing. I have attached the Billing export report from Sensus and the Error report from Inhance for reference."
+      },
+      {
+        "action_id": "",
+        "created_at": "1/16/2026 9:04 AM",
+        "action_type": "Comment",
+        "creator_id": "",
+        "creator_name": "Tony Williams",
+        "party": "unknown",
+        "description": "Chris, Can you work this into your schedule today, to at least reply with a call time?"
+      },
+      {
+        "action_id": "",
+        "created_at": "1/15/2026 10:47 PM",
+        "action_type": "Comment",
+        "creator_id": "",
+        "creator_name": "Ben Aplin",
+        "party": "unknown",
+        "description": "Good Morning Shelley - my apologies for the delayed response on this. We will engage and move this issue forward."
+      },
+      {
+        "action_id": "",
+        "created_at": "1/8/2026 11:07 AM",
+        "action_type": "Email",
+        "creator_id": "",
+        "creator_name": "Shelley Shipp",
+        "party": "unknown",
+        "description": "I will be reading meters tomorrow, and I would like to address the issue with the extra digit on the meter ID. I hope it can be resolved before I pull in the readings. For reference, I have attached the report that lists the meter IDs, which are missing the last digit. Shelley Shipp Office Supervisor Shelley.shipp@caddobasin.com WATER IS LIFE!"
+      },
+      {
+        "action_id": "",
+        "created_at": "1/6/2026 1:17 PM",
+        "action_type": "Description",
+        "creator_id": "",
+        "creator_name": "Shelley Shipp",
+        "party": "unknown",
+        "description": "Accounts that have recently had a MCO or register change out have not been pulling the reading over and end up on report saying meter id not found. The latest batch of Meter Id's I have been using have 9 digits unlike the previous that had 8, I was wondering if it's a setting that needs to be changed in order to find the meter id and pull the reading over. Last month during billing all the accounts that had a mco or register change out showed up on the unread meter report after I applied charges and I was able to get the majority (200) readings on Sensus and enter them in manual, I prefer not to have to do that. Below is a list of the report and all the meter numbers are missing their last digit."
+      }
+    ]
+  },
+  {
+    "ticket_id": "",
+    "ticket_number": "109683",
+    "ticket_name": "Task Scheduler",
+    "date_created": "",
+    "date_modified": "",
+    "days_opened": "",
+    "days_since_modified": "",
+    "status": "",
+    "severity": "",
+    "product_name": "Impresa",
+    "assignee": "",
+    "customer": "Public Water Supply District No 9",
+    "activities": [
+      {
+        "action_id": "",
+        "created_at": "2/26/2026 4:13 PM",
+        "action_type": "Comment",
+        "creator_id": "",
+        "creator_name": "Sachin Yadav",
+        "party": "unknown",
+        "description": "Chris, answer those Qs for Heather today!"
+      },
+      {
+        "action_id": "",
+        "created_at": "2/19/2026 3:38 PM",
+        "action_type": "Comment",
+        "creator_id": "",
+        "creator_name": "Lisa Ward",
+        "party": "unknown",
+        "description": "I spoke with Heather about the issue with the task scheduler and a workaround. She still has questions for Chris"
+      },
+      {
+        "action_id": "",
+        "created_at": "2/19/2026 2:20 PM",
+        "action_type": "Comment",
+        "creator_id": "",
+        "creator_name": "Heather Green",
+        "party": "unknown",
+        "description": "I am still waiting for someone to contact me regarding this issue and then I have another issue that I need to discuss with someone regarding bills and invoice cloud."
+      },
+      {
+        "action_id": "",
+        "created_at": "2/13/2026 5:13 PM",
+        "action_type": "Comment",
+        "creator_id": "",
+        "creator_name": "Tony Williams",
+        "party": "unknown",
+        "description": "Heather, We'll get someone free as soon as possible, hopefully before 4:30 pm - Tony"
+      },
+      {
+        "action_id": "",
+        "created_at": "2/13/2026 5:09 PM",
+        "action_type": "Email",
+        "creator_id": "",
+        "creator_name": "Heather Green",
+        "party": "unknown",
+        "description": "I only have about 20 minutes left in my day and I cannot leave late today but I am still waiting on a reply or someone to call me on this. Heather Green Office Manager PWSD #9 of Boone County 391 N Rangeline Rd Columbia, MO 65201"
+      },
+      {
+        "action_id": "",
+        "created_at": "2/11/2026 4:41 PM",
+        "action_type": "Description",
+        "creator_id": "",
+        "creator_name": "Heather Green",
+        "party": "unknown",
+        "description": "I am trying to make a change to something we have in the task scheduler and I make the change and hit save and it wont save. No pop no nothing. I have tried someone else's login to verify its not just a me problem and it is not just a me problem. It happens on hers as well. This isn't like super high priority but I do need to get it figured out before 4:30pm cst on Friday since this is a process that will automatically run at 7:30am on Monday the 16th."
+      }
+    ]
+  }
+]

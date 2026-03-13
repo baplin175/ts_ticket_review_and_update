@@ -11,11 +11,13 @@ Usage:
 import json
 import os
 import sys
+import csv
 from datetime import datetime, timezone
+from pathlib import Path
 
 from config import MAX_TICKETS, OUTPUT_DIR, TARGET_TICKETS
 from ts_client import fetch_open_tickets, fetch_all_activities, ticket_id
-from activity_cleaner import clean_activity_dict
+from activity_cleaner import clean_activity_dict, clean_activity
 
 
 def _log(msg: str) -> None:
@@ -87,12 +89,134 @@ def _ticket_meta(ticket: dict) -> dict:
     }
 
 
+CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Activities.csv")
+
+
+def _load_known_inh_names() -> set:
+    """Scan prior activities JSON files for creator names with party=='inh'."""
+    names: set = set()
+    out = Path(OUTPUT_DIR)
+    for f in sorted(out.glob("activities_*.json"), reverse=True):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            for t in data:
+                for a in t.get("activities", []):
+                    if a.get("party") == "inh" and a.get("creator_name"):
+                        names.add(a["creator_name"])
+            if names:
+                break  # one file is enough
+        except Exception:
+            continue
+    return names
+
+
+def _load_from_csv(ticket_numbers: list[str] | None) -> list[dict]:
+    """Read Activities.csv and build the same ticket+activities JSON structure."""
+    if not os.path.exists(CSV_PATH):
+        return []
+
+    _log(f"[csv-fallback] Reading {CSV_PATH}...")
+    inh_names = _load_known_inh_names()
+    if inh_names:
+        _log(f"[csv-fallback] Loaded {len(inh_names)} known inHANCE name(s) from prior run.")
+    else:
+        _log("[csv-fallback] No prior inHANCE names found; party will be 'unknown'.")
+
+    target_set = set(ticket_numbers) if ticket_numbers else None
+
+    # Group rows by ticket number
+    tickets_map: dict[str, list[dict]] = {}
+    ticket_meta_map: dict[str, dict] = {}
+    with open(CSV_PATH, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            tnum = (row.get("Ticket Number") or "").strip()
+            if not tnum:
+                continue
+            if target_set and tnum not in target_set:
+                continue
+
+            if tnum not in ticket_meta_map:
+                ticket_meta_map[tnum] = {
+                    "ticket_name": (row.get("Ticket Name") or "").strip(),
+                    "product_name": (row.get("Ticket Product Name") or "").strip(),
+                    "customer": (row.get("Primary Customer") or "").strip(),
+                }
+                tickets_map[tnum] = []
+
+            creator_name = (row.get("Action Creator Name") or "").strip()
+            if inh_names:
+                party = "inh" if creator_name in inh_names else "cust"
+            else:
+                party = "unknown"
+
+            raw_desc = row.get("Action Description") or ""
+            cleaned = clean_activity(raw_desc, is_html=bool(__import__("re").search(r"<[a-zA-Z][^>]*>", raw_desc)))
+
+            activity = {
+                "action_id": "",
+                "created_at": (row.get("Date Action Created") or "").strip(),
+                "action_type": (row.get("Action Type") or "").strip(),
+                "creator_id": "",
+                "creator_name": creator_name,
+                "party": party,
+                "description": cleaned,
+            }
+            tickets_map[tnum].append(activity)
+
+    # Build ticket records
+    all_tickets = []
+    for tnum, activities in tickets_map.items():
+        meta = ticket_meta_map[tnum]
+        record = {
+            "ticket_id": "",
+            "ticket_number": tnum,
+            "ticket_name": meta["ticket_name"],
+            "date_created": "",
+            "date_modified": "",
+            "days_opened": "",
+            "days_since_modified": "",
+            "status": "",
+            "severity": "",
+            "product_name": meta["product_name"],
+            "assignee": "",
+            "customer": meta["customer"],
+            "activities": activities,
+        }
+        all_tickets.append(record)
+
+    _log(f"[csv-fallback] Loaded {sum(len(a) for a in tickets_map.values())} activities across {len(all_tickets)} ticket(s) from CSV.")
+    return all_tickets
+
+
 def main() -> str:
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # 1. Fetch tickets (filtered at the API when TARGET_TICKETS is set)
-    _log("[run] Fetching tickets...")
-    open_tickets = fetch_open_tickets(ticket_numbers=TARGET_TICKETS or None)
+    # 1. Try API first; fall back to CSV on failure
+    api_ok = True
+    try:
+        _log("[run] Fetching tickets from API...")
+        open_tickets = fetch_open_tickets(ticket_numbers=TARGET_TICKETS or None)
+    except Exception as e:
+        _log(f"[run] API fetch failed ({e}). Falling back to Activities.csv...")
+        api_ok = False
+        open_tickets = []
+
+    if not open_tickets and not api_ok:
+        # API failed — try CSV
+        all_tickets_data = _load_from_csv(TARGET_TICKETS or None)
+        if not all_tickets_data:
+            _log("[run] No data from API or CSV. Exiting.")
+            sys.exit(1)
+
+        ts = _run_timestamp()
+        out_path = os.path.join(OUTPUT_DIR, f"activities_{ts}.json")
+        with open(out_path, "w", encoding="utf-8") as fout:
+            json.dump(all_tickets_data, fout, ensure_ascii=False, indent=2)
+        total = sum(len(t["activities"]) for t in all_tickets_data)
+        _log(f"[run] Done (CSV fallback). {total} activity/ies across {len(all_tickets_data)} ticket(s) written to {out_path}")
+        return out_path
+
     if not open_tickets:
         if TARGET_TICKETS:
             _log(f"[run] Ticket(s) {', '.join(TARGET_TICKETS)} not found. Exiting.")

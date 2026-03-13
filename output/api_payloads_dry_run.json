@@ -1,0 +1,26 @@
+[
+  {
+    "timestamp": "2026-03-13 16:00:38",
+    "method": "PUT",
+    "url": "https://app.na2.teamsupport.com/api/json/Tickets/",
+    "payload": {
+      "Ticket": {
+        "AIPriority": "7.5",
+        "AIPriExpln": "The most recent substantive update indicates the import layout was adjusted and the file imported correctly, and the latest activity is a customer review with no new request or escalation. Severity and aging fields are blank, so there is no current time-based breach signal to raise urgency.",
+        "AILastUpdate": "2026-03-13 16:00:38"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-13 16:00:38",
+    "method": "PUT",
+    "url": "https://app.na2.teamsupport.com/api/json/Tickets/",
+    "payload": {
+      "Ticket": {
+        "AIPriority": "1.5",
+        "AIPriExpln": "There are multiple consecutive customer follow-ups stating they are still waiting for contact, with no intervening staff update that resolves the issue, triggering the repeated-unanswered-requests override. The most recent activity is an internal escalation to respond to outstanding questions.",
+        "AILastUpdate": "2026-03-13 16:00:38"
+      }
+    }
+  }
+]

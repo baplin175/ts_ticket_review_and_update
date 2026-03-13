@@ -1,0 +1,29 @@
+{
+  "source_file": "activities_20260313_155342.json",
+  "tickets_sent": 2,
+  "results": [
+    {
+      "ticket_number": "108476",
+      "ticket_name": "Meter Id not found on recent MCO",
+      "severity": "",
+      "priority": 8,
+      "priority_explanation": "Recent activity shows the issue is actively worked and the latest support update states the import layout was changed and the file imported correctly. There is no current activity indicating an unresolved outage or an unanswered escalation.",
+      "days_opened": "",
+      "days_since_modified": "",
+      "assignee": "",
+      "customer": "Caddo Basin SUD"
+    },
+    {
+      "ticket_number": "109683",
+      "ticket_name": "Task Scheduler",
+      "severity": "",
+      "priority": 1.5,
+      "priority_explanation": "The customer reports the Task Scheduler change will not save and posts repeated follow-ups indicating they are still waiting for contact. There are two consecutive customer requests (2/11 and 2/13) with no intervening support response that materially advances the issue.",
+      "days_opened": "",
+      "days_since_modified": "",
+      "assignee": "",
+      "customer": "Public Water Supply District No 9"
+    }
+  ],
+  "writeback_count": 0
+}

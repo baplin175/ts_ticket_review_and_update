@@ -7,10 +7,11 @@ Pull open-ticket activities from TeamSupport, cleanse the text, classify each ac
 ## Architecture
 
 ```
-config.py              — Centralised settings (API creds, limits, target ticket, output dir)
-ts_client.py           — TeamSupport REST API client (fetch tickets, activities, inHANCE users, PUT write-back)
+config.py              — Centralised settings (API creds, limits, target ticket, output dir, stage toggles)
+ts_client.py           — TeamSupport REST API client (fetch tickets, activities, inHANCE users, update_ticket with auto LastInhComment/LastCustComment)
 activity_cleaner.py    — Text-cleaning pipeline (HTML→text, boilerplate/signature removal)
 matcha_client.py       — Matcha LLM API client (send prompts, extract responses)
+run_all.py             — Orchestrator: runs all stages in sequence, passes activities file between stages
 run_pull_activities.py — Part 1: fetch, clean, classify activities → activities JSON
 run_sentiment.py       — Part 2: send customer comments to Matcha for sentiment → sentiment JSON
 run_priority.py        — Part 3: AI priority scoring via Matcha → write back to TeamSupport
@@ -19,7 +20,8 @@ run_complexity.py      — Part 4: complexity analysis via Matcha → complexity
 
 ## Data Flow
 
-1. **Fetch tickets** — `ts_client.fetch_open_tickets(ticket_number=...)` queries the TeamSupport `/Tickets` endpoint. When `TARGET_TICKET` is set, the ticket is fetched by number regardless of open/closed status. When no target is set, only open tickets are returned (`isClosed=False`) with full pagination.
+1. **Fetch tickets** — `ts_client.fetch_open_tickets(ticket_number=...)` queries the TeamSupport `/Tickets` endpoint. When `TARGET_TICKET` is set, the ticket is fetched by number regardless of open/closed status. When no target is set, only open tickets are returned (`isClosed=False`) with full pagination. If the API returns 403 (rate limit), the pipeline falls back to `Activities.csv`.
+2. **CSV fallback** — When the API is rate-limited or unavailable, `run_pull_activities.py` reads `Activities.csv` from the project root. Party classification uses cached inHANCE names from prior activity JSON files; if none exist, party is set to `"unknown"`. Some metadata fields (`ticket_id`, `status`, `severity`, `assignee`, `date_created`, `date_modified`) are unavailable from CSV.
 2. **Limit tickets** — When not targeting a specific ticket, `config.MAX_TICKETS` (default **5**) caps how many are processed. Set to `0` for unlimited.
 3. **Fetch activities per ticket** — `ts_client.fetch_all_activities(ticket_id)` pages through `/Tickets/{id}/Actions`.
 4. **Load inHANCE user IDs** — `ts_client.fetch_inhance_user_ids()` calls `/Users?Organization=inHANCE` once and caches the set of CS-team user IDs.
@@ -78,7 +80,7 @@ The output file is an array of ticket objects. Each ticket object:
 11. **Build input** — `run_priority.py` reads the latest activities JSON, extracts ticket metadata + all activities into the input format expected by `prompts/ai_priority.md`.
 12. **Call Matcha** — The full prompt (instructions + ticket data) is sent to Matcha with a 600s timeout.
 13. **Parse response** — Matcha returns a JSON array with `priority` (1–10), `priority_explanation`, and verbatim pass-through fields.
-14. **Write back to TeamSupport** — `ts_client.ts_put()` updates custom fields `AIPriority`, `AIPriExpln`, `AILastUpdate`, `LastInhComment`, and `LastCustComment` on each ticket. The last-comment timestamps are derived from the activities list by scanning for the most recent `party=="inh"` and `party=="cust"` entries respectively.
+14. **Write back to TeamSupport** — `ts_client.update_ticket()` updates custom fields `AIPriority`, `AIPriExpln`, `AILastUpdate` on each ticket. `LastInhComment` and `LastCustComment` are injected automatically by `update_ticket()` for every TeamSupport write — derived from the activities list by scanning for the most recent `party=="inh"` and `party=="cust"` entries. If the API returns 403 or the ticket has no `ticket_id` (CSV-sourced), the payload is saved to `output/api_payloads_dry_run.json` for verification.
 15. **Save locally** — Results are saved to `output/priority_YYYYMMDD_HHMMSS.json`.
 
 ## Priority JSON Output Schema
@@ -128,7 +130,8 @@ The output file is an array of ticket objects. Each ticket object:
 16. **Build ticket history** — `run_complexity.py` reads the latest activities JSON and builds a text representation of each ticket (metadata + chronological activity history) for the `prompts/complexity.md` template.
 17. **Call Matcha** — The prompt (with `{{TICKET_HISTORY}}` replaced) is sent to Matcha per ticket.
 18. **Parse response** — Matcha returns a JSON object with `intrinsic_complexity`, `coordination_load`, `elapsed_drag`, `overall_complexity` (1–5 scale), plus `confidence`, drivers, evidence, and noise factors.
-19. **Save locally** — Results are saved to `output/complexity_YYYYMMDD_HHMMSS.json`.
+19. **Write back to TeamSupport** — `ts_client.update_ticket()` updates `Complexity`, `COORDINATIONLOAD`, `ELAPSEDDRAG`, `INTRINSICCOMPLEXITY` on each ticket. `LastInhComment` and `LastCustComment` are included automatically. If the API is rate-limited or ticket_id is unavailable, payloads are saved to the dry-run file.
+20. **Save locally** — Results are saved to `output/complexity_YYYYMMDD_HHMMSS.json`.
 
 ## Complexity JSON Output Schema
 
@@ -136,6 +139,7 @@ The output file is an array of ticket objects. Each ticket object:
 |-----------------------------|-------------------------------------------------------|
 | `source_file`               | Activities JSON filename used as input                |
 | `tickets_scored`            | Number of tickets scored                              |
+| `writeback_count`           | Number of tickets successfully written back to TS     |
 | `results`                   | Array of per-ticket complexity objects                 |
 
 ### Per-ticket complexity fields
@@ -176,6 +180,19 @@ All settings live in `config.py` and can be overridden with environment variable
 | `CUST_COMMENT_COUNT`| `4`                   | Customer comments sent to Matcha     |
 | `OUTPUT_DIR`       | `./output`             | Where JSONL files are written        |
 
+## Dry-Run Payloads
+
+When the TeamSupport API is rate-limited (403) or the ticket has no `ticket_id` (CSV-sourced data), write-back payloads are saved to `output/api_payloads_dry_run.json` instead of being sent to the API. Each entry contains:
+
+| Field       | Description                              |
+|-------------|------------------------------------------|
+| `timestamp` | UTC time the payload was generated       |
+| `method`    | HTTP method (`PUT`)                      |
+| `url`       | TeamSupport API URL that would be called |
+| `payload`   | Full request body (`{"Ticket": {...}}`)  |
+
+This allows verification of payload contents when the API is unavailable.
+
 ## Running
 
 ```bash
@@ -210,4 +227,13 @@ python run_complexity.py
 RUN_SENTIMENT=0 python run_sentiment.py   # skips sentiment
 RUN_PRIORITY=0 python run_priority.py     # skips priority
 RUN_COMPLEXITY=0 python run_complexity.py  # skips complexity
+
+# Orchestrator: run all stages in sequence
+TARGET_TICKET=110554 python run_all.py
+
+# Orchestrator with stages skipped
+TARGET_TICKET=110554 RUN_SENTIMENT=0 python run_all.py
+
+# Orchestrator: pull only (skip all analysis)
+TARGET_TICKET=110554 RUN_SENTIMENT=0 RUN_PRIORITY=0 RUN_COMPLEXITY=0 python run_all.py
 ```

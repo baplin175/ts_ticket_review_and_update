@@ -3,11 +3,14 @@ TeamSupport API client — fetch open tickets and their activities.
 """
 
 import base64
+import json
+import os
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import requests
 
-from config import TS_BASE, TS_KEY, TS_USER_ID
+from config import OUTPUT_DIR, TS_BASE, TS_KEY, TS_USER_ID
 
 
 def _ts_headers() -> Dict[str, str]:
@@ -182,3 +185,75 @@ def ticket_id(ticket: Dict[str, Any]) -> str:
         or ticket.get("TicketId")
         or ""
     ).strip()
+
+
+# ── Ticket update with last-comment timestamps ──────────────────────
+
+def _last_comment_timestamps(activities: List[Dict[str, Any]]) -> tuple:
+    """Return (last_inh_comment, last_cust_comment) timestamps from an activities list."""
+    last_inh = ""
+    last_cust = ""
+    for a in activities:
+        ts = a.get("created_at", "")
+        if not ts:
+            continue
+        if a.get("party") == "inh":
+            last_inh = ts
+        elif a.get("party") == "cust":
+            last_cust = ts
+    return last_inh, last_cust
+
+
+def update_ticket(tid: str, fields: Dict[str, Any], activities: List[Dict[str, Any]]) -> Any:
+    """PUT fields to a ticket, automatically injecting LastInhComment / LastCustComment.
+
+    *activities* should be the cleaned activities list (dicts with ``party`` and
+    ``created_at`` keys) so the last comment timestamps can be derived.
+
+    If *tid* is empty (e.g. CSV-sourced data), the payload is saved as a dry-run
+    file without calling the API.  If the API returns 403 (rate-limited), the
+    payload is also written to the dry-run file.
+    """
+    last_inh, last_cust = _last_comment_timestamps(activities)
+    if last_inh:
+        fields.setdefault("LastInhComment", last_inh)
+    if last_cust:
+        fields.setdefault("LastCustComment", last_cust)
+    payload = {"Ticket": fields}
+
+    if not tid:
+        save_dry_run_payload(tid, payload)
+        print(f"[ts] Dry-run (no ticket_id): payload saved.", flush=True)
+        return None
+
+    try:
+        return ts_put(f"{TS_BASE}/Tickets/{tid}", payload)
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 403:
+            save_dry_run_payload(tid, payload)
+            raise
+        raise
+
+
+def save_dry_run_payload(tid: str, payload: Dict[str, Any]) -> None:
+    """Append a payload to the dry-run output file for later review."""
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    dry_run_path = os.path.join(OUTPUT_DIR, "api_payloads_dry_run.json")
+    entry = {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "method": "PUT",
+        "url": f"{TS_BASE}/Tickets/{tid}",
+        "payload": payload,
+    }
+    # Append to existing array or start a new one
+    existing = []
+    if os.path.exists(dry_run_path):
+        try:
+            with open(dry_run_path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            existing = []
+    existing.append(entry)
+    with open(dry_run_path, "w", encoding="utf-8") as f:
+        json.dump(existing, f, ensure_ascii=False, indent=2)
+    print(f"[ts] Dry-run: payload for ticket {tid} saved to {dry_run_path}", flush=True)

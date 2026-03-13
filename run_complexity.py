@@ -16,6 +16,7 @@ from pathlib import Path
 
 from config import OUTPUT_DIR, RUN_COMPLEXITY, TARGET_TICKETS
 from matcha_client import call_matcha
+from ts_client import update_ticket
 
 PROMPT_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "prompts", "complexity.md"
@@ -152,16 +153,45 @@ def main(activities_file: str | None = None) -> None:
             _log(f"[complexity] Could not parse response for ticket {tnum}.")
             continue
 
+        result["ticket_id"] = ticket.get("ticket_id", "")
+        result["ticket_number"] = tnum
         all_results.append(result)
 
     _log(f"[complexity] Scored {len(all_results)}/{len(tickets)} ticket(s).")
 
-    # 6. Save results
+    # 6. Write back to TeamSupport
+    ticket_map = {t["ticket_number"]: t for t in tickets}
+    updated = 0
+    for result in all_results:
+        tnum = str(result.get("ticket_number", "")).strip()
+        tid = str(result.get("ticket_id", "")).strip()
+        fields = {
+            "Complexity": str(result.get("overall_complexity", "")),
+            "COORDINATIONLOAD": str(result.get("coordination_load", "")),
+            "ELAPSEDDRAG": str(result.get("elapsed_drag", "")),
+            "INTRINSICCOMPLEXITY": str(result.get("intrinsic_complexity", "")),
+        }
+        tdata = ticket_map.get(tnum, {})
+        try:
+            update_ticket(tid, fields, tdata.get("activities", []))
+            _log(f"  [ts] Wrote back complexity fields for ticket {tnum}.")
+            updated += 1
+        except Exception as e:
+            if hasattr(e, 'response') and getattr(e.response, 'status_code', None) == 403:
+                _log(f"  [ts] API rate-limited for {tnum}; payload saved to dry-run file.")
+                updated += 1
+            else:
+                _log(f"  [ts] Failed to write back complexity for {tnum}: {e}")
+
+    _log(f"[complexity] Updated {updated}/{len(all_results)} ticket(s) in TeamSupport.")
+
+    # 7. Save results locally
     ts = _run_timestamp()
     out_path = os.path.join(OUTPUT_DIR, f"complexity_{ts}.json")
     output = {
         "source_file": os.path.basename(activities_file),
         "tickets_scored": len(all_results),
+        "writeback_count": updated,
         "results": all_results,
     }
     with open(out_path, "w", encoding="utf-8") as fout:

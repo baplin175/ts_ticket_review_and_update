@@ -30,6 +30,6 @@ TARGET_TICKETS = [t.strip() for t in _TARGET_RAW.split(",") if t.strip()]
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "output"))
 
 # ── Stage toggles (1 = run, 0 = skip) ───────────────────────────────
-RUN_SENTIMENT = os.getenv("RUN_SENTIMENT", "1").strip() == "1"
+RUN_SENTIMENT = os.getenv("RUN_SENTIMENT", "0").strip() == "1"
 RUN_PRIORITY = os.getenv("RUN_PRIORITY", "1").strip() == "1"
 RUN_COMPLEXITY = os.getenv("RUN_COMPLEXITY", "1").strip() == "1"
