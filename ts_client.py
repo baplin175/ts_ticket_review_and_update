@@ -24,6 +24,13 @@ def ts_get(url: str, params=None) -> Any:
     return r.json()
 
 
+def ts_put(url: str, payload: Dict[str, Any]) -> Any:
+    headers = {**_ts_headers(), "Content-Type": "application/json"}
+    r = requests.put(url, headers=headers, json=payload, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
 # ── Normalisation helpers ────────────────────────────────────────────
 
 def _normalize_ticket_list(data: Any) -> List[Dict[str, Any]]:
@@ -62,20 +69,23 @@ def _normalize_action_list(data: Any) -> List[Dict[str, Any]]:
 
 # ── Public API ───────────────────────────────────────────────────────
 
-def fetch_open_tickets(ticket_number: str | None = None) -> List[Dict[str, Any]]:
+def fetch_open_tickets(ticket_numbers: List[str] | None = None) -> List[Dict[str, Any]]:
     """Return open tickets (paginated).
 
-    If *ticket_number* is provided the API is queried for that single
-    ticket, avoiding a full paginated sweep of all open tickets.
+    If *ticket_numbers* is provided, each ticket is fetched individually
+    regardless of open/closed status, avoiding a full paginated sweep.
     """
-    if ticket_number:
-        data = ts_get(
-            f"{TS_BASE}/Tickets",
-            params={"isClosed": "False", "TicketNumber": ticket_number},
-        )
-        tickets = _normalize_ticket_list(data)
-        print(f"[ts] Fetched {len(tickets)} ticket(s) for number {ticket_number}.", flush=True)
-        return tickets
+    if ticket_numbers:
+        all_targeted: List[Dict[str, Any]] = []
+        for tn in ticket_numbers:
+            data = ts_get(
+                f"{TS_BASE}/Tickets",
+                params={"TicketNumber": tn},
+            )
+            items = _normalize_ticket_list(data)
+            all_targeted.extend(items)
+        print(f"[ts] Fetched {len(all_targeted)} ticket(s) for number(s) {', '.join(ticket_numbers)}.", flush=True)
+        return all_targeted
 
     all_tickets: List[Dict[str, Any]] = []
     page, page_size = 1, 500

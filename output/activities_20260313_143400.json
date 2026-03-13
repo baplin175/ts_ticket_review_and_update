@@ -1,0 +1,864 @@
+[
+  {
+    "ticket_id": "16942554",
+    "ticket_number": "29696",
+    "ticket_name": "ON HOLD - Meter Re Routing - DO # 9783",
+    "date_created": "1/19/2022 1:21 PM",
+    "date_modified": "3/10/2026 2:10 PM",
+    "days_opened": "1513",
+    "days_since_modified": "3",
+    "status": "In-Progress",
+    "severity": "3 - Low Priority",
+    "product_name": "Impresa",
+    "assignee": "Shaena Robertson",
+    "customer": "Eldorado Area Water &amp; Sanitation (Eldorado OMI)",
+    "activities": [
+      {
+        "action_id": "73746545",
+        "created_at": "3/10/2026 2:10 PM",
+        "action_type": "Email",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": ""
+      },
+      {
+        "action_id": "73745832",
+        "created_at": "3/10/2026 1:27 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Nathan is sending out a meeting for Friday 3/13 @ 9:30am CT/8:30am MT."
+      },
+      {
+        "action_id": "73742152",
+        "created_at": "3/10/2026 9:45 AM",
+        "action_type": "Comment",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": "Friday works"
+      },
+      {
+        "action_id": "73739325",
+        "created_at": "3/9/2026 6:53 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Yes we sure can. We can get Nathan scheduled for Thursday or Friday this week? Do you have a preference on day? Time? Let me know."
+      },
+      {
+        "action_id": "73701001",
+        "created_at": "3/4/2026 9:54 AM",
+        "action_type": "Comment",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": "HI! Can we get this on the schedule please?"
+      },
+      {
+        "action_id": "73618591",
+        "created_at": "2/20/2026 3:14 PM",
+        "action_type": "Comment",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": "Bumping this one again."
+      },
+      {
+        "action_id": "73530642",
+        "created_at": "2/9/2026 7:12 PM",
+        "action_type": "Email",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": ""
+      },
+      {
+        "action_id": "73525441",
+        "created_at": "2/9/2026 12:11 PM",
+        "action_type": "Comment",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": "Per Anthony, Here's the file you should be using on your side, just in case you need another copy."
+      },
+      {
+        "action_id": "73525086",
+        "created_at": "2/9/2026 11:48 AM",
+        "action_type": "Comment",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": "I ran the meter report so Anthony could review the data. Per Anthony: File is incorrect. 1,346 accounts with new book/seq and 1,734 with old book/seq. Anthony"
+      },
+      {
+        "action_id": "73493052",
+        "created_at": "2/4/2026 1:07 PM",
+        "action_type": "Email",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": "Ok, heading to my meeting now. Please send over an invite for after 2:30 mst if that’s all you have left for the day."
+      },
+      {
+        "action_id": "73492758",
+        "created_at": "2/4/2026 12:53 PM",
+        "action_type": "Email",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": ""
+      },
+      {
+        "action_id": "73492626",
+        "created_at": "2/4/2026 12:46 PM",
+        "action_type": "Email",
+        "creator_id": "4147670",
+        "creator_name": "Nathan Loan",
+        "party": "inh",
+        "description": ""
+      },
+      {
+        "action_id": "73490178",
+        "created_at": "2/4/2026 10:23 AM",
+        "action_type": "Email",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": "I’m available after 1:30 MST. Just send over a request."
+      },
+      {
+        "action_id": "73485721",
+        "created_at": "2/3/2026 4:51 PM",
+        "action_type": "Comment",
+        "creator_id": "4147670",
+        "creator_name": "Nathan Loan",
+        "party": "inh",
+        "description": "Heather, It looks like I ran the stored procedure but didn't hook it up to anything. Can you let me know if you can get me connected tomorrow morning around 9 CST? If not i won't be available till after 12 CST. I am sorry about that. This should ingest Anthony's excel doc and change the sequence to match the document."
+      },
+      {
+        "action_id": "73484017",
+        "created_at": "2/3/2026 2:53 PM",
+        "action_type": "Email",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": ""
+      },
+      {
+        "action_id": "73482053",
+        "created_at": "2/3/2026 1:06 PM",
+        "action_type": "Comment",
+        "creator_id": "4147670",
+        "creator_name": "Nathan Loan",
+        "party": "inh",
+        "description": "Ran SP on PS_Test. Heather said she was sending a meter report to Anthony now and will update the ticket with a go live date."
+      },
+      {
+        "action_id": "73457418",
+        "created_at": "1/30/2026 11:13 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Great"
+      },
+      {
+        "action_id": "73450983",
+        "created_at": "1/29/2026 3:29 PM",
+        "action_type": "Email",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": "I’m available at that time"
+      },
+      {
+        "action_id": "73450910",
+        "created_at": "1/29/2026 3:25 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Oh yes we probably have repopulated that a few times since we ran the scripts. We can get this scheduled for next week, we do need to get on the server to do so. Can we schedule for Tuesday, 2/3 @ 2pm ET/1pm CT/noon MT? Let me know and I will get a meeting invite sent off."
+      },
+      {
+        "action_id": "73446289",
+        "created_at": "1/29/2026 10:58 AM",
+        "action_type": "Comment",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": "Hi! So sorry for the delay. I ran the meter report this morning in PS_Test for Anthony, and the Book / Sequence has changed back to the original books. I think at some point the data was over-written during another project possibly? Can you drop the script back in this database?"
+      },
+      {
+        "action_id": "73105571",
+        "created_at": "12/9/2025 9:51 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Anthony, We have never heard back from you on this delivery in test. Are we good to move to live? Shaena"
+      },
+      {
+        "action_id": "72870542",
+        "created_at": "11/5/2025 8:37 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Anthony, We delivered the work in test, have you reviewed? When can we promote this work to live?"
+      },
+      {
+        "action_id": "72806388",
+        "created_at": "10/29/2025 1:23 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "I know Anthony is out today - want to make sure he doesn't miss that we delivered the changes in test and need him to review and advise when to deliver in live."
+      },
+      {
+        "action_id": "72798132",
+        "created_at": "10/28/2025 4:35 PM",
+        "action_type": "Comment",
+        "creator_id": "4147670",
+        "creator_name": "Nathan Loan",
+        "party": "inh",
+        "description": "Anthony, Take a look at the Oasis_PS_test database. I ran the re routing script. Can you let me know if everything looks good?"
+      },
+      {
+        "action_id": "72781037",
+        "created_at": "10/27/2025 11:51 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": ""
+      },
+      {
+        "action_id": "72780264",
+        "created_at": "10/27/2025 11:08 AM",
+        "action_type": "Email",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": "Yes, we accepted the meeting. I can get you on the server at that time."
+      },
+      {
+        "action_id": "72777652",
+        "created_at": "10/27/2025 8:56 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Heather, I sent a meeting for tomorrow at 5pm ET/4pm CT/3pm MT/2pm PT for Nathan to get on the server and run the final file in test for Anthony's review. Will that work or can Isaac get Nathan on at that time?"
+      },
+      {
+        "action_id": "72755310",
+        "created_at": "10/23/2025 11:20 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Anthony & Heather, I apologize for the delay. I would like to get this back on track and deliver this in test for you next week. Again I apologize for the delay. Can we get on the server 10/28 @ 5pm ET/4pm CT/3pm MT/2pm PT? I will send off a meeting invite to block that time off."
+      },
+      {
+        "action_id": "72630867",
+        "created_at": "10/8/2025 5:17 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Friday @ 2pm ET/1pm CT/noon MT/11am PT meeting invite sent."
+      },
+      {
+        "action_id": "72603923",
+        "created_at": "10/6/2025 3:00 PM",
+        "action_type": "Email",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": "Anytime works. Just send an invite Heather Roybal (Pronouns: she/her) Jacobs Billing & Customer Support Supervisor 505.557.6338 505.466.2631 fax heather.roybal@jacobs.com 2 North Chamisa Drive Santa Fe, New Mexico 87508 United States www.jacobs.com"
+      },
+      {
+        "action_id": "72603129",
+        "created_at": "10/6/2025 2:16 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Great"
+      },
+      {
+        "action_id": "72599496",
+        "created_at": "10/6/2025 11:06 AM",
+        "action_type": "Email",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": "Good morning, I can get you on the server; Friday works"
+      },
+      {
+        "action_id": "72597804",
+        "created_at": "10/6/2025 9:48 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Anthony,"
+      },
+      {
+        "action_id": "72591439",
+        "created_at": "10/3/2025 4:47 PM",
+        "action_type": "Email",
+        "creator_id": "6355168",
+        "creator_name": "Anthony/ELD Marino",
+        "party": "cust",
+        "description": "Here are the final meter routes in csv and xlsx. There are currently 8 meters in the billing system that are not in these files. I would like to update those after these get uploaded. Please let us know next steps."
+      },
+      {
+        "action_id": "72157846",
+        "created_at": "8/15/2025 11:53 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "I have sent meeting for 9/9 @ 2:30pm ET/1:30pm CT/12:30pm MT/11:30pm PT"
+      },
+      {
+        "action_id": "72156181",
+        "created_at": "8/15/2025 10:21 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Anthony, Great news. I setup Monday 9/8 at 1pm ET/noon CT/11am MT/10am PT to have a call and review discuss timeline and setup install."
+      },
+      {
+        "action_id": "72154330",
+        "created_at": "8/15/2025 8:42 AM",
+        "action_type": "Email",
+        "creator_id": "6355168",
+        "creator_name": "Anthony/ELD Marino",
+        "party": "cust",
+        "description": "Just wanted to let you know that I’m working on the final review. I think it should be ready by the end of the month. Can you please look at getting this on the schedule early to mid September."
+      },
+      {
+        "action_id": "71836663",
+        "created_at": "7/9/2025 3:32 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Anthony,"
+      },
+      {
+        "action_id": "71833681",
+        "created_at": "7/9/2025 12:42 PM",
+        "action_type": "Email",
+        "creator_id": "6355168",
+        "creator_name": "Anthony/ELD Marino",
+        "party": "cust",
+        "description": "I have an updated file, but we are only about halfway through the process. Here is the updated draft file. It will probably be September before we are ready to pull the trigger. Need to get the data back from vendor and review."
+      },
+      {
+        "action_id": "71833290",
+        "created_at": "7/9/2025 12:20 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Anthony, Good afternoon. We are ready to deliver this programming in test. Do you have new file to try out? If not you will need to let us know when you have a file and we can schedule to copy live to test and run on the test environment. Do you have any outlook on when you will have a file ready if not already?"
+      },
+      {
+        "action_id": "71636457",
+        "created_at": "6/16/2025 10:19 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Here is the sp to deliver to Eldorado. Waiting on Anthony to get file to work with ."
+      },
+      {
+        "action_id": "71636406",
+        "created_at": "6/16/2025 10:16 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Anthony, Good morning. Development has completed the work on the rerouting. Here are some items that came out of the development and what we will need to look at when doing in test. File given only has CR not CR+LF at end of lines so compensated. If they change will affect the processing. After looking at the file I used columns 1, 3 and 4 for account number, book, and sequence. I did not use the location in the file as that rarely gives great matching. The account numbers in the file have had their leading zeroes stripped, so I had to do a numerical equivalence to match customer records (ie convert 000031 in DB to a literal 31 before comparing to file). This probably will not be a problem unless they have varying account number lengths and have accounts that have the same value with different leading zeroes (ex 00031 and 00031 are two different account in our system but numerically it is the same so a single value in the file may match more than one customer in system). MANY of the records in the file are for customers who are not at a location in the DB we have here. I am not sure how old the data is here, so we will use your database copy live to test and then test out this process with up to date data. I return a list of accounts not found, a list of accounts that do not have a service location, and a list of accounts with service locations without the group. After it updates the book/seq on the account, it checks the books affected and if any duplicates, will resequence them. We are ready to deliver this in test. Do you have new file to try out? If not you will need to let us know when you have a file and we can schedule to copy live to test and run on the test environment. Please let us know at your earliest convenience."
+      },
+      {
+        "action_id": "71440416",
+        "created_at": "5/23/2025 7:26 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Great"
+      },
+      {
+        "action_id": "71437707",
+        "created_at": "5/22/2025 4:20 PM",
+        "action_type": "Email",
+        "creator_id": "6355168",
+        "creator_name": "Anthony/ELD Marino",
+        "party": "cust",
+        "description": "This is what they have provided. Let me know if this will work or we need to adjust."
+      },
+      {
+        "action_id": "71437415",
+        "created_at": "5/22/2025 3:59 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Good afternoon. Do you have an idea of when the new file or a sample of the new file will be available to provide to programmers?"
+      },
+      {
+        "action_id": "71378244",
+        "created_at": "5/15/2025 3:41 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Ok"
+      },
+      {
+        "action_id": "71375698",
+        "created_at": "5/15/2025 1:28 PM",
+        "action_type": "Email",
+        "creator_id": "6355168",
+        "creator_name": "Anthony/ELD Marino",
+        "party": "cust",
+        "description": "No. The first draft did not come out very well and they are working on some edits. Anthony"
+      },
+      {
+        "action_id": "71352350",
+        "created_at": "5/13/2025 2:12 PM",
+        "action_type": "Email",
+        "creator_id": "6355168",
+        "creator_name": "Anthony/ELD Marino",
+        "party": "cust",
+        "description": "It appears that the user Anthony.Marino@jacobs.com has their out of office message turned on. Below is the automated reply we received from them: ﻿ I will be out of the office until May 14, with limited access to email. If you need assitance with Operations please contact Andy Beck at andy.beck@jacobs.com or 505-466-1085. If you need assitance with Customer Service or Billing please contact Heather Roybal at heather.roybal@jacobs.com or 505-466-1085."
+      },
+      {
+        "action_id": "71352283",
+        "created_at": "5/13/2025 2:09 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Anthony, Will you be able to get me a sample file by end of this week? We need to give our programmers a few weeks to get programming ready for June delivery as we discussed on last call."
+      },
+      {
+        "action_id": "71249287",
+        "created_at": "5/1/2025 12:30 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Per Tony - June will get this going. Shaena to ask Finance to invoice Eldorado now. Shaena to get Dev to get programming ready to run in June. Anthony to provide Shaena with a sample file so our Dev team can get working on this and be ready by end of June."
+      },
+      {
+        "action_id": "69897885",
+        "created_at": "12/1/2024 5:52 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Heather & Tony, Good afternoon. It is December and we need to get this project scheduled or due to its age (signed in 2022) we will need to cancel this project and when Eldorado is ready to start this up again we can get you a new quote. Could you please let me know if you want to schedule to start this work this month or do we need to start proceedings to cancel this project? I appreciate your prompt response. Let me know if you have any questions."
+      },
+      {
+        "action_id": "68208848",
+        "created_at": "6/4/2024 12:30 PM",
+        "action_type": "Email",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": ""
+      },
+      {
+        "action_id": "68208320",
+        "created_at": "6/4/2024 12:02 PM",
+        "action_type": "Email",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": "Good morning, We’re still working on the background work needed to implement this project, but we’re getting close. We hope to reach out to you after this in completed before the end of June. Heather Roybal (Pronouns: she/her) Jacobs Billing & Customer Support Supervisor 505.557.6338 505.466.2631 fax heather.roybal@jacobs.com 2 North Chamisa Drive Santa Fe, New Mexico 87508 United States www.jacobs.com"
+      },
+      {
+        "action_id": "68191291",
+        "created_at": "6/3/2024 9:39 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Good morning. Just checking in since it has been a few months to see what the status of this project is? I know you said it will be happening but wanted to see if you all would like to get this scheduled to do a kick off call? Please let me know."
+      },
+      {
+        "action_id": "67189665",
+        "created_at": "2/23/2024 9:58 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Anthony, Oh that is great to hear! Yes please let me know so we can work scheduled."
+      },
+      {
+        "action_id": "67188197",
+        "created_at": "2/23/2024 8:54 AM",
+        "action_type": "Email",
+        "creator_id": "6355168",
+        "creator_name": "Anthony/ELD Marino",
+        "party": "cust",
+        "description": "Hi Shaena, I just received a change order to complete the work on our end. I will keep you posted on when we think we might be ready. Anthony"
+      },
+      {
+        "action_id": "67187249",
+        "created_at": "2/23/2024 7:54 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Good morning. Just checking in that you seen my message from a few weeks ago and wanted to see if you had any updates on this?"
+      },
+      {
+        "action_id": "66289642",
+        "created_at": "2/8/2024 8:30 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Good morning, Anthony! I hope you are doing well! I am reaching out regarding the Meter Re-Routing project that you guys signed the contract on back on 1/31/22. We have been putting it on hold per your request but I have been notified by finance that if this doesn't start by end of 2024 we will need to cancel the contract and requote when you will be looking to do the work in the future. With this being said is this something that you will be wanting to schedule for later this year or do you think this is not going to happen? I am happy to jump on a call and we can discuss this but just wanted to give you a heads up since this was brought up to me this last in-house financial meeting. Please let me know if you have questions and what you wish to do with this project. Than you, Shaena Robertson"
+      },
+      {
+        "action_id": "66023572",
+        "created_at": "1/16/2024 12:19 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Anthony, Of course, we want to make sure when you are ready we are too! Just let me know if you need anything before our next touch point!"
+      },
+      {
+        "action_id": "66020268",
+        "created_at": "1/16/2024 10:01 AM",
+        "action_type": "Email",
+        "creator_id": "6355168",
+        "creator_name": "Anthony/ELD Marino",
+        "party": "cust",
+        "description": "Hi Shaena,"
+      },
+      {
+        "action_id": "66014576",
+        "created_at": "1/15/2024 5:58 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Anthony,"
+      },
+      {
+        "action_id": "65364011",
+        "created_at": "11/8/2023 10:36 AM",
+        "action_type": "Email",
+        "creator_id": "6355168",
+        "creator_name": "Anthony/ELD Marino",
+        "party": "cust",
+        "description": ""
+      },
+      {
+        "action_id": "65362410",
+        "created_at": "11/8/2023 9:40 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": ""
+      },
+      {
+        "action_id": "65361870",
+        "created_at": "11/8/2023 9:22 AM",
+        "action_type": "Email",
+        "creator_id": "7471033",
+        "creator_name": "Heather Roybal",
+        "party": "cust",
+        "description": ""
+      },
+      {
+        "action_id": "65358501",
+        "created_at": "11/8/2023 6:28 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Good afternoon, Anthony! We had this project on hold for most of the year and you said you would be ready to start working on it this fall. It is beginning of November. We need to get this scheduled quickly due to the rest of the year getting booked up we want to get this done for Eldorado. Please let me know as soon as possible so we can get you on the calendar."
+      },
+      {
+        "action_id": "64912565",
+        "created_at": "10/2/2023 1:55 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": ""
+      },
+      {
+        "action_id": "62682313",
+        "created_at": "4/19/2023 1:38 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Per Anthony: Project is being pushed out to after July. They will need to develop routes 1st then work can start in Q4 with inHance. PS to follow up by Q4 on status."
+      },
+      {
+        "action_id": "62325306",
+        "created_at": "3/27/2023 6:46 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Anthony & Heather, Good morning. I had this project on hold per your request until the end of March. I wanted to reach out and see if you were ready to proceed and can we set up a time to discuss this week? Let me know at your earliest convenience."
+      },
+      {
+        "action_id": "61156713",
+        "created_at": "1/12/2023 12:30 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Anthony,"
+      },
+      {
+        "action_id": "61150087",
+        "created_at": "1/12/2023 9:03 AM",
+        "action_type": "Email",
+        "creator_id": "6355168",
+        "creator_name": "Anthony/ELD Marino",
+        "party": "cust",
+        "description": ""
+      },
+      {
+        "action_id": "61144416",
+        "created_at": "1/11/2023 9:00 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Good afternoon Kathy. I am checking up on this project, Eldorado said they needed to hold off for 3 to 6 months and its been 7 months. Is Eldorado looking at starting this back up? Wanted to see if we needed to get this rolling again and get on our calendar. Any update would be appreciated."
+      },
+      {
+        "action_id": "60180810",
+        "created_at": "10/30/2022 5:05 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Good afternoon Kathy. I am checking up on this project, Eldorado said they needed to hold off for 3 to 6 months and its been 5 months. Is Eldorado looking at starting this back up before the end of the year? Wanted to see if we needed to get this rolling again and get on our calendar. Any update would be appreciated."
+      },
+      {
+        "action_id": "57885714",
+        "created_at": "6/3/2022 5:52 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Project on hold until Eldorado starts back up in 3-6 months."
+      },
+      {
+        "action_id": "57684609",
+        "created_at": "5/20/2022 6:39 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": ""
+      },
+      {
+        "action_id": "57675005",
+        "created_at": "5/19/2022 1:17 PM",
+        "action_type": "Email",
+        "creator_id": "7197817",
+        "creator_name": "Kathy Romero",
+        "party": "cust",
+        "description": "Hi there, still not ready for this project."
+      },
+      {
+        "action_id": "57607183",
+        "created_at": "5/16/2022 9:21 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Kathy, Good morning. I hope you are doing well. I am doing my every couple week check in on the Resequencing project for Eldorado. Are you able to provide just a sample of the file so we know the correct format we will be using to bring into the software? I wonder if Beacon could provide a sample so correct format and maybe a few rows of data so we can start to program and then when you get the real file we will have everything ready? Just let me know if you can do so or if you need us to talk with your vendor to explain the request?"
+      },
+      {
+        "action_id": "57308372",
+        "created_at": "4/26/2022 10:54 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": ""
+      },
+      {
+        "action_id": "57306633",
+        "created_at": "4/26/2022 10:01 AM",
+        "action_type": "Email",
+        "creator_id": "7197817",
+        "creator_name": "Kathy Romero",
+        "party": "cust",
+        "description": "Good Morning, Unfortunately we still do not have a file for you. Working on it though J. Kathy A. Romero Customer Service & Billing Supervisor P 505.466.1085 |F 505.466.2631 2 North Chamisa Drive Suite B|Santa Fe NM 87508"
+      },
+      {
+        "action_id": "57295882",
+        "created_at": "4/25/2022 3:44 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Good afternoon Kathy! I am just touching base with you to see if you have any updates on your file from Beacon since it has been a month since your last update? Please let me know if you have an update of expected delivery date from Beacon."
+      },
+      {
+        "action_id": "57023477",
+        "created_at": "4/6/2022 12:08 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Good afternoon Kathy! I am just touching base with you to see if you have any updates on your file from Beacon? As I advised I would check in with you every couple weeks to make sure we don't miss anything. Please let me know if you have an update and if not we will reach out in another few weeks."
+      },
+      {
+        "action_id": "56797002",
+        "created_at": "3/22/2022 3:02 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Kathy -"
+      },
+      {
+        "action_id": "56792800",
+        "created_at": "3/22/2022 12:45 PM",
+        "action_type": "Email",
+        "creator_id": "7197817",
+        "creator_name": "Kathy Romero",
+        "party": "cust",
+        "description": "We will get one to you as soon as we get from Beacon. Kathy A. Romero Customer Service & Billing Supervisor P 505.466.1085 |F 505.466.2631 2 North Chamisa Drive Suite B|Santa Fe NM 87508"
+      },
+      {
+        "action_id": "56783444",
+        "created_at": "3/22/2022 7:13 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Kathy, Good morning. I hope you are doing well. I wanted to reach out to you and see if we would be getting the sample re-sequencing file by the end of the month? We dont have to have the full completed file but need at least a sample with the layout and some data in it. We can't start any programming until we have one. Once I have the sample of the file I can get this into the development queue then it will be scheduled to start working on it. Which will take at least a few weeks based on their schedule right now. If you have any questions please let me know I would be more than happy to set up a quick call!"
+      },
+      {
+        "action_id": "56515898",
+        "created_at": "3/3/2022 1:26 PM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": ""
+      },
+      {
+        "action_id": "56514220",
+        "created_at": "3/3/2022 12:23 PM",
+        "action_type": "Email",
+        "creator_id": "7197817",
+        "creator_name": "Kathy Romero",
+        "party": "cust",
+        "description": ""
+      },
+      {
+        "action_id": "56505376",
+        "created_at": "3/3/2022 6:36 AM",
+        "action_type": "Comment",
+        "creator_id": "4204719",
+        "creator_name": "Shaena Robertson",
+        "party": "inh",
+        "description": "Eldorado Area Water & Sanitation, Your order for the Meter Re-Routing has been received. Your order has been submitted to the Professional Services & Development queue. Your project will be assigned a project manager which will keep you updated of the project status and work with you to get your solution in place. Part of the contract states that Eldorado will provide a .csv file with the information needed to do the meter re-routing programming. When will you be able to provide this file or a sample of the file so we can provide to our Development team? Once we have that file we will be able to get a schedule from Development, so it is important we get that as soon as possible. In the meantime, if you have any questions please do not hesitate to us this ticket #29696 to communicate regarding this project."
+      },
+      {
+        "action_id": "56451765",
+        "created_at": "2/28/2022 12:50 PM",
+        "action_type": "Comment",
+        "creator_id": "4375273",
+        "creator_name": "Debra Laskowski",
+        "party": "inh",
+        "description": "Sold re-sequence of routes. Created TFS 9783 for development queue."
+      },
+      {
+        "action_id": "56451372",
+        "created_at": "2/28/2022 12:38 PM",
+        "action_type": "Email",
+        "creator_id": "7197817",
+        "creator_name": "Kathy Romero",
+        "party": "cust",
+        "description": ""
+      },
+      {
+        "action_id": "56450124",
+        "created_at": "2/28/2022 11:55 AM",
+        "action_type": "Comment",
+        "creator_id": "4375273",
+        "creator_name": "Debra Laskowski",
+        "party": "inh",
+        "description": "Spoke to Kathy and resend her the quote to use for preparing PO. Debra"
+      },
+      {
+        "action_id": "56159685",
+        "created_at": "2/8/2022 11:03 AM",
+        "action_type": "Comment",
+        "creator_id": "4375273",
+        "creator_name": "Debra Laskowski",
+        "party": "inh",
+        "description": "Kathy I wanted to follow up with you to see what the status is on the quote I sent in January. Do you have any questions? Are you still interested or should I close it? I look forward to your response."
+      },
+      {
+        "action_id": "55985384",
+        "created_at": "1/27/2022 11:51 AM",
+        "action_type": "Comment",
+        "creator_id": "4375273",
+        "creator_name": "Debra Laskowski",
+        "party": "inh",
+        "description": "Kathy, Attached you will find a quote for Harris to create a process for Eldorado to use when resequencing books. To order just sign and return both pages via this ticket or email."
+      },
+      {
+        "action_id": "55839626",
+        "created_at": "1/19/2022 1:51 PM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "description": "HI Kathy, To recap what we looked at today, you will be rerouting and resequencing your reading books for a set of service locations. since your parcel numbers are unique in the system, if you can provide a .csv file with the parcel number, the book number and the sequence number that the meter is going to in separate fields, we should be able to create a script to re-sequence your meters. please let us know how many service locations will be included in the re-sequencing. a rough estimate should help with the quote process. I will send this request over to our professional services department to get the quote process started."
+      },
+      {
+        "action_id": "55838597",
+        "created_at": "1/19/2022 1:26 PM",
+        "action_type": "",
+        "creator_id": "-1",
+        "creator_name": "Shaena Robertson",
+        "party": "cust",
+        "description": ""
+      },
+      {
+        "action_id": "55838463",
+        "created_at": "1/19/2022 1:21 PM",
+        "action_type": "Description",
+        "creator_id": "7197817",
+        "creator_name": "Kathy Romero",
+        "party": "cust",
+        "description": "EAWSD is in the process of updating Routing information (Book/Sequence). We have done this in the past using parcel number, what information do you need from us and in what format?"
+      }
+    ]
+  }
+]

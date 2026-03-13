@@ -1,0 +1,18 @@
+{
+  "source_file": "activities_20260313_143621.json",
+  "tickets_sent": 1,
+  "results": [
+    {
+      "ticket_number": "110554",
+      "ticket_name": "log in",
+      "severity": "3 - Low Priority",
+      "priority": 10,
+      "priority_explanation": "Ticket is Closed with a recent support response that addressed the login question, and the severity is low. There are no unresolved customer follow-ups in the most recent activities.",
+      "days_opened": "0",
+      "days_since_modified": "3",
+      "assignee": "Tony Williams",
+      "customer": "Guilford Township/Water Auth."
+    }
+  ],
+  "writeback_count": 1
+}

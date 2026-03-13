@@ -20,9 +20,16 @@ MATCHA_MISSION_ID = os.getenv("MATCHA_MISSION_ID", "27301")
 # Maximum number of tickets to pull (for testing). Set to 0 for unlimited.
 MAX_TICKETS = int(os.getenv("MAX_TICKETS", "5"))
 
-# ── Target a specific ticket (by TicketNumber) ──────────────────────
-# When set, only this ticket is processed (overrides MAX_TICKETS).
-TARGET_TICKET = os.getenv("TARGET_TICKET", "").strip()
+# ── Target specific ticket(s) (by TicketNumber) ────────────────────
+# When set, only these tickets are processed (overrides MAX_TICKETS).
+# Accepts a comma-delimited list, e.g. "29696,110554".
+_TARGET_RAW = os.getenv("TARGET_TICKET", "110554").strip()
+TARGET_TICKETS = [t.strip() for t in _TARGET_RAW.split(",") if t.strip()]
 
 # ── Output ───────────────────────────────────────────────────────────
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "output"))
+
+# ── Stage toggles (1 = run, 0 = skip) ───────────────────────────────
+RUN_SENTIMENT = os.getenv("RUN_SENTIMENT", "1").strip() == "1"
+RUN_PRIORITY = os.getenv("RUN_PRIORITY", "1").strip() == "1"
+RUN_COMPLEXITY = os.getenv("RUN_COMPLEXITY", "1").strip() == "1"
