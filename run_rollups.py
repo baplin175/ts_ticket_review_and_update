@@ -301,6 +301,9 @@ def main():
         print("ERROR: DATABASE_URL is not set.", file=sys.stderr)
         sys.exit(1)
 
+    # Ensure schema and tables exist
+    db.migrate()
+
     ticket_number = getattr(args, "ticket", None)
     tids = _ticket_ids(ticket_number)
 
