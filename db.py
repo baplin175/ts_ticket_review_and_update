@@ -213,18 +213,18 @@ def upsert_ticket(ticket: Dict[str, Any], *, now: Optional[datetime] = None) -> 
                 )
                 ON CONFLICT (ticket_id) DO UPDATE SET
                     ticket_number       = COALESCE(EXCLUDED.ticket_number, tickets.ticket_number),
-                    ticket_name         = COALESCE(EXCLUDED.ticket_name, tickets.ticket_name),
-                    status              = COALESCE(EXCLUDED.status, tickets.status),
-                    severity            = COALESCE(EXCLUDED.severity, tickets.severity),
-                    product_name        = COALESCE(EXCLUDED.product_name, tickets.product_name),
-                    assignee            = COALESCE(EXCLUDED.assignee, tickets.assignee),
-                    customer            = COALESCE(EXCLUDED.customer, tickets.customer),
+                    ticket_name         = EXCLUDED.ticket_name,
+                    status              = EXCLUDED.status,
+                    severity            = EXCLUDED.severity,
+                    product_name        = EXCLUDED.product_name,
+                    assignee            = EXCLUDED.assignee,
+                    customer            = EXCLUDED.customer,
                     date_created        = COALESCE(EXCLUDED.date_created, tickets.date_created),
-                    date_modified       = COALESCE(EXCLUDED.date_modified, tickets.date_modified),
-                    closed_at           = COALESCE(EXCLUDED.closed_at, tickets.closed_at),
-                    days_opened         = COALESCE(EXCLUDED.days_opened, tickets.days_opened),
-                    days_since_modified = COALESCE(EXCLUDED.days_since_modified, tickets.days_since_modified),
-                    source_updated_at   = COALESCE(EXCLUDED.source_updated_at, tickets.source_updated_at),
+                    date_modified       = EXCLUDED.date_modified,
+                    closed_at           = EXCLUDED.closed_at,
+                    days_opened         = EXCLUDED.days_opened,
+                    days_since_modified = EXCLUDED.days_since_modified,
+                    source_updated_at   = EXCLUDED.source_updated_at,
                     source_payload      = COALESCE(EXCLUDED.source_payload, tickets.source_payload),
                     last_ingested_at    = %(now)s,
                     last_seen_at        = %(now)s;
@@ -284,16 +284,16 @@ def upsert_action(action: Dict[str, Any], *, now: Optional[datetime] = None) -> 
                 ON CONFLICT (action_id) DO UPDATE SET
                     ticket_id           = EXCLUDED.ticket_id,
                     created_at          = COALESCE(EXCLUDED.created_at, ticket_actions.created_at),
-                    action_type         = COALESCE(EXCLUDED.action_type, ticket_actions.action_type),
-                    creator_id          = COALESCE(EXCLUDED.creator_id, ticket_actions.creator_id),
-                    creator_name        = COALESCE(EXCLUDED.creator_name, ticket_actions.creator_name),
-                    party               = COALESCE(EXCLUDED.party, ticket_actions.party),
-                    is_visible          = COALESCE(EXCLUDED.is_visible, ticket_actions.is_visible),
-                    description         = COALESCE(EXCLUDED.description, ticket_actions.description),
-                    cleaned_description = COALESCE(EXCLUDED.cleaned_description, ticket_actions.cleaned_description),
+                    action_type         = EXCLUDED.action_type,
+                    creator_id          = EXCLUDED.creator_id,
+                    creator_name        = EXCLUDED.creator_name,
+                    party               = EXCLUDED.party,
+                    is_visible          = EXCLUDED.is_visible,
+                    description         = EXCLUDED.description,
+                    cleaned_description = EXCLUDED.cleaned_description,
                     action_class        = COALESCE(EXCLUDED.action_class, ticket_actions.action_class),
                     is_empty            = EXCLUDED.is_empty,
-                    is_customer_visible = COALESCE(EXCLUDED.is_customer_visible, ticket_actions.is_customer_visible),
+                    is_customer_visible = EXCLUDED.is_customer_visible,
                     source_payload      = COALESCE(EXCLUDED.source_payload, ticket_actions.source_payload),
                     last_ingested_at    = %(now)s,
                     last_seen_at        = %(now)s;
@@ -315,6 +315,139 @@ def upsert_action(action: Dict[str, Any], *, now: Optional[datetime] = None) -> 
                     if action.get("source_payload") is not None else None,
                 "now": now,
             })
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def upsert_ticket_with_actions(
+    ticket: Dict[str, Any],
+    actions: List[Dict[str, Any]],
+    *,
+    now: Optional[datetime] = None,
+) -> None:
+    """Upsert a ticket and all its actions in a single DB transaction.
+
+    This prevents partial data when the process crashes between upserting the
+    ticket and its actions.
+    """
+    now = now or datetime.now(timezone.utc)
+    tid = ticket["ticket_id"]
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # -- ticket upsert --
+            cur.execute("""
+                INSERT INTO tickets (
+                    ticket_id, ticket_number, ticket_name,
+                    status, severity, product_name, assignee, customer,
+                    date_created, date_modified, closed_at,
+                    days_opened, days_since_modified,
+                    source_updated_at, source_payload,
+                    first_ingested_at, last_ingested_at, last_seen_at
+                ) VALUES (
+                    %(ticket_id)s, %(ticket_number)s, %(ticket_name)s,
+                    %(status)s, %(severity)s, %(product_name)s,
+                    %(assignee)s, %(customer)s,
+                    %(date_created)s, %(date_modified)s, %(closed_at)s,
+                    %(days_opened)s, %(days_since_modified)s,
+                    %(source_updated_at)s, %(source_payload)s,
+                    %(now)s, %(now)s, %(now)s
+                )
+                ON CONFLICT (ticket_id) DO UPDATE SET
+                    ticket_number       = COALESCE(EXCLUDED.ticket_number, tickets.ticket_number),
+                    ticket_name         = EXCLUDED.ticket_name,
+                    status              = EXCLUDED.status,
+                    severity            = EXCLUDED.severity,
+                    product_name        = EXCLUDED.product_name,
+                    assignee            = EXCLUDED.assignee,
+                    customer            = EXCLUDED.customer,
+                    date_created        = COALESCE(EXCLUDED.date_created, tickets.date_created),
+                    date_modified       = EXCLUDED.date_modified,
+                    closed_at           = EXCLUDED.closed_at,
+                    days_opened         = EXCLUDED.days_opened,
+                    days_since_modified = EXCLUDED.days_since_modified,
+                    source_updated_at   = EXCLUDED.source_updated_at,
+                    source_payload      = COALESCE(EXCLUDED.source_payload, tickets.source_payload),
+                    last_ingested_at    = %(now)s,
+                    last_seen_at        = %(now)s;
+            """, {
+                "ticket_id": tid,
+                "ticket_number": ticket.get("ticket_number"),
+                "ticket_name": ticket.get("ticket_name"),
+                "status": ticket.get("status"),
+                "severity": ticket.get("severity"),
+                "product_name": ticket.get("product_name"),
+                "assignee": ticket.get("assignee"),
+                "customer": ticket.get("customer"),
+                "date_created": ticket.get("date_created"),
+                "date_modified": ticket.get("date_modified"),
+                "closed_at": ticket.get("closed_at"),
+                "days_opened": ticket.get("days_opened"),
+                "days_since_modified": ticket.get("days_since_modified"),
+                "source_updated_at": ticket.get("source_updated_at"),
+                "source_payload": psycopg2.extras.Json(ticket.get("source_payload"))
+                    if ticket.get("source_payload") is not None else None,
+                "now": now,
+            })
+
+            # -- action upserts (same transaction) --
+            for action in actions:
+                cur.execute("""
+                    INSERT INTO ticket_actions (
+                        action_id, ticket_id, created_at, action_type,
+                        creator_id, creator_name, party, is_visible,
+                        description, cleaned_description,
+                        action_class, is_empty, is_customer_visible,
+                        source_payload,
+                        first_ingested_at, last_ingested_at, last_seen_at
+                    ) VALUES (
+                        %(action_id)s, %(ticket_id)s, %(created_at)s, %(action_type)s,
+                        %(creator_id)s, %(creator_name)s, %(party)s, %(is_visible)s,
+                        %(description)s, %(cleaned_description)s,
+                        %(action_class)s, %(is_empty)s, %(is_customer_visible)s,
+                        %(source_payload)s,
+                        %(now)s, %(now)s, %(now)s
+                    )
+                    ON CONFLICT (action_id) DO UPDATE SET
+                        ticket_id           = EXCLUDED.ticket_id,
+                        created_at          = COALESCE(EXCLUDED.created_at, ticket_actions.created_at),
+                        action_type         = EXCLUDED.action_type,
+                        creator_id          = EXCLUDED.creator_id,
+                        creator_name        = EXCLUDED.creator_name,
+                        party               = EXCLUDED.party,
+                        is_visible          = EXCLUDED.is_visible,
+                        description         = EXCLUDED.description,
+                        cleaned_description = EXCLUDED.cleaned_description,
+                        action_class        = COALESCE(EXCLUDED.action_class, ticket_actions.action_class),
+                        is_empty            = EXCLUDED.is_empty,
+                        is_customer_visible = EXCLUDED.is_customer_visible,
+                        source_payload      = COALESCE(EXCLUDED.source_payload, ticket_actions.source_payload),
+                        last_ingested_at    = %(now)s,
+                        last_seen_at        = %(now)s;
+                """, {
+                    "action_id": action["action_id"],
+                    "ticket_id": action["ticket_id"],
+                    "created_at": action.get("created_at"),
+                    "action_type": action.get("action_type"),
+                    "creator_id": action.get("creator_id"),
+                    "creator_name": action.get("creator_name"),
+                    "party": action.get("party"),
+                    "is_visible": action.get("is_visible"),
+                    "description": action.get("description"),
+                    "cleaned_description": action.get("cleaned_description"),
+                    "action_class": action.get("action_class"),
+                    "is_empty": action.get("is_empty", False),
+                    "is_customer_visible": action.get("is_customer_visible"),
+                    "source_payload": psycopg2.extras.Json(action.get("source_payload"))
+                        if action.get("source_payload") is not None else None,
+                    "now": now,
+                })
+
         conn.commit()
     except Exception:
         conn.rollback()

@@ -125,6 +125,7 @@ def main(*, force: bool = False, no_writeback: bool = False) -> None:
     if all_updates and not no_writeback:
         _log(f"\n[orchestrator] Writing back {len(all_updates)} ticket(s) (single call each)...")
         updated = 0
+        deferred = 0
         for tnum, data in all_updates.items():
             try:
                 update_ticket(data["ticket_id"], data["fields"], data["activities"])
@@ -133,10 +134,10 @@ def main(*, force: bool = False, no_writeback: bool = False) -> None:
             except Exception as e:
                 if hasattr(e, 'response') and getattr(e.response, 'status_code', None) == 403:
                     _log(f"  [ts] API rate-limited for {tnum}; payload saved to dry-run file.")
-                    updated += 1
+                    deferred += 1
                 else:
                     _log(f"  [ts] Failed to update ticket {tnum}: {e}")
-        _log(f"[orchestrator] Write-back complete: {updated}/{len(all_updates)} ticket(s).")
+        _log(f"[orchestrator] Write-back complete: {updated}/{len(all_updates)} updated, {deferred} deferred (rate-limited).")
     elif all_updates and no_writeback:
         _log(f"\n[orchestrator] {len(all_updates)} ticket(s) scored but write-back skipped (--no-writeback).")
         for tnum, data in all_updates.items():

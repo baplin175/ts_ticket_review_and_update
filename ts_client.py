@@ -47,8 +47,10 @@ def _log_api_call(method: str, url: str, params: Any = None,
         except (json.JSONDecodeError, OSError):
             existing = []
     existing.append(entry)
-    with open(log_path, "w", encoding="utf-8") as f:
+    tmp_path = log_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(existing, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, log_path)
 
 
 def _ts_headers() -> Dict[str, str]:
@@ -203,7 +205,12 @@ def _normalize_users_list(data: Any) -> List[Dict[str, Any]]:
 
 
 def fetch_inhance_user_ids() -> set:
-    """Fetch all user IDs belonging to Organization=inHANCE (one API call, cached)."""
+    """Fetch all user IDs belonging to Organization=inHANCE (one API call, cached).
+
+    On API failure the result is NOT cached so that subsequent calls can
+    retry.  An empty set is returned as a safe fallback for the current
+    invocation.
+    """
     global _INHANCE_IDS
     if _INHANCE_IDS is not None:
         return _INHANCE_IDS
@@ -211,8 +218,8 @@ def fetch_inhance_user_ids() -> set:
         data = ts_get(f"{TS_BASE}/Users", params={"Organization": "inHANCE"})
     except Exception as e:
         print(f"[ts] Failed to fetch inHANCE users: {e}", flush=True)
-        _INHANCE_IDS = set()
-        return _INHANCE_IDS
+        # Return empty but do NOT cache — allow retry on next call.
+        return set()
     users = _normalize_users_list(data)
     _INHANCE_IDS = set()
     for u in users:
@@ -335,6 +342,8 @@ def save_dry_run_payload(tid: str, payload: Dict[str, Any]) -> None:
         except (json.JSONDecodeError, OSError):
             existing = []
     existing.append(entry)
-    with open(dry_run_path, "w", encoding="utf-8") as f:
+    tmp_path = dry_run_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(existing, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, dry_run_path)
     print(f"[ts] Dry-run: payload for ticket {tid} saved to {dry_run_path}", flush=True)
