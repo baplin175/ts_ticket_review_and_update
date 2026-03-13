@@ -23,7 +23,7 @@ MAX_TICKETS = int(os.getenv("MAX_TICKETS", "5"))
 # ── Target specific ticket(s) (by TicketNumber) ────────────────────
 # When set, only these tickets are processed (overrides MAX_TICKETS).
 # Accepts a comma-delimited list, e.g. "29696,110554".
-_TARGET_RAW = os.getenv("TARGET_TICKET", "110554").strip()
+_TARGET_RAW = os.getenv("TARGET_TICKET", "109683,108476,108182,108098").strip()
 TARGET_TICKETS = [t.strip() for t in _TARGET_RAW.split(",") if t.strip()]
 
 # ── Output ───────────────────────────────────────────────────────────
@@ -33,3 +33,7 @@ OUTPUT_DIR = os.getenv("OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspat
 RUN_SENTIMENT = os.getenv("RUN_SENTIMENT", "0").strip() == "1"
 RUN_PRIORITY = os.getenv("RUN_PRIORITY", "1").strip() == "1"
 RUN_COMPLEXITY = os.getenv("RUN_COMPLEXITY", "1").strip() == "1"
+
+# ── Logging / diagnostics ────────────────────────────────────────────
+LOG_TO_FILE = os.getenv("LOG_TO_FILE", "1").strip() == "1"
+LOG_API_CALLS = os.getenv("LOG_API_CALLS", "1").strip() == "1"

@@ -143,7 +143,13 @@ def _write_back_to_ts(tid: str, ticket_number: str, priority_result: dict,
         return False
 
 
-def main(activities_file: str | None = None) -> None:
+def main(activities_file: str | None = None, write_back: bool = True) -> dict:
+    """Run priority scoring.  Returns a dict mapping ticket_number to
+    ``{"ticket_id": ..., "fields": {...}, "activities": [...]}`` so the
+    caller can merge fields with other stages before a single API call.
+    When *write_back* is True (default / standalone), the function also
+    writes each ticket back to TeamSupport individually.
+    """
     if not TARGET_TICKETS:
         _log("[priority] TARGET_TICKET is required. Set it as an env var (comma-delimited for multiple).")
         sys.exit(1)
@@ -192,22 +198,53 @@ def main(activities_file: str | None = None) -> None:
 
     _log(f"[priority] Parsed {len(results)} priority result(s).")
 
-    # 6. Write back to TeamSupport
-    updated = 0
-    # Build lookups from ticket_number -> ticket_id and ticket_number -> ticket_data
-    tid_map = {t["ticket_number"]: t["ticket_id"] for t in tickets}
+    # 6. Build per-ticket field maps
+    tid_map = {t["ticket_number"]: t.get("ticket_id", "") for t in tickets}
     ticket_data_map = {t["ticket_number"]: t for t in tickets}
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    ticket_fields: dict[str, dict] = {}  # return value
 
     for result in results:
         tnum = str(result.get("ticket_number", "")).strip()
+        priority = str(result.get("priority", "")).strip()
+        explanation = str(result.get("priority_explanation", "")).strip()
+        if not priority or not explanation:
+            _log(f"  [priority] Missing priority or explanation for {tnum}; skipping.")
+            continue
+
+        fields = {
+            "AIPriority": priority,
+            "AIPriExpln": explanation,
+            "AILastUpdate": now_str,
+        }
         tid = tid_map.get(tnum, "")
         tdata = ticket_data_map.get(tnum, {})
-        if _write_back_to_ts(tid, tnum, result, tdata):
-            updated += 1
+        ticket_fields[tnum] = {
+            "ticket_id": tid,
+            "fields": fields,
+            "activities": tdata.get("activities", []),
+        }
 
-    _log(f"[priority] Updated {updated}/{len(results)} ticket(s) in TeamSupport.")
+    # 7. Write back to TeamSupport (only when running standalone)
+    updated = 0
+    if write_back:
+        for tnum, data in ticket_fields.items():
+            try:
+                update_ticket(data["ticket_id"], dict(data["fields"]), data["activities"])
+                _log(f"  [ts] Wrote back AI fields for ticket {tnum}.")
+                updated += 1
+            except Exception as e:
+                if hasattr(e, 'response') and getattr(e.response, 'status_code', None) == 403:
+                    _log(f"  [ts] API rate-limited for {tnum}; payload saved to dry-run file.")
+                    updated += 1
+                else:
+                    _log(f"  [ts] Failed to write back AI fields for {tnum}: {e}")
+        _log(f"[priority] Updated {updated}/{len(ticket_fields)} ticket(s) in TeamSupport.")
+    else:
+        _log(f"[priority] Collected fields for {len(ticket_fields)} ticket(s) (write-back deferred).")
 
-    # 7. Save results locally
+    # 8. Save results locally
     ts = _run_timestamp()
     out_path = os.path.join(OUTPUT_DIR, f"priority_{ts}.json")
     output = {
@@ -220,6 +257,7 @@ def main(activities_file: str | None = None) -> None:
         json.dump(output, fout, ensure_ascii=False, indent=2)
 
     _log(f"[priority] Results saved to {out_path}")
+    return ticket_fields
 
 
 if __name__ == "__main__":

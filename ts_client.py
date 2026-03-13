@@ -10,7 +10,45 @@ from typing import Any, Dict, List
 
 import requests
 
-from config import OUTPUT_DIR, TS_BASE, TS_KEY, TS_USER_ID
+from config import LOG_API_CALLS, OUTPUT_DIR, TS_BASE, TS_KEY, TS_USER_ID
+
+
+# ── API call logging ────────────────────────────────────────────────
+
+def _log_api_call(method: str, url: str, params: Any = None,
+                  payload: Any = None, status: int | None = None,
+                  error: str | None = None,
+                  response_body: Any = None) -> None:
+    """Append an API call record to the api_calls log file."""
+    if not LOG_API_CALLS:
+        return
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    log_path = os.path.join(OUTPUT_DIR, "api_calls.json")
+    entry: Dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "method": method,
+        "url": url,
+    }
+    if params:
+        entry["params"] = params if isinstance(params, (dict, list)) else str(params)
+    if payload:
+        entry["payload"] = payload
+    if status is not None:
+        entry["status"] = status
+    if response_body is not None:
+        entry["response"] = response_body
+    if error:
+        entry["error"] = error
+    existing: list = []
+    if os.path.exists(log_path):
+        try:
+            with open(log_path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            existing = []
+    existing.append(entry)
+    with open(log_path, "w", encoding="utf-8") as f:
+        json.dump(existing, f, ensure_ascii=False, indent=2)
 
 
 def _ts_headers() -> Dict[str, str]:
@@ -22,16 +60,30 @@ def _ts_headers() -> Dict[str, str]:
 
 
 def ts_get(url: str, params=None) -> Any:
-    r = requests.get(url, headers=_ts_headers(), params=params or {}, timeout=60)
-    r.raise_for_status()
-    return r.json()
+    try:
+        r = requests.get(url, headers=_ts_headers(), params=params or {}, timeout=60)
+        _log_api_call("GET", url, params=params, status=r.status_code)
+        r.raise_for_status()
+        return r.json()
+    except requests.exceptions.HTTPError:
+        raise
+    except Exception as exc:
+        _log_api_call("GET", url, params=params, error=str(exc))
+        raise
 
 
 def ts_put(url: str, payload: Dict[str, Any]) -> Any:
-    headers = {**_ts_headers(), "Content-Type": "application/json"}
-    r = requests.put(url, headers=headers, json=payload, timeout=30)
-    r.raise_for_status()
-    return r.json()
+    try:
+        headers = {**_ts_headers(), "Content-Type": "application/json"}
+        r = requests.put(url, headers=headers, json=payload, timeout=30)
+        _log_api_call("PUT", url, payload=payload, status=r.status_code)
+        r.raise_for_status()
+        return r.json()
+    except requests.exceptions.HTTPError:
+        raise
+    except Exception as exc:
+        _log_api_call("PUT", url, payload=payload, error=str(exc))
+        raise
 
 
 # ── Normalisation helpers ────────────────────────────────────────────
@@ -189,19 +241,48 @@ def ticket_id(ticket: Dict[str, Any]) -> str:
 
 # ── Ticket update with last-comment timestamps ──────────────────────
 
+def _parse_ts_datetime(value: str):
+    """Parse a TeamSupport datetime string into a timezone-aware datetime."""
+    if not value:
+        return None
+    v = value.strip()
+    try:
+        if v.endswith("Z"):
+            return datetime.fromisoformat(v.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(v)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        pass
+    try:
+        return datetime.strptime(v, "%m/%d/%Y %I:%M %p").replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
 def _last_comment_timestamps(activities: List[Dict[str, Any]]) -> tuple:
-    """Return (last_inh_comment, last_cust_comment) timestamps from an activities list."""
-    last_inh = ""
-    last_cust = ""
+    """Return (last_inh_comment, last_cust_comment) timestamps from an activities list.
+
+    Activities may be in any order (often newest-first), so we parse dates and
+    keep the most recent for each party.
+    """
+    best_inh = ""
+    best_cust = ""
+    best_inh_dt = None
+    best_cust_dt = None
     for a in activities:
         ts = a.get("created_at", "")
         if not ts:
             continue
+        dt = _parse_ts_datetime(ts)
         if a.get("party") == "inh":
-            last_inh = ts
+            if dt is not None and (best_inh_dt is None or dt > best_inh_dt):
+                best_inh_dt = dt
+                best_inh = ts
         elif a.get("party") == "cust":
-            last_cust = ts
-    return last_inh, last_cust
+            if dt is not None and (best_cust_dt is None or dt > best_cust_dt):
+                best_cust_dt = dt
+                best_cust = ts
+    return best_inh, best_cust
 
 
 def update_ticket(tid: str, fields: Dict[str, Any], activities: List[Dict[str, Any]]) -> Any:

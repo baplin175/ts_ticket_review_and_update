@@ -1,0 +1,516 @@
+[
+  {
+    "ticket_id": "21022947",
+    "ticket_number": "109683",
+    "ticket_name": "Task Scheduler",
+    "date_created": "2/11/2026 3:41 PM",
+    "date_modified": "2/11/2026 3:41 PM",
+    "days_opened": "8",
+    "days_since_modified": "30",
+    "status": "Closed",
+    "severity": "2 - Medium Priority",
+    "product_name": "Impresa",
+    "assignee": "Chris Holloway",
+    "customer": "Public Water Supply District No 9",
+    "activities": [
+      {
+        "action_id": "73608578",
+        "created_at": "2/19/2026 2:38 PM",
+        "action_type": "Comment",
+        "creator_id": "7902903",
+        "creator_name": "Lisa Ward",
+        "party": "inh",
+        "is_visible": true,
+        "description": "I spoke with Heather about the issue with the task scheduler and a workaround. She still has questions for Chris"
+      },
+      {
+        "action_id": "73607280",
+        "created_at": "2/19/2026 1:20 PM",
+        "action_type": "Comment",
+        "creator_id": "7254768",
+        "creator_name": "Heather Green",
+        "party": "cust",
+        "is_visible": true,
+        "description": "I am still waiting for someone to contact me regarding this issue and then I have another issue that I need to discuss with someone regarding bills and invoice cloud."
+      },
+      {
+        "action_id": "73570700",
+        "created_at": "2/13/2026 4:13 PM",
+        "action_type": "Comment",
+        "creator_id": "5206266",
+        "creator_name": "Tony Williams",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Heather, We'll get someone free as soon as possible, hopefully before 4:30 pm - Tony"
+      },
+      {
+        "action_id": "73570677",
+        "created_at": "2/13/2026 4:09 PM",
+        "action_type": "Email",
+        "creator_id": "7254768",
+        "creator_name": "Heather Green",
+        "party": "cust",
+        "is_visible": true,
+        "description": "I only have about 20 minutes left in my day and I cannot leave late today but I am still waiting on a reply or someone to call me on this. Heather Green Office Manager PWSD #9 of Boone County 391 N Rangeline Rd Columbia, MO 65201 573-474-9521"
+      },
+      {
+        "action_id": "73550852",
+        "created_at": "2/11/2026 3:41 PM",
+        "action_type": "Description",
+        "creator_id": "7254768",
+        "creator_name": "Heather Green",
+        "party": "cust",
+        "is_visible": true,
+        "description": "I am trying to make a change to something we have in the task scheduler and I make the change and hit save and it wont save. No pop no nothing. I have tried someone else's login to verify its not just a me problem and it is not just a me problem. It happens on hers as well. This isn't like super high priority but I do need to get it figured out before 4:30pm cst on Friday since this is a process that will automatically run at 7:30am on Monday the 16th."
+      }
+    ]
+  },
+  {
+    "ticket_id": "20954135",
+    "ticket_number": "108476",
+    "ticket_name": "Meter Id not found on recent MCO",
+    "date_created": "1/6/2026 12:17 PM",
+    "date_modified": "1/6/2026 12:17 PM",
+    "days_opened": "63",
+    "days_since_modified": "66",
+    "status": "Closed",
+    "severity": "1 - High Priority",
+    "product_name": "Impresa",
+    "assignee": "Chris Holloway",
+    "customer": "Caddo Basin SUD",
+    "activities": [
+      {
+        "action_id": "73751731",
+        "created_at": "3/11/2026 9:24 AM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Hi Shelley, We were able to make changes to the layout for the import, to match what your new reading file will look like. This imported correctly."
+      },
+      {
+        "action_id": "73751240",
+        "created_at": "3/11/2026 8:53 AM",
+        "action_type": "Email",
+        "creator_id": "4174559",
+        "creator_name": "Shelley Shipp",
+        "party": "cust",
+        "is_visible": true,
+        "description": "Now will work."
+      },
+      {
+        "action_id": "73751222",
+        "created_at": "3/11/2026 8:52 AM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Actually, if you are available now, I can give you a call?"
+      },
+      {
+        "action_id": "73751200",
+        "created_at": "3/11/2026 8:50 AM",
+        "action_type": "Email",
+        "creator_id": "4174559",
+        "creator_name": "Shelley Shipp",
+        "party": "cust",
+        "is_visible": true,
+        "description": "Yes please."
+      },
+      {
+        "action_id": "73751162",
+        "created_at": "3/11/2026 8:47 AM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Hi Shelley, I can give you a call today around 10 am to help with this."
+      },
+      {
+        "action_id": "73743837",
+        "created_at": "3/10/2026 11:28 AM",
+        "action_type": "Email",
+        "creator_id": "4174559",
+        "creator_name": "Shelley Shipp",
+        "party": "cust",
+        "is_visible": true,
+        "description": "File is still not working."
+      },
+      {
+        "action_id": "73736617",
+        "created_at": "3/9/2026 2:15 PM",
+        "action_type": "Email",
+        "creator_id": "4174559",
+        "creator_name": "Shelley Shipp",
+        "party": "cust",
+        "is_visible": true,
+        "description": ""
+      },
+      {
+        "action_id": "73735465",
+        "created_at": "3/9/2026 1:06 PM",
+        "action_type": "Email",
+        "creator_id": "4174559",
+        "creator_name": "Shelley Shipp",
+        "party": "cust",
+        "is_visible": true,
+        "description": ""
+      },
+      {
+        "action_id": "73733430",
+        "created_at": "3/9/2026 10:49 AM",
+        "action_type": "Email",
+        "creator_id": "7965494",
+        "creator_name": "Valued Customer",
+        "party": "cust",
+        "is_visible": true,
+        "description": ""
+      },
+      {
+        "action_id": "73733109",
+        "created_at": "3/9/2026 10:30 AM",
+        "action_type": "Email",
+        "creator_id": "4174559",
+        "creator_name": "Shelley Shipp",
+        "party": "cust",
+        "is_visible": true,
+        "description": ""
+      },
+      {
+        "action_id": "73732371",
+        "created_at": "3/9/2026 9:49 AM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Hi Shelly, I am not seeing an email from todd.madrid@aqua-metric.com, or anyone else there. Please send them an email and include my email address on it as well if we need to help with anything. Cholloway@harricomputer.com"
+      },
+      {
+        "action_id": "73726215",
+        "created_at": "3/6/2026 2:23 PM",
+        "action_type": "Email",
+        "creator_id": "4174559",
+        "creator_name": "Shelley Shipp",
+        "party": "cust",
+        "is_visible": true,
+        "description": "Has anyone from Sensus contacted you? I emailed my Sensus representative after our conversation last week and forwarded the email outlining what was done."
+      },
+      {
+        "action_id": "73722597",
+        "created_at": "3/6/2026 10:19 AM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Hi Shelly, We have had a few tickets about this issue from other companies and I am not certain if you and I ever worked on this directly. Were you able to use the layout that I provided previously to be able to import the readings?"
+      },
+      {
+        "action_id": "73672764",
+        "created_at": "2/27/2026 2:12 PM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Hi Shelly, We looked at the file import layout and found that we needed to adjust the Genie for this. Here is the new layout for Sensus to use. The actual end of the file is 32, to allow for CR/LF at the end of the data in the file. Please let us know you or Sensus have any questions about this. My direct email is CHolloway@harriscomputer.com New: Original:"
+      },
+      {
+        "action_id": "73578043",
+        "created_at": "2/16/2026 1:14 PM",
+        "action_type": "Comment",
+        "creator_id": "4174559",
+        "creator_name": "Shelley Shipp",
+        "party": "cust",
+        "is_visible": true,
+        "description": "This tickets needs to be changed to High Priority and any contact about this is to be directed to Todd Madrid and myself. Email: todd.madrid@aqua-metric.com"
+      },
+      {
+        "action_id": "73514072",
+        "created_at": "2/6/2026 12:21 PM",
+        "action_type": "Email",
+        "creator_id": "4174559",
+        "creator_name": "Shelley Shipp",
+        "party": "cust",
+        "is_visible": true,
+        "description": ""
+      },
+      {
+        "action_id": "73473440",
+        "created_at": "2/2/2026 3:50 PM",
+        "action_type": "Email",
+        "creator_id": "4174559",
+        "creator_name": "Shelley Shipp",
+        "party": "cust",
+        "is_visible": true,
+        "description": "Touching base, Aquametric will be at our office on Tuesday, 2/2/2026, starting at 9 am. Sometime tomorrow, will you be available to discuss the issue?"
+      },
+      {
+        "action_id": "73449627",
+        "created_at": "1/29/2026 2:13 PM",
+        "action_type": "Email",
+        "creator_id": "4174559",
+        "creator_name": "Shelley Shipp",
+        "party": "cust",
+        "is_visible": true,
+        "description": "We have training with Aqua Metric on Tuesday, February 3rd at 9 AM. Will that date and time work for you to be able to speak with their representative?"
+      },
+      {
+        "action_id": "73421830",
+        "created_at": "1/27/2026 9:09 AM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Hi Shelley, Please send out a meeting invite, or suggest some times available this week for a meeting and we can take a look at this. I think both options will cause a problem with our software. Getting a change made to the import process would affect all our customer's using the this import type, so it may be a difficult change to get implemented. Wednesday through Friday this week are my most open days."
+      },
+      {
+        "action_id": "73351926",
+        "created_at": "1/16/2026 9:13 AM",
+        "action_type": "Email",
+        "creator_id": "4174559",
+        "creator_name": "Shelley Shipp",
+        "party": "cust",
+        "is_visible": true,
+        "description": "I had a meeting with Sensus (Aqua-Metric) yesterday asked about the issue of the extra digit that is not being carried over when I upload the read file from Sensus to Inhance. The representative from Sensus concluded that it is likely an issue on their end, but she has some questions for Inhance. She is concerned that if they add the extra digit to the Excel file or insert a comma, our billing software may not recognize the change. A representative from Sensus will be in our office next week for some updates. While they are here, can we schedule a time for Inhance to speak with the Sensus representative? This will help clarify the issue and ensure that including the extra digit in the file does not cause any problems when uploading to Inhance for billing. I have attached the Billing export report from Sensus and the Error report from Inhance for reference."
+      },
+      {
+        "action_id": "73349945",
+        "created_at": "1/15/2026 9:47 PM",
+        "action_type": "Comment",
+        "creator_id": "7068139",
+        "creator_name": "Ben Aplin",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Good Morning Shelley - my apologies for the delayed response on this. We will engage and move this issue forward."
+      },
+      {
+        "action_id": "73286853",
+        "created_at": "1/8/2026 10:07 AM",
+        "action_type": "Email",
+        "creator_id": "4174559",
+        "creator_name": "Shelley Shipp",
+        "party": "cust",
+        "is_visible": true,
+        "description": "I will be reading meters tomorrow, and I would like to address the issue with the extra digit on the meter ID. I hope it can be resolved before I pull in the readings. For reference, I have attached the report that lists the meter IDs, which are missing the last digit. Shelley Shipp Office Supervisor Shelley.shipp@caddobasin.com WATER IS LIFE!"
+      },
+      {
+        "action_id": "73267598",
+        "created_at": "1/6/2026 12:17 PM",
+        "action_type": "Description",
+        "creator_id": "4174559",
+        "creator_name": "Shelley Shipp",
+        "party": "cust",
+        "is_visible": true,
+        "description": "Accounts that have recently had a MCO or register change out have not been pulling the reading over and end up on report saying meter id not found. The latest batch of Meter Id's I have been using have 9 digits unlike the previous that had 8, I was wondering if it's a setting that needs to be changed in order to find the meter id and pull the reading over. Last month during billing all the accounts that had a mco or register change out showed up on the unread meter report after I applied charges and I was able to get the majority (200) readings on Sensus and enter them in manual, I prefer not to have to do that. Below is a list of the report and all the meter numbers are missing their last digit."
+      }
+    ]
+  },
+  {
+    "ticket_id": "20937476",
+    "ticket_number": "108182",
+    "ticket_name": "Automating penalty process",
+    "date_created": "12/23/2025 8:48 AM",
+    "date_modified": "12/23/2025 8:48 AM",
+    "days_opened": "58",
+    "days_since_modified": "80",
+    "status": "Closed",
+    "severity": "2 - Medium Priority",
+    "product_name": "Impresa",
+    "assignee": "Chris Holloway",
+    "customer": "Collier Co. Utility Billing and Customer",
+    "activities": [
+      {
+        "action_id": "73608046",
+        "created_at": "2/19/2026 2:07 PM",
+        "action_type": "Comment",
+        "creator_id": "4174762",
+        "creator_name": "Jhony Desinor",
+        "party": "cust",
+        "is_visible": true,
+        "description": "Chris provided instructions on how to setup the scheduler for auto penalty process, but Collier Billing wants to continue doing the manual process to ensure the Autopays, bank drafts, and lock process are all concluded before running penalties.Collier will revisit this later, but this ticket can be closed.JD-2/19/2026"
+      },
+      {
+        "action_id": "73602231",
+        "created_at": "2/19/2026 8:14 AM",
+        "action_type": "Email",
+        "creator_id": "4174762",
+        "creator_name": "Jhony Desinor",
+        "party": "cust",
+        "is_visible": true,
+        "description": "Tony, We still need some assistance to get the scheduler setup properly. Please provide a resource to assist with this."
+      },
+      {
+        "action_id": "73598630",
+        "created_at": "2/18/2026 3:01 PM",
+        "action_type": "Comment",
+        "creator_id": "5206266",
+        "creator_name": "Tony Williams",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Jhony, Have the tests revealed anything as of yet?"
+      },
+      {
+        "action_id": "73448990",
+        "created_at": "1/29/2026 1:36 PM",
+        "action_type": "Comment",
+        "creator_id": "4174762",
+        "creator_name": "Jhony Desinor",
+        "party": "cust",
+        "is_visible": true,
+        "description": "The instructions are still being tested. JD-1/29/2026"
+      },
+      {
+        "action_id": "73349587",
+        "created_at": "1/15/2026 6:20 PM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Hi Annia, If you set the schedule to apply penalties every day for all cycles, the system will only apply penalties to the accounts that meet the criteria for the penalty. You should test this before setting in live though."
+      },
+      {
+        "action_id": "73336899",
+        "created_at": "1/14/2026 3:04 PM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Hi Annia, I sent out a tentative meeting invite. Please suggest another time if tomorrow at 3pm your time doesn't work for you."
+      },
+      {
+        "action_id": "73238704",
+        "created_at": "12/31/2025 11:38 AM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Hi Annia, We will need to set up a time to review all the open tickets with you and Jhony in January."
+      },
+      {
+        "action_id": "73206591",
+        "created_at": "12/23/2025 10:30 AM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Hi Annia,"
+      },
+      {
+        "action_id": "73205838",
+        "created_at": "12/23/2025 9:47 AM",
+        "action_type": "Email",
+        "creator_id": "4174764",
+        "creator_name": "Annia Machin",
+        "party": "cust",
+        "is_visible": true,
+        "description": ""
+      },
+      {
+        "action_id": "73205242",
+        "created_at": "12/23/2025 9:15 AM",
+        "action_type": "",
+        "creator_id": "-1",
+        "creator_name": "Chris Holloway",
+        "party": "cust",
+        "is_visible": true,
+        "description": "Dear DL-UBCS-TS, The resolution for this ticket has been provided. If the issue has not been resolved please update the ticket as soon as possible by responding in this ticket. (Please note: You have up to 7 days to notify inHANCE of any issues or concerns related to this ticket. If no issues or concerns have been noted within the 7-day window, the issue is considered complete and this ticket will automatically close.) However, if the issue has been resolved, please close the ticket and take a moment to provide your rating of the service you received."
+      },
+      {
+        "action_id": "73205118",
+        "created_at": "12/23/2025 9:04 AM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Hi Annie, Yes, in the task scheduler under System Administration > System Configuration > Task Scheduler. Create a new task, select Penalties as the Task type. Enter a Code and Description, select your penalty group, Increment times penalized or not and the Due Dt Offset. Then select the cycle or cycles and save. If it complains, you may need to select a User to notify. Save the changes, then edit the schedule and save again. This creates a SQL job that runs on the schedule you select (or single execution if you selected that option). Be aware that this will run even if your normal billing is off by a few days. So if you bill on a specific day and run penalties directly after and you are running a little late on billing, you may need to adjust the schedule. Please let us know if you have any questions about how to set this up."
+      },
+      {
+        "action_id": "73204933",
+        "created_at": "12/23/2025 8:48 AM",
+        "action_type": "Description",
+        "creator_id": "4174764",
+        "creator_name": "Annia Machin",
+        "party": "cust",
+        "is_visible": true,
+        "description": ""
+      }
+    ]
+  },
+  {
+    "ticket_id": "20931704",
+    "ticket_number": "108098",
+    "ticket_name": "Import File",
+    "date_created": "12/18/2025 3:18 PM",
+    "date_modified": "12/18/2025 3:18 PM",
+    "days_opened": "61",
+    "days_since_modified": "85",
+    "status": "Closed",
+    "severity": "2 - Medium Priority",
+    "product_name": "Impresa",
+    "assignee": "Chris Holloway",
+    "customer": "Agawam Water Dept",
+    "activities": [
+      {
+        "action_id": "73598361",
+        "created_at": "2/18/2026 2:45 PM",
+        "action_type": "Comment",
+        "creator_id": "5206266",
+        "creator_name": "Tony Williams",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Mackenzie, We haven't heard from you for some time. If this issue persists, please reopen this ticket or a new one."
+      },
+      {
+        "action_id": "73358458",
+        "created_at": "1/16/2026 4:14 PM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Hi Mackenzie, Please let us know if the information below answered your questions on this ticket."
+      },
+      {
+        "action_id": "73201848",
+        "created_at": "12/22/2025 3:15 PM",
+        "action_type": "Comment",
+        "creator_id": "4147672",
+        "creator_name": "Chris Holloway",
+        "party": "inh",
+        "is_visible": true,
+        "description": "Hi Mackenzie, When payments come into the system, they get distributed according to your payment priority usually, unless you have some customization. I don't see anything in the batch payment screen that would indicate a specific set of income centers a payment can be sent. Even if you had two sets of files, one for water and one for sewer, there is nothing to indicate to only pay one income center or the other. Do you know if you have a customization or if you used the customer screen's payment process in the past? The customer's screen's payment process will allow you to indicate specific income centers, however, that is a manual process."
+      },
+      {
+        "action_id": "73188845",
+        "created_at": "12/19/2025 12:08 PM",
+        "action_type": "Email",
+        "creator_id": "7776544",
+        "creator_name": "Mackenzie Gamache",
+        "party": "cust",
+        "is_visible": true,
+        "description": "Hello, I figured out the import file. My next question is, is there a way to tell inhance where you want the payments applied? One of my files is for water and one is for sewer. These amounts are for anything billed and due before June 30 of the previous year. In the past the payments applied to the correct charges, but it didn’t seem to apply to the correct charges this year…"
+      },
+      {
+        "action_id": "73182528",
+        "created_at": "12/18/2025 3:18 PM",
+        "action_type": "Description",
+        "creator_id": "7776544",
+        "creator_name": "Mackenzie Gamache",
+        "party": "cust",
+        "is_visible": true,
+        "description": ""
+      }
+    ]
+  }
+]

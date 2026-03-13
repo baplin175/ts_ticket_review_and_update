@@ -160,6 +160,7 @@ def _load_from_csv(ticket_numbers: list[str] | None) -> list[dict]:
                 "creator_id": "",
                 "creator_name": creator_name,
                 "party": party,
+                "is_visible": True,
                 "description": cleaned,
             }
             tickets_map[tnum].append(activity)
@@ -260,11 +261,29 @@ def main() -> str:
             continue
         _log(f"  [run] {len(raw_actions)} raw activity/ies fetched.")
 
-        # 5. Cleanse each activity
+        # 5. Cleanse each activity, keep only visible (public) ones
         activities = []
+        skipped_private = 0
         for action in raw_actions:
-            activities.append(clean_activity_dict(action))
+            cleaned = clean_activity_dict(action)
+            if not cleaned.get("is_visible", True):
+                skipped_private += 1
+                continue
+            activities.append(cleaned)
             total_activities += 1
+        if skipped_private:
+            _log(f"  [run] Filtered out {skipped_private} non-visible (private) activity/ies.")
+
+        # 6. Recalculate date_modified from last inh/cust action date
+        last_action_date = ""
+        for a in activities:
+            if a.get("party") in ("inh", "cust") and a.get("created_at"):
+                last_action_date = a["created_at"]
+        if last_action_date:
+            meta["date_modified"] = last_action_date
+            dm_dt = _parse_ts_datetime(last_action_date)
+            if dm_dt:
+                meta["days_since_modified"] = str((datetime.now(timezone.utc) - dm_dt).days)
 
         ticket_record = {
             "ticket_id": tid,

@@ -11,7 +11,7 @@ config.py              — Centralised settings (API creds, limits, target ticke
 ts_client.py           — TeamSupport REST API client (fetch tickets, activities, inHANCE users, update_ticket with auto LastInhComment/LastCustComment)
 activity_cleaner.py    — Text-cleaning pipeline (HTML→text, boilerplate/signature removal)
 matcha_client.py       — Matcha LLM API client (send prompts, extract responses)
-run_all.py             — Orchestrator: runs all stages in sequence, passes activities file between stages
+run_all.py             — Orchestrator: runs all stages in sequence, merges fields, single API call per ticket
 run_pull_activities.py — Part 1: fetch, clean, classify activities → activities JSON
 run_sentiment.py       — Part 2: send customer comments to Matcha for sentiment → sentiment JSON
 run_priority.py        — Part 3: AI priority scoring via Matcha → write back to TeamSupport
@@ -32,7 +32,10 @@ run_complexity.py      — Part 4: complexity analysis via Matcha → complexity
    - Email signature and quoted-reply stripping
    - Line deduplication and whitespace normalisation
    - Creator name extraction and party classification (`inh` = inHANCE team, `cust` = customer)
-6. **Write JSON** — Output is written to `output/activities_YYYYMMDD_HHMMSS.json` as an array of ticket objects. Each ticket object contains metadata at the top level and an `activities` array of cleaned activity records — ticket-level fields are stored once, not repeated per activity.
+   - Visibility flag extraction (`is_visible` from `IsVisibleOnPortal`)
+   - **Only public/visible activities** (`is_visible=True`) are kept; private actions are filtered out
+6. **Recalculate date_modified** — After filtering, `date_modified` is recalculated as the `created_at` of the last visible activity where `party` is `inh` or `cust`. `days_since_modified` is recomputed accordingly. This ensures the date reflects the last meaningful human interaction, not system events.
+7. **Write JSON** — Output is written to `output/activities_YYYYMMDD_HHMMSS.json` as an array of ticket objects. Each ticket object contains metadata at the top level and an `activities` array of cleaned activity records — ticket-level fields are stored once, not repeated per activity.
 
 ### Part 2 — Sentiment Analysis
 
@@ -73,6 +76,7 @@ The output file is an array of ticket objects. Each ticket object:
 | `creator_id`    | ID of the user who created the activity             |
 | `creator_name`  | Display name of the creator                         |
 | `party`         | `inh` (inHANCE CS team) or `cust` (customer)       |
+| `is_visible`    | `true` if visible on portal (public), `false` if private |
 | `description`   | Cleaned plain-text body                             |
 
 ### Part 3 — AI Priority Scoring
@@ -80,7 +84,7 @@ The output file is an array of ticket objects. Each ticket object:
 11. **Build input** — `run_priority.py` reads the latest activities JSON, extracts ticket metadata + all activities into the input format expected by `prompts/ai_priority.md`.
 12. **Call Matcha** — The full prompt (instructions + ticket data) is sent to Matcha with a 600s timeout.
 13. **Parse response** — Matcha returns a JSON array with `priority` (1–10), `priority_explanation`, and verbatim pass-through fields.
-14. **Write back to TeamSupport** — `ts_client.update_ticket()` updates custom fields `AIPriority`, `AIPriExpln`, `AILastUpdate` on each ticket. `LastInhComment` and `LastCustComment` are injected automatically by `update_ticket()` for every TeamSupport write — derived from the activities list by scanning for the most recent `party=="inh"` and `party=="cust"` entries. If the API returns 403 or the ticket has no `ticket_id` (CSV-sourced), the payload is saved to `output/api_payloads_dry_run.json` for verification.
+14. **Collect fields** — `run_priority.py` returns the computed fields (`AIPriority`, `AIPriExpln`, `AILastUpdate`) per ticket without calling the API. When run standalone, it writes back directly; when run via the orchestrator, write-back is deferred.
 15. **Save locally** — Results are saved to `output/priority_YYYYMMDD_HHMMSS.json`.
 
 ## Priority JSON Output Schema
@@ -130,8 +134,12 @@ The output file is an array of ticket objects. Each ticket object:
 16. **Build ticket history** — `run_complexity.py` reads the latest activities JSON and builds a text representation of each ticket (metadata + chronological activity history) for the `prompts/complexity.md` template.
 17. **Call Matcha** — The prompt (with `{{TICKET_HISTORY}}` replaced) is sent to Matcha per ticket.
 18. **Parse response** — Matcha returns a JSON object with `intrinsic_complexity`, `coordination_load`, `elapsed_drag`, `overall_complexity` (1–5 scale), plus `confidence`, drivers, evidence, and noise factors.
-19. **Write back to TeamSupport** — `ts_client.update_ticket()` updates `Complexity`, `COORDINATIONLOAD`, `ELAPSEDDRAG`, `INTRINSICCOMPLEXITY` on each ticket. `LastInhComment` and `LastCustComment` are included automatically. If the API is rate-limited or ticket_id is unavailable, payloads are saved to the dry-run file.
+19. **Collect fields** — `run_complexity.py` returns the computed fields (`Complexity`, `COORDINATIONLOAD`, `ELAPSEDDRAG`, `INTRINSICCOMPLEXITY`) per ticket without calling the API. When run standalone, it writes back directly; when run via the orchestrator, write-back is deferred.
 20. **Save locally** — Results are saved to `output/complexity_YYYYMMDD_HHMMSS.json`.
+
+### Consolidated Write-Back
+
+21. **Single API call per ticket** — When running via `run_all.py`, the orchestrator collects all fields from enabled stages (priority + complexity) and merges them into a single `update_ticket()` call per ticket. `LastInhComment` and `LastCustComment` are injected automatically by `update_ticket()` — derived from the activities list by scanning for the most recent `party=="inh"` and `party=="cust"` entries. If the API returns 403 or the ticket has no `ticket_id` (CSV-sourced), the payload is saved to `output/api_payloads_dry_run.json` for verification.
 
 ## Complexity JSON Output Schema
 
@@ -177,8 +185,16 @@ All settings live in `config.py` and can be overridden with environment variable
 | `RUN_SENTIMENT`    | `1`                    | Run sentiment analysis (0 = skip)    |
 | `RUN_PRIORITY`     | `1`                    | Run AI priority scoring (0 = skip)   |
 | `RUN_COMPLEXITY`   | `1`                    | Run complexity analysis (0 = skip)   |
+| `LOG_TO_FILE`      | `1`                    | Save pipeline logs to output dir     |
+| `LOG_API_CALLS`    | `1`                    | Save API call log to output dir      |
 | `CUST_COMMENT_COUNT`| `4`                   | Customer comments sent to Matcha     |
 | `OUTPUT_DIR`       | `./output`             | Where JSONL files are written        |
+
+## Logging
+
+When `LOG_TO_FILE=1` (default), all pipeline stdout/stderr is teed to `output/pipeline_YYYYMMDD_HHMMSS.log`.
+
+When `LOG_API_CALLS=1` (default), every TeamSupport and Matcha API call (GET, PUT, POST) is recorded in `output/api_calls.json` with timestamp, method, URL, params/payload, and HTTP status code. Matcha entries include `input_length` (prompt size) instead of the full prompt text.
 
 ## Dry-Run Payloads
 

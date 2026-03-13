@@ -6,7 +6,8 @@ import time
 
 import requests
 
-from config import MATCHA_URL, MATCHA_API_KEY, MATCHA_MISSION_ID
+from config import LOG_API_CALLS, MATCHA_URL, MATCHA_API_KEY, MATCHA_MISSION_ID
+from ts_client import _log_api_call
 
 MAX_RETRIES = 3
 RETRY_BACKOFF = 10  # seconds; doubles each retry
@@ -51,12 +52,22 @@ def call_matcha(
             response = requests.post(
                 MATCHA_URL, json=payload, headers=headers, timeout=timeout
             )
+            reply_text = _extract_reply_text(response.json())
+            _log_api_call(
+                "POST", MATCHA_URL,
+                payload=payload,
+                status=response.status_code,
+                response_body=reply_text,
+            )
             response.raise_for_status()
-            return _extract_reply_text(response.json())
+            return reply_text
         except (
             requests.exceptions.ConnectionError,
             requests.exceptions.Timeout,
         ) as exc:
+            _log_api_call("POST", MATCHA_URL,
+                          payload=payload,
+                          error=str(exc))
             last_error = exc
             if attempt < max_retries:
                 wait = retry_backoff * (2 ** (attempt - 1))

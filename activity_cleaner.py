@@ -358,6 +358,10 @@ def clean_activity_dict(action: Dict) -> Dict:
 
     party = "inh" if is_inhance_user(creator_id) else "cust"
 
+    is_visible = str(
+        action.get("IsVisibleOnPortal") or action.get("isVisibleOnPortal") or ""
+    ).strip().lower() == "true"
+
     return {
         "action_id": str(
             action.get("ID") or action.get("Id") or action.get("ActionID") or ""
@@ -367,5 +371,6 @@ def clean_activity_dict(action: Dict) -> Dict:
         "creator_id": creator_id,
         "creator_name": creator_name,
         "party": party,
+        "is_visible": is_visible,
         "description": clean_activity(unescaped, is_html=is_html),
     }

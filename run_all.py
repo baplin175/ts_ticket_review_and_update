@@ -13,20 +13,58 @@ Usage:
     RUN_SENTIMENT=0 RUN_COMPLEXITY=0 python run_all.py
 """
 
+import os
 import sys
+from datetime import datetime, timezone
 
-from config import RUN_COMPLEXITY, RUN_PRIORITY, RUN_SENTIMENT
+from config import LOG_TO_FILE, OUTPUT_DIR, RUN_COMPLEXITY, RUN_PRIORITY, RUN_SENTIMENT
 from run_pull_activities import main as pull_activities
 from run_sentiment import main as run_sentiment
 from run_priority import main as run_priority
 from run_complexity import main as run_complexity
+from ts_client import update_ticket
+
+_log_fh = None
 
 
 def _log(msg: str) -> None:
     print(msg, flush=True)
+    if _log_fh is not None:
+        _log_fh.write(msg + "\n")
+        _log_fh.flush()
+
+
+def _setup_log_file() -> None:
+    """Redirect all print() output to a timestamped log file in OUTPUT_DIR."""
+    global _log_fh
+    if not LOG_TO_FILE:
+        return
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    log_path = os.path.join(OUTPUT_DIR, f"pipeline_{ts}.log")
+    _log_fh = open(log_path, "w", encoding="utf-8")
+    # Tee stdout/stderr to the log file
+    import io
+
+    class _Tee(io.TextIOBase):
+        def __init__(self, original, logfile):
+            self._original = original
+            self._logfile = logfile
+        def write(self, s):
+            self._original.write(s)
+            self._logfile.write(s)
+            self._logfile.flush()
+            return len(s)
+        def flush(self):
+            self._original.flush()
+            self._logfile.flush()
+
+    sys.stdout = _Tee(sys.__stdout__, _log_fh)
+    sys.stderr = _Tee(sys.__stderr__, _log_fh)
 
 
 def main() -> None:
+    _setup_log_file()
     _log("=" * 60)
     _log("[orchestrator] Starting pipeline")
     _log("=" * 60)
@@ -42,19 +80,52 @@ def main() -> None:
     else:
         _log("\n[orchestrator] Part 2: Sentiment — skipped (RUN_SENTIMENT=0)")
 
+    # Collect fields from each stage for a single consolidated write-back
+    # per ticket.  Each runner returns {ticket_number: {ticket_id, fields, activities}}
+    all_updates: dict[str, dict] = {}  # ticket_number -> merged data
+
     # Part 3 — priority
     if RUN_PRIORITY:
         _log("\n[orchestrator] Part 3: AI priority scoring")
-        run_priority(activities_file=activities_file)
+        priority_results = run_priority(activities_file=activities_file, write_back=False)
+        for tnum, data in priority_results.items():
+            entry = all_updates.setdefault(
+                tnum,
+                {"ticket_id": data["ticket_id"], "fields": {}, "activities": data["activities"]},
+            )
+            entry["fields"].update(data["fields"])
     else:
         _log("\n[orchestrator] Part 3: Priority — skipped (RUN_PRIORITY=0)")
 
     # Part 4 — complexity
     if RUN_COMPLEXITY:
         _log("\n[orchestrator] Part 4: Complexity analysis")
-        run_complexity(activities_file=activities_file)
+        complexity_results = run_complexity(activities_file=activities_file, write_back=False)
+        for tnum, data in complexity_results.items():
+            entry = all_updates.setdefault(
+                tnum,
+                {"ticket_id": data["ticket_id"], "fields": {}, "activities": data["activities"]},
+            )
+            entry["fields"].update(data["fields"])
     else:
         _log("\n[orchestrator] Part 4: Complexity — skipped (RUN_COMPLEXITY=0)")
+
+    # ── Consolidated write-back: one API call per ticket ──
+    if all_updates:
+        _log(f"\n[orchestrator] Writing back {len(all_updates)} ticket(s) (single call each)...")
+        updated = 0
+        for tnum, data in all_updates.items():
+            try:
+                update_ticket(data["ticket_id"], data["fields"], data["activities"])
+                _log(f"  [ts] Updated ticket {tnum} — fields: {list(data['fields'].keys())}")
+                updated += 1
+            except Exception as e:
+                if hasattr(e, 'response') and getattr(e.response, 'status_code', None) == 403:
+                    _log(f"  [ts] API rate-limited for {tnum}; payload saved to dry-run file.")
+                    updated += 1
+                else:
+                    _log(f"  [ts] Failed to update ticket {tnum}: {e}")
+        _log(f"[orchestrator] Write-back complete: {updated}/{len(all_updates)} ticket(s).")
 
     _log("\n" + "=" * 60)
     _log("[orchestrator] Pipeline complete")

@@ -107,7 +107,13 @@ def _parse_json_response(raw: str) -> dict | None:
     return None
 
 
-def main(activities_file: str | None = None) -> None:
+def main(activities_file: str | None = None, write_back: bool = True) -> dict:
+    """Run complexity scoring.  Returns a dict mapping ticket_number to
+    ``{"ticket_id": ..., "fields": {...}, "activities": [...]}`` so the
+    caller can merge fields with other stages before a single API call.
+    When *write_back* is True (default / standalone), the function also
+    writes each ticket back to TeamSupport individually.
+    """
     if not TARGET_TICKETS:
         _log("[complexity] TARGET_TICKET is required. Set it as an env var.")
         sys.exit(1)
@@ -159,9 +165,10 @@ def main(activities_file: str | None = None) -> None:
 
     _log(f"[complexity] Scored {len(all_results)}/{len(tickets)} ticket(s).")
 
-    # 6. Write back to TeamSupport
+    # 6. Build per-ticket field maps
     ticket_map = {t["ticket_number"]: t for t in tickets}
-    updated = 0
+    ticket_fields: dict[str, dict] = {}  # return value
+
     for result in all_results:
         tnum = str(result.get("ticket_number", "")).strip()
         tid = str(result.get("ticket_id", "")).strip()
@@ -172,20 +179,31 @@ def main(activities_file: str | None = None) -> None:
             "INTRINSICCOMPLEXITY": str(result.get("intrinsic_complexity", "")),
         }
         tdata = ticket_map.get(tnum, {})
-        try:
-            update_ticket(tid, fields, tdata.get("activities", []))
-            _log(f"  [ts] Wrote back complexity fields for ticket {tnum}.")
-            updated += 1
-        except Exception as e:
-            if hasattr(e, 'response') and getattr(e.response, 'status_code', None) == 403:
-                _log(f"  [ts] API rate-limited for {tnum}; payload saved to dry-run file.")
+        ticket_fields[tnum] = {
+            "ticket_id": tid,
+            "fields": fields,
+            "activities": tdata.get("activities", []),
+        }
+
+    # 7. Write back to TeamSupport (only when running standalone)
+    updated = 0
+    if write_back:
+        for tnum, data in ticket_fields.items():
+            try:
+                update_ticket(data["ticket_id"], dict(data["fields"]), data["activities"])
+                _log(f"  [ts] Wrote back complexity fields for ticket {tnum}.")
                 updated += 1
-            else:
-                _log(f"  [ts] Failed to write back complexity for {tnum}: {e}")
+            except Exception as e:
+                if hasattr(e, 'response') and getattr(e.response, 'status_code', None) == 403:
+                    _log(f"  [ts] API rate-limited for {tnum}; payload saved to dry-run file.")
+                    updated += 1
+                else:
+                    _log(f"  [ts] Failed to write back complexity for {tnum}: {e}")
+        _log(f"[complexity] Updated {updated}/{len(ticket_fields)} ticket(s) in TeamSupport.")
+    else:
+        _log(f"[complexity] Collected fields for {len(ticket_fields)} ticket(s) (write-back deferred).")
 
-    _log(f"[complexity] Updated {updated}/{len(all_results)} ticket(s) in TeamSupport.")
-
-    # 7. Save results locally
+    # 8. Save results locally
     ts = _run_timestamp()
     out_path = os.path.join(OUTPUT_DIR, f"complexity_{ts}.json")
     output = {
@@ -198,6 +216,7 @@ def main(activities_file: str | None = None) -> None:
         json.dump(output, fout, ensure_ascii=False, indent=2)
 
     _log(f"[complexity] Results saved to {out_path}")
+    return ticket_fields
 
 
 if __name__ == "__main__":
