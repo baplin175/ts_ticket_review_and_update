@@ -405,6 +405,9 @@ def main():
         print("ERROR: DATABASE_URL is not set.", file=sys.stderr)
         sys.exit(1)
 
+    # Ensure schema and tables exist before syncing
+    db.migrate()
+
     # Parse --ticket
     ticket_numbers = None
     if args.ticket:

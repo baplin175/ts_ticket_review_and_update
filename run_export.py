@@ -241,6 +241,9 @@ def main():
         print("ERROR: DATABASE_URL is not set.", file=sys.stderr)
         sys.exit(1)
 
+    # Ensure schema and tables exist
+    db.migrate()
+
     ticket = getattr(args, "ticket", None)
 
     if args.command in ("activities", "all"):
