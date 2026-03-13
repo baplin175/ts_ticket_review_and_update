@@ -16,6 +16,7 @@ run_ingest.py          — DB-backed incremental ingestion CLI (sync, resync, st
 action_classifier.py   — Deterministic rule-based action classification (no LLM)
 run_rollups.py         — Rebuild action classification, thread rollups, and metrics from DB state
 run_all.py             — Orchestrator: runs all stages in sequence, merges fields, single API call per ticket (--force, --no-writeback)
+run_csv_import.py      — Bulk-import Activities.csv into DB (synthetic action IDs, streaming, idempotent)
 run_export.py          — Export canonical DB state to timestamped JSON artifacts
 run_pull_activities.py — Part 1: fetch, clean, classify activities → activities JSON
 run_sentiment.py       — Part 2: sentiment analysis via Matcha (DB persistence + hash-based skipping when DB available)
@@ -536,10 +537,63 @@ TARGET_TICKET=29696 python run_all.py          # full pipeline with write-back
 TARGET_TICKET=29696 python run_all.py --no-writeback  # dry-run
 ```
 
+### Mode 3: CSV Bulk Import (initial DB population without API)
+
+Use this when you have a large TeamSupport CSV export and want to populate the DB without burning API requests.
+
+```bash
+# 1. Set up database
+export DATABASE_URL="postgresql://user:pass@localhost:5432/Work"
+python db.py migrate
+
+# 2. Bulk-import from CSV
+python run_csv_import.py                     # all rows
+python run_csv_import.py --ticket 109683     # specific tickets
+python run_csv_import.py --dry-run            # preview without writing
+python run_csv_import.py --verbose            # per-ticket detail
+
+# 3. Build rollups (required before enrichments)
+python run_rollups.py all
+
+# 4. Run enrichments
+TARGET_TICKET=109683 python run_sentiment.py
+TARGET_TICKET=109683 python run_priority.py
+TARGET_TICKET=109683 python run_complexity.py
+```
+
+**CSV column mapping:**
+
+| CSV Column | DB Column | Notes |
+|---|---|---|
+| `Ticket ID` | `tickets.ticket_id` | Primary key (BIGINT) |
+| `Ticket Number` | `tickets.ticket_number` | Display number |
+| `Ticket Name` | `tickets.ticket_name` | Subject line |
+| `Ticket Product Name` | `tickets.product_name` | |
+| `Primary Customer` | `tickets.customer` | |
+| `Severity` | `tickets.severity` | |
+| `Date Ticket Created` | `tickets.date_created` | Parsed to UTC |
+| `Is Closed` | `tickets.status` | Mapped to Open/Closed |
+| `Group Name` | `tickets.assignee` | |
+| `Action Description` | `ticket_actions.description` | Raw + cleaned |
+| `Action Type` | `ticket_actions.action_type` | |
+| `Date Action Created` | `ticket_actions.created_at` | Parsed to UTC |
+| `Action Creator Name` | `ticket_actions.creator_name` | |
+
+**Key behaviours:**
+- **No Action ID in CSV**: Synthetic deterministic `action_id` generated from SHA-256 of `(ticket_id, date_created, description[:200])`. Re-importing the same CSV produces identical IDs.
+- **No Creator ID in CSV**: Party detection uses known inHANCE employee names from prior JSON files and/or existing DB records. Falls back to `"unknown"` if no reference data.
+- **Streaming**: CSV is processed row-by-row; the entire file is never loaded into memory.
+- **Idempotent**: Re-running the import converges to the same state (upsert semantics).
+- **Ingest run tracking**: Each import is recorded in `ingest_runs` with source `csv_import`.
+- **Bonus columns** (`Ticket Source`, `Ticket Type`, `Action Hours Spent`, `Action Source`) are stored in `source_payload` JSONB.
+
 ### Common Operational Workflows
 
 | Workflow | Command |
 |----------|---------|
+| **CSV bulk import** | `python run_csv_import.py` |
+| **CSV import (specific tickets)** | `python run_csv_import.py --ticket 109683` |
+| **CSV import dry-run** | `python run_csv_import.py --dry-run` |
 | **Incremental sync** | `python run_ingest.py sync` |
 | **Single-ticket resync** | `python run_ingest.py sync --ticket 29696` |
 | **Check sync status** | `python run_ingest.py status` |
