@@ -166,6 +166,22 @@ def fetch_open_tickets(ticket_numbers: List[str] | None = None) -> List[Dict[str
     return all_tickets
 
 
+def fetch_ticket_by_id(ticket_id: str) -> List[Dict[str, Any]]:
+    """Fetch a single ticket by its internal TicketID.
+
+    Returns a list with zero or one ticket dicts (list for consistency
+    with the other fetch helpers).
+    """
+    data = ts_get(f"{TS_BASE}/Tickets/{ticket_id}")
+    items = _normalize_ticket_list(data)
+    # The single-ticket endpoint may return the ticket at the top level
+    if not items and isinstance(data, dict):
+        if any(k in data for k in ("ID", "TicketID", "TicketNumber", "Name")):
+            items = [data]
+    print(f"[ts] Fetched {len(items)} ticket(s) for id={ticket_id}.", flush=True)
+    return items
+
+
 def fetch_all_activities(ticket_id: str) -> List[Dict[str, Any]]:
     """Return every activity/action for a ticket (paginated, oldest→newest)."""
     all_actions: List[Dict[str, Any]] = []

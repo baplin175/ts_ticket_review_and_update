@@ -168,6 +168,7 @@ def test_log_api_call_uses_atomic_replace(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         monkeypatch.setattr(ts_client, "OUTPUT_DIR", tmpdir)
         monkeypatch.setattr(ts_client, "LOG_API_CALLS", True)
+        monkeypatch.setattr(ts_client, "SKIP_OUTPUT_FILES", False)
 
         ts_client._log_api_call("GET", "http://example.com", status=200)
 
@@ -187,6 +188,7 @@ def test_save_dry_run_payload_uses_atomic_replace(monkeypatch):
 
     with tempfile.TemporaryDirectory() as tmpdir:
         monkeypatch.setattr(ts_client, "OUTPUT_DIR", tmpdir)
+        monkeypatch.setattr(ts_client, "SKIP_OUTPUT_FILES", False)
 
         ts_client.save_dry_run_payload("12345", {"Ticket": {"Status": "Open"}})
 

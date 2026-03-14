@@ -7,12 +7,12 @@ Pull open-ticket activities from TeamSupport, cleanse the text, classify each ac
 ## Architecture
 
 ```
-config.py              — Centralised settings (API creds, limits, target ticket, output dir, stage toggles, DATABASE_URL)
-ts_client.py           — TeamSupport REST API client (fetch tickets, activities, inHANCE users, all-users name→ID mapping, update_ticket with auto LastInhComment/LastCustComment)
+config.py              — Centralised settings (API creds, limits, target ticket, output dir, stage toggles, DATABASE_URL, SAFETY_BUFFER_MINUTES, INITIAL_BACKFILL_DAYS)
+ts_client.py           — TeamSupport REST API client (fetch tickets, activities, inHANCE users, all-users name→ID mapping, update_ticket with auto LastInhComment/LastCustComment, fetch_ticket_by_id)
 activity_cleaner.py    — Text-cleaning pipeline (HTML→text, boilerplate/signature removal)
 matcha_client.py       — Matcha LLM API client (send prompts, extract responses)
-db.py                  — Postgres data-access layer (connection pool, migration runner, upsert helpers, enrichment persistence)
-run_ingest.py          — DB-backed incremental ingestion CLI (sync, resync, status)
+db.py                  — Postgres data-access layer (connection pool, migration runner, upsert helpers, enrichment persistence, get_sync_state watermark reader)
+run_ingest.py          — DB-backed incremental ingestion CLI (watermark-based sync, single-ticket resync, replay mode, status)
 action_classifier.py   — Deterministic rule-based action classification (no LLM; action_type='Description' → customer_problem_statement)
 run_rollups.py         — Rebuild action classification, thread rollups, and metrics from DB state
 run_all.py             — Orchestrator: runs all stages in sequence, merges fields, single API call per ticket (--force, --no-writeback)
@@ -336,17 +336,24 @@ TARGET_TICKET=110554 RUN_SENTIMENT=0 RUN_PRIORITY=0 RUN_COMPLEXITY=0 python run_
 Requires `DATABASE_URL` to be set. Does not replace the JSON pipeline above.
 
 ```bash
-# Incremental sync — fetches open tickets (respects MAX_TICKETS)
+# Incremental sync — reads watermark from sync_state, applies safety buffer,
+# fetches open tickets, and post-filters to those modified since the watermark.
 DATABASE_URL="postgresql://user:pass@localhost:5432/Work" python run_ingest.py sync
 
-# Resync a single ticket by number
+# Resync a single ticket by TicketNumber
 python run_ingest.py sync --ticket 29696
 
-# Resync multiple tickets
+# Resync multiple tickets by TicketNumber
 python run_ingest.py sync --ticket 29696,110554
 
-# Replay tickets modified in a recent window
+# Resync a single ticket by internal TicketID
+python run_ingest.py sync --ticket-id 12345
+
+# Replay tickets modified in a recent window (explicit date)
 python run_ingest.py sync --since 2026-03-01
+
+# Replay the last N days (shorthand for --since)
+python run_ingest.py sync --days 7
 
 # Fetch all open tickets (ignore MAX_TICKETS)
 python run_ingest.py sync --all
@@ -358,12 +365,31 @@ python run_ingest.py sync --ticket 29696 --dry-run --verbose
 python run_ingest.py status
 ```
 
+**Incremental sync details:**
+
+- **Watermark**: On each normal sync, `sync_state.last_successful_sync_at` is
+  read.  If present, `SAFETY_BUFFER_MINUTES` (default 10) is subtracted to
+  produce the effective `from_ts`.  Tickets with `DateModified < from_ts` are
+  skipped.  The overlap is safe because all writes use `ON CONFLICT … DO UPDATE`
+  (idempotent upserts).
+- **First run / no watermark**: If no watermark exists, the sync fetches all
+  open tickets (full backfill).  Set `INITIAL_BACKFILL_DAYS` to limit to a
+  recent window instead.
+- **Watermark advancement**: `last_successful_sync_at` is advanced **only**
+  when a normal incremental sync completes successfully.  Targeted syncs
+  (`--ticket`, `--ticket-id`, `--since`, `--days`) never advance the watermark,
+  because they process a subset and cannot vouch for completeness.
+- **Failure safety**: If a run fails, the watermark stays put.  The next run
+  replays the same window, converging to correctness without duplicates.
+- **Replay safety**: Re-running the same time window is idempotent — it
+  produces the same DB state without duplicate rows.
+
 **Notes:**
 - Upserts are idempotent — repeated runs converge to the same state.
 - Raw TS payloads are stored in `source_payload` JSONB columns.
 - `ingest_runs` records start/finish/counts/errors for each run.
 - `sync_state` tracks last successful sync.
-- The TS API does not support server-side `DateModifiedSince` filtering; `--since` does a full fetch and filters locally.
+- The TS API does not support server-side `DateModifiedSince` filtering; the sync fetches all qualifying tickets and filters locally.
 
 ### Analytical Derived Layer (run_rollups.py)
 
@@ -683,8 +709,10 @@ Test coverage includes:
 - **Action classifier** (18 tests): all classification categories, noise/substance helpers
 - **Activity cleaner** (9 tests): HTML conversion, boilerplate removal, party classification
 - **DB upserts** (11 tests): idempotent INSERT ON CONFLICT, first_ingested_at stability, sync_state, ingest_runs
+- **Incremental sync** (9 tests): watermark reading, safety buffer filtering, watermark advancement on success, no advancement on targeted/replay/failed syncs, empty result handling
 - **Hash-based skipping** (9 tests): all three enrichment types, force override, missing rollups
 - **Write-back** (5 tests): LastInhComment/LastCustComment timestamp derivation
+- **Operational fixes** (11 tests): cache poisoning, atomic writes, retry logic, transaction batching
 
 ## Audit Summary (2026-03-13)
 
