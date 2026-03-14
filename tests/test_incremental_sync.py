@@ -124,8 +124,7 @@ def test_incremental_sync_reads_watermark_and_applies_buffer(_mock_sync_deps, mo
          patch("db.upsert_ticket_with_actions"), \
          patch("run_ingest.fetch_inhance_user_ids"), \
          patch("run_ingest.fetch_open_tickets", return_value=[ticket_in_buffer, ticket_old, ticket_new]), \
-         patch("run_ingest.fetch_all_activities", return_value=[]), \
-         patch("db.upsert_sync_state") as mock_sync_state:
+         patch("run_ingest.fetch_all_activities", return_value=[]):
 
         result = run_ingest._sync(dry_run=False, verbose=False)
 
