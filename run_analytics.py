@@ -243,6 +243,7 @@ def _infer_state(party: str, action_class: str | None, desc: str | None) -> str:
         return _STATE_MAP[ac]
 
     # Heuristic: if description mentions dev/engineering handoff
+    # "escalat" is a prefix match for both "escalated" and "escalation"
     text = (desc or "").lower()
     if any(kw in text for kw in ("dev team", "engineering", "r&d", "development team", "escalat")):
         return "waiting_on_dev"
