@@ -256,6 +256,19 @@ All tables are created inside the `tickets_ai` Postgres schema (configurable via
 | `ticket_sentiment`         | Sentiment enrichment results (append-only)             |
 | `ticket_priority_scores`   | AI priority enrichment results (append-only)           |
 | `ticket_complexity_scores` | Complexity enrichment results (append-only)            |
+| `ticket_wait_states`       | Wait-state segments per ticket (003)                   |
+| `ticket_participants`      | Per-ticket participant roster with counts (003)        |
+| `ticket_handoffs`          | Inferred handoff events between parties (003)          |
+| `ticket_snapshots_daily`   | Daily point-in-time ticket snapshots (003)             |
+| `ticket_issue_summaries`   | LLM-generated issue/cause/mechanism summaries (003)    |
+| `ticket_embeddings`        | Stored embedding vectors per ticket (003)              |
+| `cluster_runs`             | Clustering run metadata (003)                          |
+| `ticket_clusters`          | Ticket-to-cluster assignments (003)                    |
+| `cluster_catalog`          | Cluster labels and descriptions (003)                  |
+| `ticket_interventions`     | Recommended interventions per ticket (003)             |
+| `customer_ticket_health`   | Daily customer-level health aggregates (003)           |
+| `product_ticket_health`    | Daily product-level health aggregates (003)            |
+| `enrichment_runs`          | Enrichment run audit log (003)                         |
 
 ### Upsert helpers
 
