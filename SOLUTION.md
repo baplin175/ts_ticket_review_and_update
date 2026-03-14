@@ -17,6 +17,7 @@ action_classifier.py   — Deterministic rule-based action classification (no LL
 run_rollups.py         — Rebuild action classification, thread rollups, and metrics from DB state
 run_all.py             — Orchestrator: runs all stages in sequence, merges fields, single API call per ticket (--force, --no-writeback)
 run_enrich_db.py       — DB-only enrichment: score all closed (or filtered) tickets from Postgres, no TS API calls
+run_analytics.py       — Rebuild derived analytics tables: participants, handoffs, wait-states, snapshots, health
 run_csv_import.py      — Bulk-import Activities.csv into DB (synthetic action IDs, streaming, idempotent)
 run_export.py          — Export canonical DB state to timestamped JSON artifacts
 run_pull_activities.py — Part 1: fetch, clean, classify activities → activities JSON
@@ -711,6 +712,188 @@ Two config flags control side-effects:
 
 - **`SKIP_OUTPUT_FILES`** (default `0`): When `1`, **no** files are written to the `output/` directory during enrichment — this includes activities JSON, enrichment result JSON, pipeline log files, and API call logs. This is useful when the DB is the canonical store and file artifacts are unwanted. When `0`, all files are written as usual.
 
+## Analytics Extension (run_analytics.py)
+
+### Overview
+
+The analytics extension adds derived tables and views on top of the canonical DB to support:
+- **Wait-state profiling**: Infer where time is spent (customer, support, dev, PS) per ticket
+- **Participant tracking**: Who is involved in each ticket and how much
+- **Handoff detection**: When responsibility transfers between parties
+- **Daily snapshots**: Point-in-time ticket state for historical backlog analysis
+- **Customer health scoring**: Per-customer risk metrics and load pressure
+- **Product health scoring**: Per-product quality metrics and pain patterns
+- **Analytics views**: Pre-joined views for dashboards and reporting
+
+### Table Architecture
+
+#### Source Truth Tables
+| Table | Owner |
+|-------|-------|
+| `tickets` | run_ingest.py |
+| `ticket_actions` | run_ingest.py |
+
+#### Derived Ticket Tables (rebuilt from actions)
+| Table | Rebuilt By | Strategy |
+|-------|-----------|----------|
+| `ticket_thread_rollups` | run_rollups.py | Full refresh per ticket |
+| `ticket_metrics` | run_rollups.py | Full refresh per ticket |
+| `ticket_participants` | run_analytics.py | Full refresh per ticket (DELETE + INSERT) |
+| `ticket_handoffs` | run_analytics.py | Full refresh per ticket (DELETE + INSERT) |
+| `ticket_wait_states` | run_analytics.py | Full refresh per ticket (DELETE + INSERT) |
+
+#### Enrichment Tables (append-only, LLM-scored)
+| Table | Scored By |
+|-------|----------|
+| `ticket_sentiment` | run_sentiment.py |
+| `ticket_priority_scores` | run_priority.py |
+| `ticket_complexity_scores` | run_complexity.py |
+| `ticket_issue_summaries` | (future LLM enrichment) |
+| `ticket_embeddings` | (future embedding pipeline) |
+
+#### Snapshot / History Tables
+| Table | Purpose |
+|-------|---------|
+| `ticket_snapshots_daily` | Daily point-in-time snapshot of every ticket's state, priority, complexity, and wait state. Enables "backlog per week over the year" analysis. |
+
+**Why ticket_snapshots_daily exists:** Without daily snapshots, it is impossible to reconstruct what the backlog looked like at any past point in time, because ticket status/priority/complexity change over the ticket's life. The snapshot captures the state as of each day, enabling time-series backlog analysis.
+
+**How "backlog per week over the year" is answered:**
+1. `vw_backlog_daily` — daily open/high-priority/high-complexity counts from snapshots
+2. `vw_backlog_weekly` — weekly aggregation of daily counts
+3. `vw_backlog_weekly_eow` — end-of-week backlog using latest snapshot per ticket within each week
+4. `vw_backlog_weekly_from_dates` — fallback approximation from `tickets.date_created` / `closed_at` when snapshots don't cover the full history
+
+#### Analytics / Health Tables
+| Table | Purpose |
+|-------|---------|
+| `customer_ticket_health` | Per-customer, per-date health metrics (open counts, priority/complexity averages, frustration, pressure score) |
+| `product_ticket_health` | Per-product, per-date health metrics (volume, complexity, coordination, dev touch rate) |
+
+#### Clustering & Intervention Tables (future)
+| Table | Purpose |
+|-------|---------|
+| `cluster_runs` | Metadata for each clustering run |
+| `ticket_clusters` | Ticket-to-cluster assignments |
+| `cluster_catalog` | Cluster labels, descriptions, representative tickets |
+| `ticket_interventions` | Recommended interventions per ticket |
+| `enrichment_runs` | Audit log for enrichment batches |
+
+### Analytics Views
+
+| View | Purpose |
+|------|---------|
+| `vw_latest_ticket_sentiment` | Latest sentiment per ticket |
+| `vw_latest_ticket_priority` | Latest priority per ticket |
+| `vw_latest_ticket_complexity` | Latest complexity per ticket |
+| `vw_latest_ticket_issue_summary` | Latest issue summary per ticket |
+| `vw_ticket_analytics_core` | Master join: tickets + metrics + rollups + all latest enrichments |
+| `vw_ticket_complexity_breakdown` | Tickets with full complexity breakdown |
+| `vw_ticket_wait_profile` | Per-ticket wait-time aggregation by state |
+| `vw_customer_support_risk` | 90-day customer risk rollup |
+| `vw_product_pain_patterns` | Product × cluster × mechanism patterns |
+| `vw_intervention_opportunities` | Intervention type × target × product rollup |
+| `vw_backlog_daily` | Daily backlog counts |
+| `vw_backlog_weekly` | Weekly backlog aggregation |
+| `vw_backlog_weekly_eow` | End-of-week backlog snapshot |
+| `vw_backlog_aging_current` | Current backlog by age bucket (0-6, 7-13, 14-29, 30-59, 60-89, 90+) |
+| `vw_backlog_weekly_from_dates` | Fallback weekly backlog from ticket dates |
+
+### Population Functions
+
+| Function | Scope | Strategy |
+|----------|-------|----------|
+| `rebuild_ticket_participants(ticket_ids)` | Per-ticket or all | Full refresh (DELETE + INSERT) |
+| `rebuild_ticket_handoffs(ticket_ids)` | Per-ticket or all | Full refresh (DELETE + INSERT) |
+| `rebuild_ticket_wait_states(ticket_ids)` | Per-ticket or all | Full refresh (DELETE + INSERT) |
+| `snapshot_tickets_daily(date, ticket_ids)` | All tickets or subset | Upsert (ON CONFLICT DO UPDATE) |
+| `rebuild_customer_ticket_health(date)` | All customers | Upsert (ON CONFLICT DO UPDATE) |
+| `rebuild_product_ticket_health(date)` | All products | Upsert (ON CONFLICT DO UPDATE) |
+
+### Normal Run Flow
+
+The intended normal run flow after this extension:
+
+1. **Sync** — `run_ingest.py sync` fetches changed tickets/actions from TeamSupport
+2. **Rollups** — `run_rollups.py all` rebuilds classification + thread rollups + metrics for touched tickets
+3. **Analytics** — `run_analytics.py all` rebuilds participants / handoffs / wait-states for touched tickets, writes today's snapshot, refreshes customer & product health
+4. **Enrichment** — LLM scoring (sentiment/priority/complexity) runs as configured
+5. **Views** — Analytics views are always query-ready (no refresh needed)
+
+```bash
+# Full DB-mode run:
+python run_ingest.py sync
+python run_rollups.py all
+python run_analytics.py all
+# (optional) python run_enrich_db.py
+```
+
+### Wait-State Inference (First-Pass Heuristics)
+
+Wait states are inferred deterministically from the action stream using these rules:
+- **After customer action** → `waiting_on_support`
+- **After inh action classified `waiting_on_customer`** → `waiting_on_customer`
+- **After inh action classified `scheduling`** → `scheduled`
+- **After inh action classified `delivery_confirmation`** → `resolved`
+- **After inh action mentioning dev/engineering/escalation** → `waiting_on_dev`
+- **After inh action mentioning professional services** → `waiting_on_ps`
+- **After any other inh action** → `active_work`
+
+These are first-pass heuristics using `inference_method = 'rule_based_v1'` with `confidence = 0.8`. Future versions may use LLM-based inference.
+
+### Handoff Inference
+
+Handoffs are inferred from party transitions between consecutive non-empty human actions. A handoff occurs when the party changes (e.g., `cust→inh` or `inh→cust`). Each handoff records the from/to party and participant IDs with `confidence = 0.9`.
+
+### Incremental vs Full-Refresh
+
+- **Participants, handoffs, wait-states**: Full refresh per ticket (DELETE + INSERT). When `ticket_ids` is provided, only those tickets are rebuilt. Safe to re-run.
+- **Snapshots**: Upsert per (snapshot_date, ticket_id). When run without ticket filter, snapshots all tickets. Safe to re-run for the same date.
+- **Customer/product health**: Upsert per (as_of_date, customer/product). Full refresh for the date. Safe to re-run.
+- **Views**: No refresh needed — always query-ready from underlying tables.
+
+### Customer Health Pressure Score
+
+First-pass heuristic formula:
+```
+ticket_load_pressure_score = open_ticket_count
+                           + 2 × high_priority_count
+                           + 1.5 × high_complexity_count
+                           + 3 × frustration_count_90d
+```
+
+### CLI Usage
+
+```bash
+# Rebuild participants for all tickets
+python run_analytics.py participants
+
+# Rebuild for one ticket
+python run_analytics.py participants --ticket 29696
+
+# Rebuild handoffs
+python run_analytics.py handoffs
+
+# Rebuild wait states
+python run_analytics.py wait-states
+
+# Today's snapshot
+python run_analytics.py snapshot
+
+# Specific date
+python run_analytics.py snapshot --date 2026-03-14
+
+# Customer health
+python run_analytics.py customer-health
+
+# Product health
+python run_analytics.py product-health
+
+# Run everything
+python run_analytics.py all
+python run_analytics.py all --ticket 29696
+```
+
 ## Tests
 
 ```bash
@@ -726,6 +909,7 @@ Test coverage includes:
 - **Hash-based skipping** (9 tests): all three enrichment types, force override, missing rollups
 - **Write-back** (5 tests): LastInhComment/LastCustComment timestamp derivation
 - **Operational fixes** (11 tests): cache poisoning, atomic writes, retry logic, transaction batching
+- **Analytics** (21 tests): wait-state inference rules, participant/handoff/wait-state rebuilds, daily snapshot logic, customer/product health derivation, migration file verification
 
 ## Audit Summary (2026-03-13)
 
