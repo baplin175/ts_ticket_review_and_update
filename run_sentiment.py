@@ -149,8 +149,10 @@ def _persist_to_db(ticket_id: int, thread_hash: str | None,
     )
 
 
-def main(activities_file: str | None = None, *, force: bool = False) -> None:
-    if not TARGET_TICKETS:
+def main(activities_file: str | None = None, *, force: bool = False,
+         ticket_numbers: list[str] | None = None) -> None:
+    target_tickets = ticket_numbers or TARGET_TICKETS
+    if not target_tickets:
         _log("[sentiment] TARGET_TICKET is required. Set it as an env var.")
         sys.exit(1)
 
@@ -164,7 +166,7 @@ def main(activities_file: str | None = None, *, force: bool = False) -> None:
     # Resolve ticket_number → ticket_id map (for DB mode)
     tid_map: dict[str, int] = {}
     if db_enabled:
-        tid_map = db.ticket_ids_for_numbers(TARGET_TICKETS)
+        tid_map = db.ticket_ids_for_numbers(target_tickets)
 
     # 1. Locate most recent activities file (still needed for JSON fallback)
     if not activities_file:
@@ -177,7 +179,7 @@ def main(activities_file: str | None = None, *, force: bool = False) -> None:
 
     all_results = []
 
-    for tkt_num in TARGET_TICKETS:
+    for tkt_num in target_tickets:
         _log(f"[sentiment] Processing ticket {tkt_num}...")
 
         ticket_id = tid_map.get(tkt_num)

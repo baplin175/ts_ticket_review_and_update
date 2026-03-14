@@ -192,7 +192,7 @@ def _persist_to_db(ticket_id: int, technical_core_hash: str | None,
 
 
 def main(activities_file: str | None = None, write_back: bool | None = None,
-         *, force: bool = False) -> dict:
+         *, force: bool = False, ticket_numbers: list[str] | None = None) -> dict:
     """Run complexity scoring.  Returns a dict mapping ticket_number to
     ``{"ticket_id": ..., "fields": {...}, "activities": [...]}`` so the
     caller can merge fields with other stages before a single API call.
@@ -202,7 +202,8 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
     if write_back is None:
         write_back = TS_WRITEBACK
 
-    if not TARGET_TICKETS:
+    target_tickets = ticket_numbers or TARGET_TICKETS
+    if not target_tickets:
         _log("[complexity] TARGET_TICKET is required. Set it as an env var.")
         sys.exit(1)
 
@@ -217,7 +218,7 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
     tid_map: dict[str, int] = {}
     hash_map: dict[str, str | None] = {}  # ticket_number → technical_core_hash
     if db_enabled:
-        tid_map = db.ticket_ids_for_numbers(TARGET_TICKETS)
+        tid_map = db.ticket_ids_for_numbers(target_tickets)
         for tnum, tid in tid_map.items():
             hashes = db.get_current_hashes(tid)
             hash_map[tnum] = hashes.get("technical_core_hash")
@@ -225,7 +226,7 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
     # Filter tickets by hash-based skip logic
     tickets_to_score = []
     skipped = []
-    for tnum in TARGET_TICKETS:
+    for tnum in target_tickets:
         tid = tid_map.get(tnum)
         if tid and _should_skip(tid, force):
             _log(f"[complexity] Ticket {tnum} technical core unchanged (hash match). Skipping. Use --force to override.")

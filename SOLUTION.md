@@ -16,6 +16,7 @@ run_ingest.py          — DB-backed incremental ingestion CLI (sync, resync, st
 action_classifier.py   — Deterministic rule-based action classification (no LLM; action_type='Description' → customer_problem_statement)
 run_rollups.py         — Rebuild action classification, thread rollups, and metrics from DB state
 run_all.py             — Orchestrator: runs all stages in sequence, merges fields, single API call per ticket (--force, --no-writeback)
+run_enrich_db.py       — DB-only enrichment: score all closed (or filtered) tickets from Postgres, no TS API calls
 run_csv_import.py      — Bulk-import Activities.csv into DB (synthetic action IDs, streaming, idempotent)
 run_export.py          — Export canonical DB state to timestamped JSON artifacts
 run_pull_activities.py — Part 1: fetch, clean, classify activities → activities JSON
@@ -540,7 +541,41 @@ TARGET_TICKET=29696 python run_all.py          # full pipeline with write-back
 TARGET_TICKET=29696 python run_all.py --no-writeback  # dry-run
 ```
 
-### Mode 3: CSV Bulk Import (initial DB population without API)
+### Mode 3: DB-Only Enrichment (no TS API calls)
+
+Score all closed tickets using data already in Postgres. Only Matcha LLM calls are made. Hash-based skipping ensures only new/changed tickets are scored.
+
+```bash
+# Score all closed tickets (priority + complexity)
+python run_enrich_db.py
+
+# Limit to first 100 tickets
+python run_enrich_db.py --limit 100
+
+# Priority only, batch size 10
+python run_enrich_db.py --priority-only --batch-size 10
+
+# Complexity only
+python run_enrich_db.py --complexity-only
+
+# Include sentiment
+python run_enrich_db.py --sentiment
+
+# Force rescore (ignore hash-based skip)
+python run_enrich_db.py --force --limit 50
+
+# Target Open tickets instead of Closed
+python run_enrich_db.py --status Open
+```
+
+**Key behaviours:**
+- **No TS API calls** — reads entirely from the Postgres DB.
+- **Hash-based skipping** — tickets already scored with the same content hash are skipped automatically. Use `--force` to override.
+- **Batched priority** — priority scoring sends `--batch-size` tickets (default 20) per Matcha call.
+- **Per-ticket complexity** — complexity processes one ticket per Matcha call (inherent to the prompt design).
+- **Resilient** — errors in one batch don't stop the pipeline; processing continues with the next batch.
+
+### Mode 4: CSV Bulk Import (initial DB population without API)
 
 Use this when you have a large TeamSupport CSV export and want to populate the DB without burning API requests.
 
@@ -608,6 +643,10 @@ TARGET_TICKET=109683 python run_complexity.py
 | **Export JSON from DB** | `python run_export.py all` |
 | **Dry-run write-back** | `TARGET_TICKET=29696 python run_all.py --no-writeback` |
 | **Full pipeline + write-back** | `TARGET_TICKET=29696 python run_all.py` |
+| **Score all closed tickets** | `python run_enrich_db.py` |
+| **Score closed (limit 100)** | `python run_enrich_db.py --limit 100` |
+| **Priority only (DB)** | `python run_enrich_db.py --priority-only` |
+| **Complexity only (DB)** | `python run_enrich_db.py --complexity-only` |
 
 ### Canonical DB Concept
 

@@ -797,6 +797,19 @@ def ticket_ids_for_numbers(ticket_numbers: list[str]) -> Dict[str, int]:
     return {str(r[0]): r[1] for r in rows}
 
 
+def fetch_ticket_numbers_by_status(status: str) -> list[str]:
+    """Return all ticket_numbers matching the given status that have rollups."""
+    rows = fetch_all(
+        """SELECT t.ticket_number
+             FROM tickets t
+             JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
+            WHERE t.status = %s AND r.thread_hash IS NOT NULL
+            ORDER BY t.ticket_number;""",
+        (status,),
+    )
+    return [str(r[0]) for r in rows]
+
+
 # ── CLI entry point ──────────────────────────────────────────────────
 
 if __name__ == "__main__":
