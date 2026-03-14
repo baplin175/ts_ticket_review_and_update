@@ -456,6 +456,32 @@ def upsert_ticket_with_actions(
         put_conn(conn)
 
 
+def get_sync_state(source_name: str) -> Optional[Dict[str, Any]]:
+    """Read the sync_state row for *source_name*.
+
+    Returns a dict with keys matching the table columns, or None if no
+    row exists yet (first run).  Used to retrieve the watermark
+    (``last_successful_sync_at``) for incremental syncs.
+    """
+    row = fetch_one(
+        "SELECT source_name, last_successful_sync_at, last_attempted_sync_at, "
+        "       last_status, last_error, last_cursor, updated_at "
+        "FROM sync_state WHERE source_name = %s;",
+        (source_name,),
+    )
+    if not row:
+        return None
+    return {
+        "source_name": row[0],
+        "last_successful_sync_at": row[1],
+        "last_attempted_sync_at": row[2],
+        "last_status": row[3],
+        "last_error": row[4],
+        "last_cursor": row[5],
+        "updated_at": row[6],
+    }
+
+
 def upsert_sync_state(
     source_name: str,
     *,

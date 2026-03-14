@@ -2,16 +2,31 @@
 run_ingest.py — Incremental TeamSupport ticket + action ingestion into Postgres.
 
 Usage:
-    python run_ingest.py sync                       # incremental sync (open tickets)
+    python run_ingest.py sync                       # incremental sync (watermark-based)
     python run_ingest.py sync --ticket 29696        # resync one ticket by number
     python run_ingest.py sync --ticket 29696,110554 # resync multiple tickets
+    python run_ingest.py sync --ticket-id 123456    # resync one ticket by internal ID
     python run_ingest.py sync --since 2026-03-01    # replay tickets modified since date
+    python run_ingest.py sync --days 7              # replay last N days
     python run_ingest.py sync --all                 # full fetch (ignore MAX_TICKETS)
     python run_ingest.py sync --dry-run             # fetch & log but don't write to DB
     python run_ingest.py status                     # show sync state + recent runs
 
 Requires DATABASE_URL to be set.  Does NOT replace the existing JSON pipeline
 (run_pull_activities.py); this is the new DB-backed ingestion path.
+
+Incremental sync logic:
+    1. Read last_successful_sync_at from sync_state (the "watermark").
+    2. Subtract SAFETY_BUFFER_MINUTES to compute from_ts.  The overlap is
+       safe because all writes use ON CONFLICT … DO UPDATE (idempotent).
+    3. Fetch all open tickets from TeamSupport, then post-filter locally to
+       tickets with DateModified >= from_ts.  (The TS API does not support
+       server-side date filtering, so a local post-filter is the safest
+       practical approach.)
+    4. Upsert each ticket and its actions into Postgres.
+    5. Only advance last_successful_sync_at if the *entire* run succeeds.
+       This means a failed or partial run will be safely replayed on the
+       next invocation — no data loss, no duplicates.
 """
 
 import argparse
@@ -24,6 +39,7 @@ import config
 import db
 from ts_client import (
     fetch_open_tickets,
+    fetch_ticket_by_id,
     fetch_all_activities,
     fetch_inhance_user_ids,
     ticket_id as extract_ticket_id,
@@ -154,20 +170,72 @@ SOURCE_NAME = "teamsupport"
 
 def _sync(
     ticket_numbers: list[str] | None = None,
+    ticket_ids: list[str] | None = None,
     since: datetime | None = None,
     max_tickets: int | None = None,
     dry_run: bool = False,
     verbose: bool = False,
 ) -> dict:
-    """Run one ingestion cycle.  Returns a summary dict."""
+    """Run one ingestion cycle.  Returns a summary dict.
+
+    Sync modes (mutually exclusive):
+    - *ticket_numbers*: resync specific tickets by TicketNumber.
+    - *ticket_ids*: resync specific tickets by internal TicketID.
+    - *since*: replay all tickets modified since a given timestamp.
+    - default: true incremental sync using the stored watermark.
+
+    Watermark semantics:
+    - Only a normal incremental sync (no --ticket/--ticket-id/--since/--days)
+      advances last_successful_sync_at on success.
+    - Single-ticket and replay syncs do NOT advance the watermark because
+      they cover a subset of data and must not imply "everything is caught up".
+    """
     now = datetime.now(timezone.utc)
+
+    # Determine whether this is a "targeted" (single-ticket / replay) sync.
+    # Targeted syncs must NOT advance the global watermark.
+    is_targeted = bool(ticket_numbers or ticket_ids or since)
+
+    # ── Resolve the effective from_ts for incremental filtering ──
+    # When no explicit filter is provided, read the watermark from sync_state
+    # and apply the safety buffer.
+    effective_since = since
+    if not is_targeted and not dry_run:
+        state = db.get_sync_state(SOURCE_NAME)
+        watermark = state["last_successful_sync_at"] if state else None
+        if watermark:
+            # Subtract the safety buffer so we re-process a small overlap
+            # window.  This guards against clock skew between TeamSupport
+            # and our DB, as well as in-flight writes that completed after
+            # the watermark was recorded.  It is safe because all upserts
+            # use ON CONFLICT … DO UPDATE (idempotent).
+            effective_since = watermark - timedelta(minutes=config.SAFETY_BUFFER_MINUTES)
+            print(
+                f"[ingest] Watermark: {watermark.isoformat()}, "
+                f"safety buffer: {config.SAFETY_BUFFER_MINUTES}min → "
+                f"fetching tickets modified since {effective_since.isoformat()}",
+                flush=True,
+            )
+        elif config.INITIAL_BACKFILL_DAYS > 0:
+            effective_since = now - timedelta(days=config.INITIAL_BACKFILL_DAYS)
+            print(
+                f"[ingest] No prior watermark — backfilling last "
+                f"{config.INITIAL_BACKFILL_DAYS} day(s) "
+                f"(since {effective_since.isoformat()}).",
+                flush=True,
+            )
+        else:
+            print("[ingest] No prior watermark — full backfill of open tickets.", flush=True)
 
     # ── Config snapshot
     cfg_snap = {
         "ticket_numbers": ticket_numbers,
-        "since": since.isoformat() if since else None,
+        "ticket_ids": ticket_ids,
+        "since": effective_since.isoformat() if effective_since else None,
         "max_tickets": max_tickets,
         "dry_run": dry_run,
+        "is_targeted": is_targeted,
+        "safety_buffer_minutes": config.SAFETY_BUFFER_MINUTES,
         "ts_base": config.TS_BASE,
     }
 
@@ -189,28 +257,37 @@ def _sync(
 
         # ── Fetch tickets
         print("[ingest] Fetching tickets …", flush=True)
-        if ticket_numbers:
+        if ticket_ids:
+            # Fetch each ticket individually by internal ID
+            raw_tickets = []
+            for tid_str in ticket_ids:
+                raw_tickets.extend(fetch_ticket_by_id(tid_str))
+        elif ticket_numbers:
             raw_tickets = fetch_open_tickets(ticket_numbers=ticket_numbers)
         else:
             raw_tickets = fetch_open_tickets()
 
-        # ── Filter by --since (local post-filter; TS API doesn't support date filters)
-        if since:
+        # ── Filter by effective_since (local post-filter).
+        # The TeamSupport API does not support a server-side "modified since"
+        # filter, so we fetch all qualifying tickets and filter locally.
+        # Combined with the safety overlap buffer this is the safest practical
+        # approach for incremental sync.
+        if effective_since:
             before_count = len(raw_tickets)
             raw_tickets = [
                 t for t in raw_tickets
                 if _parse_ts_datetime(str(t.get("DateModified") or "")) is not None
-                and _parse_ts_datetime(str(t.get("DateModified") or "")) >= since
+                and _parse_ts_datetime(str(t.get("DateModified") or "")) >= effective_since
             ]
             print(
                 f"[ingest] Filtered {before_count} → {len(raw_tickets)} ticket(s) "
-                f"modified since {since.date()}.",
+                f"modified since {effective_since.isoformat()}.",
                 flush=True,
             )
 
         # ── Apply max_tickets limit
         effective_max = max_tickets if max_tickets is not None else config.MAX_TICKETS
-        if effective_max and not ticket_numbers:
+        if effective_max and not ticket_numbers and not ticket_ids:
             raw_tickets = raw_tickets[:effective_max]
 
         tickets_seen = len(raw_tickets)
@@ -297,11 +374,16 @@ def _sync(
             actions_upserted=actions_upserted,
             error_text=error_text,
         )
+        # Only advance last_successful_sync_at when the run fully succeeds
+        # AND this is a normal incremental sync (not a targeted resync or
+        # replay).  Advancing the watermark on a targeted sync would falsely
+        # signal that all tickets are up to date.
+        advance_watermark = (status == "completed") and not is_targeted
         db.upsert_sync_state(
             SOURCE_NAME,
             status=status,
             error=error_text,
-            is_success=(status == "completed"),
+            is_success=advance_watermark,
         )
 
     return {
@@ -373,8 +455,17 @@ def main():
         help="Comma-delimited ticket number(s) to resync.",
     )
     p_sync.add_argument(
+        "--ticket-id",
+        help="Comma-delimited internal ticket ID(s) to resync.",
+    )
+    p_sync.add_argument(
         "--since", "-s",
         help="Only process tickets modified since this date (YYYY-MM-DD).",
+    )
+    p_sync.add_argument(
+        "--days", "-d",
+        type=int,
+        help="Replay the last N days (shorthand for --since).",
     )
     p_sync.add_argument(
         "--all", action="store_true",
@@ -415,20 +506,32 @@ def main():
     if args.ticket:
         ticket_numbers = [t.strip() for t in args.ticket.split(",") if t.strip()]
 
-    # Parse --since
+    # Parse --ticket-id
+    ticket_ids = None
+    if args.ticket_id:
+        ticket_ids = [t.strip() for t in args.ticket_id.split(",") if t.strip()]
+
+    # Parse --since / --days
     since = None
+    if args.since and args.days:
+        print("ERROR: --since and --days are mutually exclusive.", file=sys.stderr)
+        sys.exit(1)
     if args.since:
         try:
             since = datetime.strptime(args.since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         except ValueError:
             print(f"ERROR: Invalid --since date: {args.since!r}  (expected YYYY-MM-DD)", file=sys.stderr)
             sys.exit(1)
+    elif args.days:
+        since = datetime.now(timezone.utc) - timedelta(days=args.days)
+        print(f"[ingest] Replay mode: last {args.days} day(s) (since {since.isoformat()}).", flush=True)
 
     # Max tickets
     max_tickets = 0 if args.all else None  # 0 = unlimited; None = use config default
 
     result = _sync(
         ticket_numbers=ticket_numbers,
+        ticket_ids=ticket_ids,
         since=since,
         max_tickets=max_tickets,
         dry_run=args.dry_run,

@@ -44,6 +44,16 @@ SKIP_OUTPUT_FILES = os.getenv("SKIP_OUTPUT_FILES", "1").strip() == "1"
 LOG_TO_FILE = os.getenv("LOG_TO_FILE", "1").strip() == "1"
 LOG_API_CALLS = os.getenv("LOG_API_CALLS", "1").strip() == "1"
 
+# ── Incremental sync ─────────────────────────────────────────────────
+# Safety buffer (minutes) subtracted from last_successful_sync_at when
+# querying for changed tickets.  Overlap is safe because upserts are
+# idempotent; it guards against clock skew and in-flight writes.
+SAFETY_BUFFER_MINUTES = int(os.getenv("SAFETY_BUFFER_MINUTES", "10"))
+
+# Default number of days to look back when no prior sync_state exists
+# (initial backfill window).  Set to 0 for full backfill (all open tickets).
+INITIAL_BACKFILL_DAYS = int(os.getenv("INITIAL_BACKFILL_DAYS", "0"))
+
 # ── Database (Postgres) ──────────────────────────────────────────────
 # Optional. When empty/unset, the pipeline runs in JSON-only mode.
 # Local dev: DATABASE_URL=postgresql://user:pass@localhost:5432/Work
