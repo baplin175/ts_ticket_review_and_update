@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 
 import requests
 
-from config import LOG_API_CALLS, OUTPUT_DIR, TS_BASE, TS_KEY, TS_USER_ID
+from config import LOG_API_CALLS, OUTPUT_DIR, SKIP_OUTPUT_FILES, TS_BASE, TS_KEY, TS_USER_ID
 
 
 # ── API call logging ────────────────────────────────────────────────
@@ -20,7 +20,7 @@ def _log_api_call(method: str, url: str, params: Any = None,
                   error: str | None = None,
                   response_body: Any = None) -> None:
     """Append an API call record to the api_calls log file."""
-    if not LOG_API_CALLS:
+    if not LOG_API_CALLS or SKIP_OUTPUT_FILES:
         return
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     log_path = os.path.join(OUTPUT_DIR, "api_calls.json")
@@ -230,6 +230,45 @@ def fetch_inhance_user_ids() -> set:
     return _INHANCE_IDS
 
 
+_ALL_USERS_CACHE: dict | None = None
+
+
+def fetch_all_users() -> dict:
+    """Fetch ALL users from TeamSupport and return a name→user_id mapping.
+
+    Returns a dict keyed by display name (``FirstName LastName``) with
+    the string user ID as value.  Also indexes by ``Name`` and
+    ``DisplayName`` keys when present.  Result is cached for the
+    process lifetime.
+    """
+    global _ALL_USERS_CACHE
+    if _ALL_USERS_CACHE is not None:
+        return _ALL_USERS_CACHE
+    try:
+        data = ts_get(f"{TS_BASE}/Users")
+    except Exception as e:
+        print(f"[ts] Failed to fetch all users: {e}", flush=True)
+        return {}
+    users = _normalize_users_list(data)
+    mapping: dict[str, str] = {}
+    for u in users:
+        uid = str(u.get("ID") or u.get("Id") or u.get("UserID") or "").strip()
+        if not uid:
+            continue
+        fn = (u.get("FirstName") or "").strip()
+        ln = (u.get("LastName") or "").strip()
+        name = f"{fn} {ln}".strip() if fn or ln else ""
+        if name:
+            mapping[name] = uid
+        for k in ("Name", "DisplayName"):
+            v = (u.get(k) or "").strip()
+            if v:
+                mapping[v] = uid
+    _ALL_USERS_CACHE = mapping
+    print(f"[ts] Loaded {len(mapping)} user name→ID mapping(s).", flush=True)
+    return _ALL_USERS_CACHE
+
+
 def is_inhance_user(creator_id: str) -> bool:
     """Return True if the creator_id belongs to an inHANCE org user."""
     return creator_id in fetch_inhance_user_ids()
@@ -325,6 +364,8 @@ def update_ticket(tid: str, fields: Dict[str, Any], activities: List[Dict[str, A
 
 def save_dry_run_payload(tid: str, payload: Dict[str, Any]) -> None:
     """Append a payload to the dry-run output file for later review."""
+    if SKIP_OUTPUT_FILES:
+        return
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     dry_run_path = os.path.join(OUTPUT_DIR, "api_payloads_dry_run.json")
     entry = {

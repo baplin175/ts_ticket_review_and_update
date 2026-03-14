@@ -25,7 +25,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import OUTPUT_DIR, RUN_COMPLEXITY, TARGET_TICKETS, MATCHA_MISSION_ID
+from config import OUTPUT_DIR, RUN_COMPLEXITY, TARGET_TICKETS, MATCHA_MISSION_ID, TS_WRITEBACK, SKIP_OUTPUT_FILES
 from matcha_client import call_matcha
 from ts_client import update_ticket
 
@@ -191,7 +191,7 @@ def _persist_to_db(ticket_id: int, technical_core_hash: str | None,
     )
 
 
-def main(activities_file: str | None = None, write_back: bool = True,
+def main(activities_file: str | None = None, write_back: bool | None = None,
          *, force: bool = False) -> dict:
     """Run complexity scoring.  Returns a dict mapping ticket_number to
     ``{"ticket_id": ..., "fields": {...}, "activities": [...]}`` so the
@@ -199,6 +199,9 @@ def main(activities_file: str | None = None, write_back: bool = True,
     When *write_back* is True (default / standalone), the function also
     writes each ticket back to TeamSupport individually.
     """
+    if write_back is None:
+        write_back = TS_WRITEBACK
+
     if not TARGET_TICKETS:
         _log("[complexity] TARGET_TICKET is required. Set it as an env var.")
         sys.exit(1)
@@ -330,20 +333,23 @@ def main(activities_file: str | None = None, write_back: bool = True,
         _log(f"[complexity] Collected fields for {len(ticket_fields)} ticket(s) (write-back deferred).")
 
     # 8. Save results locally (JSON artifact)
-    ts = _run_timestamp()
-    out_path = os.path.join(OUTPUT_DIR, f"complexity_{ts}.json")
-    source = os.path.basename(activities_file) if activities_file else "db"
-    output = {
-        "source_file": source,
-        "tickets_scored": len(all_results),
-        "tickets_skipped": len(skipped),
-        "writeback_count": updated,
-        "results": all_results,
-    }
-    with open(out_path, "w", encoding="utf-8") as fout:
-        json.dump(output, fout, ensure_ascii=False, indent=2)
+    if not SKIP_OUTPUT_FILES:
+        ts = _run_timestamp()
+        out_path = os.path.join(OUTPUT_DIR, f"complexity_{ts}.json")
+        source = os.path.basename(activities_file) if activities_file else "db"
+        output = {
+            "source_file": source,
+            "tickets_scored": len(all_results),
+            "tickets_skipped": len(skipped),
+            "writeback_count": updated,
+            "results": all_results,
+        }
+        with open(out_path, "w", encoding="utf-8") as fout:
+            json.dump(output, fout, ensure_ascii=False, indent=2)
 
-    _log(f"[complexity] Results saved to {out_path}")
+        _log(f"[complexity] Results saved to {out_path}")
+    else:
+        _log("[complexity] JSON artifact skipped (SKIP_OUTPUT_FILES=1).")
     return ticket_fields
 
 

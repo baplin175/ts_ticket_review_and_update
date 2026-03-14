@@ -34,6 +34,12 @@ RUN_SENTIMENT = os.getenv("RUN_SENTIMENT", "0").strip() == "1"
 RUN_PRIORITY = os.getenv("RUN_PRIORITY", "1").strip() == "1"
 RUN_COMPLEXITY = os.getenv("RUN_COMPLEXITY", "1").strip() == "1"
 
+# ── Write-back / output controls ────────────────────────────────────
+# Write enrichment results back to TeamSupport (1 = yes, 0 = no).
+TS_WRITEBACK = os.getenv("TS_WRITEBACK", "0").strip() == "1"
+# Skip writing JSON artifact files when DB persistence is active (1 = skip, 0 = write).
+SKIP_OUTPUT_FILES = os.getenv("SKIP_OUTPUT_FILES", "1").strip() == "1"
+
 # ── Logging / diagnostics ────────────────────────────────────────────
 LOG_TO_FILE = os.getenv("LOG_TO_FILE", "1").strip() == "1"
 LOG_API_CALLS = os.getenv("LOG_API_CALLS", "1").strip() == "1"

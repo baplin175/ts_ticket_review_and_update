@@ -51,12 +51,54 @@ def _synthetic_action_id(ticket_id: str, date_created: str, description_prefix: 
 # ── Party detection ──────────────────────────────────────────────────
 
 def _load_known_inh_names() -> set:
-    """Scan prior activities JSON files for creator names with party == 'inh'.
+    """Build the set of inHANCE employee names.
 
-    Falls back to the DB if no JSON files exist.
+    Sources (in priority order):
+    1. TeamSupport API — /Users?Organization=inHANCE (most authoritative)
+    2. DB — distinct creator_name where party='inh'
+    3. Prior activities JSON files
     """
     import json
     names: set = set()
+
+    # 1. Try TS API first (single call, gives the canonical list)
+    try:
+        from ts_client import ts_get, TS_BASE
+        data = ts_get(f"{TS_BASE}/Users", params={"Organization": "inHANCE"})
+        users = data if isinstance(data, list) else data.get("Users", data.get("users", []))
+        if isinstance(users, dict):
+            users = users.get("User", users.get("user", []))
+        if not isinstance(users, list):
+            users = [users]
+        for u in users:
+            fn = (u.get("FirstName") or "").strip()
+            ln = (u.get("LastName") or "").strip()
+            name = f"{fn} {ln}".strip() if fn or ln else ""
+            if name:
+                names.add(name)
+            for k in ("Name", "DisplayName"):
+                v = (u.get(k) or "").strip()
+                if v:
+                    names.add(v)
+        if names:
+            _log(f"[csv-import] Loaded {len(names)} inHANCE name(s) from TS API.")
+            return names
+    except Exception as exc:
+        _log(f"[csv-import] TS API user fetch failed ({exc}), falling back to local sources.")
+
+    # 2. Pull from DB if available
+    if db._is_enabled():
+        try:
+            rows = db.fetch_all(
+                "SELECT DISTINCT creator_name FROM ticket_actions WHERE party = 'inh' AND creator_name IS NOT NULL;"
+            )
+            for r in rows:
+                if r[0]:
+                    names.add(r[0])
+        except Exception:
+            pass
+
+    # 3. Scan prior activities JSON files
     out = Path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "output"))
     for f in sorted(out.glob("activities_*.json"), reverse=True):
         try:
@@ -69,18 +111,6 @@ def _load_known_inh_names() -> set:
                 break
         except Exception:
             continue
-
-    # Also pull from DB if available
-    if db._is_enabled():
-        try:
-            rows = db.fetch_all(
-                "SELECT DISTINCT creator_name FROM ticket_actions WHERE party = 'inh' AND creator_name IS NOT NULL;"
-            )
-            for r in rows:
-                if r[0]:
-                    names.add(r[0])
-        except Exception:
-            pass
 
     return names
 
@@ -136,6 +166,14 @@ def run_import(
         _log(f"[csv-import] Loaded {len(inh_names)} known inHANCE name(s) for party detection.")
     else:
         _log("[csv-import] No known inHANCE names found — party will be 'unknown'.")
+
+    # Build name→user_id mapping from TS API
+    name_to_id: dict[str, str] = {}
+    try:
+        from ts_client import fetch_all_users
+        name_to_id = fetch_all_users()
+    except Exception as exc:
+        _log(f"[csv-import] Could not fetch user ID mapping: {exc}")
 
     ticket_set = set(ticket_filter) if ticket_filter else None
 
@@ -261,7 +299,8 @@ def run_import(
 
                 action_created = _parse_ts_date(date_action_raw)
 
-                # Party detection
+                # Party detection + creator_id lookup
+                creator_id = name_to_id.get(creator_name)
                 if inh_names:
                     party = "inh" if creator_name in inh_names else "cust"
                 else:
@@ -291,7 +330,7 @@ def run_import(
                     "ticket_id": ticket_id,
                     "created_at": action_created,
                     "action_type": action_type or None,
-                    "creator_id": None,
+                    "creator_id": creator_id,
                     "creator_name": creator_name or None,
                     "party": party,
                     "is_visible": True,

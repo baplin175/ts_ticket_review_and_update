@@ -24,9 +24,10 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
-from config import OUTPUT_DIR, RUN_PRIORITY, TARGET_TICKETS, MATCHA_MISSION_ID
+from config import OUTPUT_DIR, RUN_PRIORITY, TARGET_TICKETS, MATCHA_MISSION_ID, TS_WRITEBACK, SKIP_OUTPUT_FILES
 from matcha_client import call_matcha
 from ts_client import update_ticket
 
@@ -41,6 +42,13 @@ MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
 
 def _log(msg: str) -> None:
     print(msg, flush=True)
+
+
+def _json_default(obj):
+    """Handle non-standard types (e.g. Decimal from Postgres) in JSON serialization."""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 def _run_timestamp() -> str:
@@ -178,7 +186,7 @@ def _persist_to_db(ticket_id: int, thread_hash: str | None,
     )
 
 
-def main(activities_file: str | None = None, write_back: bool = True,
+def main(activities_file: str | None = None, write_back: bool | None = None,
          *, force: bool = False) -> dict:
     """Run priority scoring.  Returns a dict mapping ticket_number to
     ``{"ticket_id": ..., "fields": {...}, "activities": [...]}`` so the
@@ -186,6 +194,9 @@ def main(activities_file: str | None = None, write_back: bool = True,
     When *write_back* is True (default / standalone), the function also
     writes each ticket back to TeamSupport individually.
     """
+    if write_back is None:
+        write_back = TS_WRITEBACK
+
     if not TARGET_TICKETS:
         _log("[priority] TARGET_TICKET is required. Set it as an env var (comma-delimited for multiple).")
         sys.exit(1)
@@ -242,7 +253,7 @@ def main(activities_file: str | None = None, write_back: bool = True,
     # 2. Build prompt
     prompt_instructions = _load_prompt()
     input_data = [_build_input_block(t) for t in tickets]
-    input_json = json.dumps(input_data, ensure_ascii=False, indent=2)
+    input_json = json.dumps(input_data, ensure_ascii=False, indent=2, default=_json_default)
 
     full_prompt = f"""{prompt_instructions}
 
@@ -322,20 +333,23 @@ def main(activities_file: str | None = None, write_back: bool = True,
         _log(f"[priority] Collected fields for {len(ticket_fields)} ticket(s) (write-back deferred).")
 
     # 7. Save results locally (JSON artifact)
-    ts = _run_timestamp()
-    out_path = os.path.join(OUTPUT_DIR, f"priority_{ts}.json")
-    source = os.path.basename(activities_file) if activities_file else "db"
-    output = {
-        "source_file": source,
-        "tickets_sent": len(tickets),
-        "tickets_skipped": len(skipped),
-        "results": results,
-        "writeback_count": updated,
-    }
-    with open(out_path, "w", encoding="utf-8") as fout:
-        json.dump(output, fout, ensure_ascii=False, indent=2)
+    if not SKIP_OUTPUT_FILES:
+        ts = _run_timestamp()
+        out_path = os.path.join(OUTPUT_DIR, f"priority_{ts}.json")
+        source = os.path.basename(activities_file) if activities_file else "db"
+        output = {
+            "source_file": source,
+            "tickets_sent": len(tickets),
+            "tickets_skipped": len(skipped),
+            "results": results,
+            "writeback_count": updated,
+        }
+        with open(out_path, "w", encoding="utf-8") as fout:
+            json.dump(output, fout, ensure_ascii=False, indent=2)
 
-    _log(f"[priority] Results saved to {out_path}")
+        _log(f"[priority] Results saved to {out_path}")
+    else:
+        _log("[priority] JSON artifact skipped (SKIP_OUTPUT_FILES=1).")
     return ticket_fields
 
 

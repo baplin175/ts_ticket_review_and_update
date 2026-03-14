@@ -108,8 +108,9 @@ def rebuild_rollups(ticket_ids: list[int]) -> int:
             if not text or empty:
                 continue
 
-            # Prefix for thread context
-            prefix = f"[{cname or party or '?'}]"
+            # Prefix for thread context (includes timestamp for LLM sequence interpretation)
+            ts = cat.strftime("%Y-%m-%d %H:%M") if cat else "unknown-date"
+            prefix = f"[{ts} | {cname or party or '?'}]"
             line = f"{prefix} {text}"
 
             # full_thread_text: all non-empty actions, even noise
@@ -195,6 +196,14 @@ def rebuild_metrics(ticket_ids: list[int]) -> int:
             (tid,),
         )
 
+        # Fetch ticket-level fields for date_created and days_opened
+        trow = db.fetch_one(
+            "SELECT date_created, days_opened FROM tickets WHERE ticket_id = %s;",
+            (tid,),
+        )
+        date_created = trow[0] if trow else None
+        days_open = float(trow[1]) if trow and trow[1] is not None else None
+
         action_count = len(rows)
         nonempty_count = 0
         cust_count = 0
@@ -241,6 +250,12 @@ def rebuild_metrics(ticket_ids: list[int]) -> int:
         if action_count > 0:
             empty_ratio = round((action_count - nonempty_count) / action_count, 4)
 
+        # Compute hours to first response
+        hours_to_first_response = None
+        if first_response_at and date_created:
+            delta = (first_response_at - date_created).total_seconds()
+            hours_to_first_response = round(delta / 3600, 2)
+
         # Upsert into ticket_metrics
         db.execute("""
             INSERT INTO ticket_metrics (
@@ -248,8 +263,9 @@ def rebuild_metrics(ticket_ids: list[int]) -> int:
                 customer_message_count, inhance_message_count,
                 distinct_participant_count, first_response_at,
                 last_human_activity_at, empty_action_ratio,
-                handoff_count, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                handoff_count, date_created, hours_to_first_response,
+                days_open, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (ticket_id) DO UPDATE SET
                 action_count               = EXCLUDED.action_count,
                 nonempty_action_count      = EXCLUDED.nonempty_action_count,
@@ -260,13 +276,17 @@ def rebuild_metrics(ticket_ids: list[int]) -> int:
                 last_human_activity_at     = EXCLUDED.last_human_activity_at,
                 empty_action_ratio         = EXCLUDED.empty_action_ratio,
                 handoff_count              = EXCLUDED.handoff_count,
+                date_created               = EXCLUDED.date_created,
+                hours_to_first_response    = EXCLUDED.hours_to_first_response,
+                days_open                  = EXCLUDED.days_open,
                 updated_at                 = EXCLUDED.updated_at;
         """, (
             tid, action_count, nonempty_count,
             cust_count, inh_count,
             len(participants), first_response_at,
             last_human_at, empty_ratio,
-            handoffs, now,
+            handoffs, date_created, hours_to_first_response,
+            days_open, now,
         ))
         count += 1
 

@@ -15,7 +15,7 @@ import csv
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import MAX_TICKETS, OUTPUT_DIR, TARGET_TICKETS
+from config import MAX_TICKETS, OUTPUT_DIR, SKIP_OUTPUT_FILES, TARGET_TICKETS
 from ts_client import fetch_open_tickets, fetch_all_activities, ticket_id
 from activity_cleaner import clean_activity_dict, clean_activity
 
@@ -190,7 +190,7 @@ def _load_from_csv(ticket_numbers: list[str] | None) -> list[dict]:
     return all_tickets
 
 
-def main() -> str:
+def main() -> str | None:
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # 1. Try API first; fall back to CSV on failure
@@ -210,11 +210,14 @@ def main() -> str:
             _log("[run] No data from API or CSV. Exiting.")
             sys.exit(1)
 
+        total = sum(len(t["activities"]) for t in all_tickets_data)
+        if SKIP_OUTPUT_FILES:
+            _log(f"[run] Done (CSV fallback). {total} activity/ies across {len(all_tickets_data)} ticket(s) (file write skipped).")
+            return None
         ts = _run_timestamp()
         out_path = os.path.join(OUTPUT_DIR, f"activities_{ts}.json")
         with open(out_path, "w", encoding="utf-8") as fout:
             json.dump(all_tickets_data, fout, ensure_ascii=False, indent=2)
-        total = sum(len(t["activities"]) for t in all_tickets_data)
         _log(f"[run] Done (CSV fallback). {total} activity/ies across {len(all_tickets_data)} ticket(s) written to {out_path}")
         return out_path
 
@@ -295,6 +298,9 @@ def main() -> str:
         all_tickets_data.append(ticket_record)
 
     # 6. Write nested JSON
+    if SKIP_OUTPUT_FILES:
+        _log(f"[run] Done. {total_activities} activity/ies across {len(all_tickets_data)} ticket(s) (file write skipped).")
+        return None
     with open(out_path, "w", encoding="utf-8") as fout:
         json.dump(all_tickets_data, fout, ensure_ascii=False, indent=2)
 

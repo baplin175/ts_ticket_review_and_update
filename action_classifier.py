@@ -133,6 +133,10 @@ def classify_action(
     if is_empty or not cleaned_description or not cleaned_description.strip():
         return "system_noise"
 
+    # ── "Description" action type is always the initial customer problem
+    if action_type and action_type.strip().lower() == "description":
+        return "customer_problem_statement"
+
     text = cleaned_description.strip()
 
     # Very short text (≤ 15 chars) that's likely just an ACK

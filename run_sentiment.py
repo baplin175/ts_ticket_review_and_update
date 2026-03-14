@@ -26,7 +26,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import OUTPUT_DIR, RUN_SENTIMENT, TARGET_TICKETS, MATCHA_MISSION_ID
+from config import OUTPUT_DIR, RUN_SENTIMENT, TARGET_TICKETS, MATCHA_MISSION_ID, SKIP_OUTPUT_FILES
 from matcha_client import call_matcha
 
 CUST_COMMENT_COUNT = int(os.getenv("CUST_COMMENT_COUNT", "4"))
@@ -258,13 +258,16 @@ Output format (strict JSON):
         all_results.append(record)
 
     # 6. Write response JSON artifact
-    ts = _run_timestamp()
-    out_path = os.path.join(OUTPUT_DIR, f"sentiment_{ts}.json")
+    if not SKIP_OUTPUT_FILES:
+        ts = _run_timestamp()
+        out_path = os.path.join(OUTPUT_DIR, f"sentiment_{ts}.json")
 
-    with open(out_path, "w", encoding="utf-8") as fout:
-        json.dump(all_results, fout, ensure_ascii=False, indent=2)
+        with open(out_path, "w", encoding="utf-8") as fout:
+            json.dump(all_results, fout, ensure_ascii=False, indent=2)
 
-    _log(f"[sentiment] {len(all_results)} result(s) written to {out_path}")
+        _log(f"[sentiment] {len(all_results)} result(s) written to {out_path}")
+    else:
+        _log("[sentiment] JSON artifact skipped (SKIP_OUTPUT_FILES=1).")
 
 
 if __name__ == "__main__":

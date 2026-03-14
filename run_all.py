@@ -24,7 +24,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
-from config import LOG_TO_FILE, OUTPUT_DIR, RUN_COMPLEXITY, RUN_PRIORITY, RUN_SENTIMENT
+from config import LOG_TO_FILE, OUTPUT_DIR, RUN_COMPLEXITY, RUN_PRIORITY, RUN_SENTIMENT, SKIP_OUTPUT_FILES, TS_WRITEBACK
 from run_pull_activities import main as pull_activities
 from run_sentiment import main as run_sentiment
 from run_priority import main as run_priority
@@ -44,7 +44,7 @@ def _log(msg: str) -> None:
 def _setup_log_file() -> None:
     """Redirect all print() output to a timestamped log file in OUTPUT_DIR."""
     global _log_fh
-    if not LOG_TO_FILE:
+    if not LOG_TO_FILE or SKIP_OUTPUT_FILES:
         return
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -72,12 +72,14 @@ def _setup_log_file() -> None:
 
 def main(*, force: bool = False, no_writeback: bool = False) -> None:
     _setup_log_file()
+    write_back = TS_WRITEBACK and not no_writeback
     _log("=" * 60)
     _log("[orchestrator] Starting pipeline")
     if force:
         _log("[orchestrator] --force: hash-based skip checks disabled")
-    if no_writeback:
-        _log("[orchestrator] --no-writeback: TS write-back disabled")
+    if not write_back:
+        _log("[orchestrator] TS write-back disabled"
+             + (" (--no-writeback)" if no_writeback else " (TS_WRITEBACK=0)"))
     _log("=" * 60)
 
     # Part 1 — always runs
@@ -122,7 +124,7 @@ def main(*, force: bool = False, no_writeback: bool = False) -> None:
         _log("\n[orchestrator] Part 4: Complexity — skipped (RUN_COMPLEXITY=0)")
 
     # ── Consolidated write-back: one API call per ticket ──
-    if all_updates and not no_writeback:
+    if all_updates and write_back:
         _log(f"\n[orchestrator] Writing back {len(all_updates)} ticket(s) (single call each)...")
         updated = 0
         deferred = 0
@@ -138,8 +140,9 @@ def main(*, force: bool = False, no_writeback: bool = False) -> None:
                 else:
                     _log(f"  [ts] Failed to update ticket {tnum}: {e}")
         _log(f"[orchestrator] Write-back complete: {updated}/{len(all_updates)} updated, {deferred} deferred (rate-limited).")
-    elif all_updates and no_writeback:
-        _log(f"\n[orchestrator] {len(all_updates)} ticket(s) scored but write-back skipped (--no-writeback).")
+    elif all_updates and not write_back:
+        reason = "--no-writeback" if no_writeback else "TS_WRITEBACK=0"
+        _log(f"\n[orchestrator] {len(all_updates)} ticket(s) scored but write-back skipped ({reason}).")
         for tnum, data in all_updates.items():
             _log(f"  {tnum}: {list(data['fields'].keys())}")
 
