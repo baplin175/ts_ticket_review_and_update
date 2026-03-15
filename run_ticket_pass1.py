@@ -111,6 +111,7 @@ def process_ticket(
         started_at=started_at,
     )
 
+    raw_response = None
     try:
         # Call Matcha
         raw_response = call_matcha(full_prompt)
@@ -143,7 +144,7 @@ def process_ticket(
         db.update_pass_result(
             row_id,
             status="failed",
-            raw_response_text=raw_response if "raw_response" in dir() else None,
+            raw_response_text=raw_response,
             error_message=str(exc),
             completed_at=completed_at,
         )
@@ -159,6 +160,7 @@ def process_ticket(
         db.update_pass_result(
             row_id,
             status="failed",
+            raw_response_text=raw_response,
             error_message=str(exc),
             completed_at=completed_at,
         )

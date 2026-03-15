@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS ticket_llm_pass_results (
     model_name          TEXT,
     raw_response_text   TEXT,
     parsed_json         JSONB,
-    phenomenon          TEXT,                              -- projected column for pass1
+    phenomenon          TEXT,                              -- Pass 1 output; NULL for other passes
     status              TEXT            NOT NULL DEFAULT 'pending',  -- pending / success / failed
     error_message       TEXT,
     started_at          TIMESTAMPTZ,
