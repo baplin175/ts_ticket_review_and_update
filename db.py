@@ -267,14 +267,14 @@ def upsert_action(action: Dict[str, Any], *, now: Optional[datetime] = None) -> 
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO ticket_actions (
-                    action_id, ticket_id, created_at, action_type,
+                    action_id, ticket_id, ticket_number, created_at, action_type,
                     creator_id, creator_name, party, is_visible,
                     description, cleaned_description,
                     action_class, is_empty, is_customer_visible,
                     source_payload,
                     first_ingested_at, last_ingested_at, last_seen_at
                 ) VALUES (
-                    %(action_id)s, %(ticket_id)s, %(created_at)s, %(action_type)s,
+                    %(action_id)s, %(ticket_id)s, %(ticket_number)s, %(created_at)s, %(action_type)s,
                     %(creator_id)s, %(creator_name)s, %(party)s, %(is_visible)s,
                     %(description)s, %(cleaned_description)s,
                     %(action_class)s, %(is_empty)s, %(is_customer_visible)s,
@@ -283,6 +283,7 @@ def upsert_action(action: Dict[str, Any], *, now: Optional[datetime] = None) -> 
                 )
                 ON CONFLICT (action_id) DO UPDATE SET
                     ticket_id           = EXCLUDED.ticket_id,
+                    ticket_number       = COALESCE(EXCLUDED.ticket_number, ticket_actions.ticket_number),
                     created_at          = COALESCE(EXCLUDED.created_at, ticket_actions.created_at),
                     action_type         = EXCLUDED.action_type,
                     creator_id          = EXCLUDED.creator_id,
@@ -300,6 +301,7 @@ def upsert_action(action: Dict[str, Any], *, now: Optional[datetime] = None) -> 
             """, {
                 "action_id": action["action_id"],
                 "ticket_id": action["ticket_id"],
+                "ticket_number": action.get("ticket_number"),
                 "created_at": action.get("created_at"),
                 "action_type": action.get("action_type"),
                 "creator_id": action.get("creator_id"),
@@ -399,14 +401,14 @@ def upsert_ticket_with_actions(
             for action in actions:
                 cur.execute("""
                     INSERT INTO ticket_actions (
-                        action_id, ticket_id, created_at, action_type,
+                        action_id, ticket_id, ticket_number, created_at, action_type,
                         creator_id, creator_name, party, is_visible,
                         description, cleaned_description,
                         action_class, is_empty, is_customer_visible,
                         source_payload,
                         first_ingested_at, last_ingested_at, last_seen_at
                     ) VALUES (
-                        %(action_id)s, %(ticket_id)s, %(created_at)s, %(action_type)s,
+                        %(action_id)s, %(ticket_id)s, %(ticket_number)s, %(created_at)s, %(action_type)s,
                         %(creator_id)s, %(creator_name)s, %(party)s, %(is_visible)s,
                         %(description)s, %(cleaned_description)s,
                         %(action_class)s, %(is_empty)s, %(is_customer_visible)s,
@@ -415,6 +417,7 @@ def upsert_ticket_with_actions(
                     )
                     ON CONFLICT (action_id) DO UPDATE SET
                         ticket_id           = EXCLUDED.ticket_id,
+                        ticket_number       = COALESCE(EXCLUDED.ticket_number, ticket_actions.ticket_number),
                         created_at          = COALESCE(EXCLUDED.created_at, ticket_actions.created_at),
                         action_type         = EXCLUDED.action_type,
                         creator_id          = EXCLUDED.creator_id,
@@ -432,6 +435,7 @@ def upsert_ticket_with_actions(
                 """, {
                     "action_id": action["action_id"],
                     "ticket_id": action["ticket_id"],
+                    "ticket_number": action.get("ticket_number"),
                     "created_at": action.get("created_at"),
                     "action_type": action.get("action_type"),
                     "creator_id": action.get("creator_id"),
@@ -638,6 +642,7 @@ def get_current_hashes(ticket_id: int) -> Dict[str, Optional[str]]:
 def insert_sentiment(
     ticket_id: int,
     *,
+    ticket_number: Optional[str] = None,
     thread_hash: Optional[str] = None,
     model_name: Optional[str] = None,
     prompt_name: Optional[str] = None,
@@ -654,12 +659,12 @@ def insert_sentiment(
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO ticket_sentiment (
-                    ticket_id, thread_hash, model_name, prompt_name,
+                    ticket_id, ticket_number, thread_hash, model_name, prompt_name,
                     prompt_version, frustrated, activity_id, created_at,
                     source_file, raw_response
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """, (
-                ticket_id, thread_hash, model_name, prompt_name,
+                ticket_id, ticket_number, thread_hash, model_name, prompt_name,
                 prompt_version, frustrated, activity_id, created_at,
                 source_file,
                 psycopg2.extras.Json(raw_response) if raw_response is not None else None,
@@ -675,6 +680,7 @@ def insert_sentiment(
 def insert_priority(
     ticket_id: int,
     *,
+    ticket_number: Optional[str] = None,
     thread_hash: Optional[str] = None,
     model_name: Optional[str] = None,
     prompt_name: Optional[str] = None,
@@ -689,12 +695,12 @@ def insert_priority(
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO ticket_priority_scores (
-                    ticket_id, thread_hash, model_name, prompt_name,
+                    ticket_id, ticket_number, thread_hash, model_name, prompt_name,
                     prompt_version, priority, priority_explanation,
                     raw_response
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
             """, (
-                ticket_id, thread_hash, model_name, prompt_name,
+                ticket_id, ticket_number, thread_hash, model_name, prompt_name,
                 prompt_version, priority, priority_explanation,
                 psycopg2.extras.Json(raw_response) if raw_response is not None else None,
             ))
@@ -709,6 +715,7 @@ def insert_priority(
 def insert_complexity(
     ticket_id: int,
     *,
+    ticket_number: Optional[str] = None,
     technical_core_hash: Optional[str] = None,
     model_name: Optional[str] = None,
     prompt_name: Optional[str] = None,
@@ -731,17 +738,17 @@ def insert_complexity(
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO ticket_complexity_scores (
-                    ticket_id, technical_core_hash, model_name, prompt_name,
+                    ticket_id, ticket_number, technical_core_hash, model_name, prompt_name,
                     prompt_version, intrinsic_complexity, coordination_load,
                     elapsed_drag, overall_complexity, confidence,
                     primary_complexity_drivers, complexity_summary,
                     evidence, noise_factors, duration_vs_complexity_note,
                     raw_response
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 );
             """, (
-                ticket_id, technical_core_hash, model_name, prompt_name,
+                ticket_id, ticket_number, technical_core_hash, model_name, prompt_name,
                 prompt_version, intrinsic_complexity, coordination_load,
                 elapsed_drag, overall_complexity, confidence,
                 psycopg2.extras.Json(primary_complexity_drivers)
@@ -821,6 +828,18 @@ def ticket_ids_for_numbers(ticket_numbers: list[str]) -> Dict[str, int]:
         tuple(ticket_numbers),
     )
     return {str(r[0]): r[1] for r in rows}
+
+
+def ticket_numbers_for_ids(ticket_ids: list[int]) -> Dict[int, str]:
+    """Return a mapping from ticket_id → ticket_number for the given IDs."""
+    if not ticket_ids:
+        return {}
+    placeholders = ",".join(["%s"] * len(ticket_ids))
+    rows = fetch_all(
+        f"SELECT ticket_id, ticket_number FROM tickets WHERE ticket_id IN ({placeholders});",
+        tuple(ticket_ids),
+    )
+    return {r[0]: (str(r[1]) if r[1] else None) for r in rows}
 
 
 def fetch_ticket_numbers_by_status(status: str) -> list[str]:

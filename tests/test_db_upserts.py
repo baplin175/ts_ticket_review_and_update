@@ -118,6 +118,7 @@ def test_upsert_action_sql_uses_on_conflict(patch_pool):
     action = {
         "action_id": 99999,
         "ticket_id": 12345,
+        "ticket_number": "29696",
         "created_at": now,
         "action_type": "Comment",
         "creator_id": "1",

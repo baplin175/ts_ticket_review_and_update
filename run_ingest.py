@@ -325,6 +325,7 @@ def _sync(
                         continue
 
                     action_row = _extract_action_row(action_raw, tid, cleaned)
+                    action_row["ticket_number"] = tnum
                     if not dry_run:
                         action_rows.append(action_row)
                     elif verbose:

@@ -328,6 +328,7 @@ def run_import(
                 action_dict = {
                     "action_id": action_id,
                     "ticket_id": ticket_id,
+                    "ticket_number": ticket_number,
                     "created_at": action_created,
                     "action_type": action_type or None,
                     "creator_id": creator_id,

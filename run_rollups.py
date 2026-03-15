@@ -96,6 +96,7 @@ def rebuild_rollups(ticket_ids: list[int]) -> int:
     """
     now = datetime.now(timezone.utc)
     count = 0
+    tnum_map = db.ticket_numbers_for_ids(ticket_ids)
 
     for tid in ticket_ids:
         # Fetch all actions (sorted chronologically)
@@ -155,12 +156,13 @@ def rebuild_rollups(ticket_ids: list[int]) -> int:
         # Upsert into ticket_thread_rollups
         db.execute("""
             INSERT INTO ticket_thread_rollups (
-                ticket_id, full_thread_text, customer_visible_text,
+                ticket_id, ticket_number, full_thread_text, customer_visible_text,
                 latest_customer_text, latest_inhance_text,
                 technical_core_text, summary_for_embedding,
                 thread_hash, technical_core_hash, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (ticket_id) DO UPDATE SET
+                ticket_number         = EXCLUDED.ticket_number,
                 full_thread_text      = EXCLUDED.full_thread_text,
                 customer_visible_text = EXCLUDED.customer_visible_text,
                 latest_customer_text  = EXCLUDED.latest_customer_text,
@@ -171,7 +173,7 @@ def rebuild_rollups(ticket_ids: list[int]) -> int:
                 technical_core_hash   = EXCLUDED.technical_core_hash,
                 updated_at            = EXCLUDED.updated_at;
         """, (
-            tid, full_thread, customer_visible,
+            tid, tnum_map.get(tid), full_thread, customer_visible,
             latest_customer_text, latest_inhance_text,
             technical_core, summary_for_embedding,
             thread_hash, technical_core_hash, now,
@@ -198,6 +200,7 @@ def rebuild_metrics(ticket_ids: list[int]) -> int:
     """
     now = datetime.now(timezone.utc)
     count = 0
+    tnum_map = db.ticket_numbers_for_ids(ticket_ids)
 
     for tid in ticket_ids:
         rows = db.fetch_all(
@@ -269,14 +272,15 @@ def rebuild_metrics(ticket_ids: list[int]) -> int:
         # Upsert into ticket_metrics
         db.execute("""
             INSERT INTO ticket_metrics (
-                ticket_id, action_count, nonempty_action_count,
+                ticket_id, ticket_number, action_count, nonempty_action_count,
                 customer_message_count, inhance_message_count,
                 distinct_participant_count, first_response_at,
                 last_human_activity_at, empty_action_ratio,
                 handoff_count, date_created, hours_to_first_response,
                 days_open, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (ticket_id) DO UPDATE SET
+                ticket_number              = EXCLUDED.ticket_number,
                 action_count               = EXCLUDED.action_count,
                 nonempty_action_count      = EXCLUDED.nonempty_action_count,
                 customer_message_count     = EXCLUDED.customer_message_count,
@@ -291,7 +295,7 @@ def rebuild_metrics(ticket_ids: list[int]) -> int:
                 days_open                  = EXCLUDED.days_open,
                 updated_at                 = EXCLUDED.updated_at;
         """, (
-            tid, action_count, nonempty_count,
+            tid, tnum_map.get(tid), action_count, nonempty_count,
             cust_count, inh_count,
             len(participants), first_response_at,
             last_human_at, empty_ratio,
@@ -322,6 +326,7 @@ def rebuild_ticket_participants(ticket_ids: list[int]) -> int:
 
     now = datetime.now(timezone.utc)
     count = 0
+    tnum_map = db.ticket_numbers_for_ids(ticket_ids)
 
     for tid in ticket_ids:
         rows = db.fetch_all(
@@ -370,7 +375,7 @@ def rebuild_ticket_participants(ticket_ids: list[int]) -> int:
         insert_rows = []
         for pid, p in participants.items():
             insert_rows.append((
-                tid, pid, p["participant_name"], p["participant_type"],
+                tid, tnum_map.get(tid), pid, p["participant_name"], p["participant_type"],
                 p["first_seen_at"], p["last_seen_at"],
                 p["action_count"], p["first_response_flag"],
                 now, now,
@@ -378,7 +383,7 @@ def rebuild_ticket_participants(ticket_ids: list[int]) -> int:
 
         db.bulk_insert(
             "ticket_participants",
-            ["ticket_id", "participant_id", "participant_name", "participant_type",
+            ["ticket_id", "ticket_number", "participant_id", "participant_name", "participant_type",
              "first_seen_at", "last_seen_at", "action_count", "first_response_flag",
              "created_at", "updated_at"],
             insert_rows,
@@ -403,6 +408,7 @@ def rebuild_ticket_handoffs(ticket_ids: list[int]) -> int:
 
     now = datetime.now(timezone.utc)
     count = 0
+    tnum_map = db.ticket_numbers_for_ids(ticket_ids)
 
     for tid in ticket_ids:
         rows = db.fetch_all(
@@ -426,14 +432,14 @@ def rebuild_ticket_handoffs(ticket_ids: list[int]) -> int:
                     else:
                         reason = f"participant_switch_within_{party}"
                     insert_rows.append((
-                        tid, prev_party, party, prev_pid, pid,
+                        tid, tnum_map.get(tid), prev_party, party, prev_pid, pid,
                         cat, reason, aid, 0.8, now,
                     ))
             prev = (party, pid, cname)
 
         db.bulk_insert(
             "ticket_handoffs",
-            ["ticket_id", "from_party", "to_party", "from_participant_id",
+            ["ticket_id", "ticket_number", "from_party", "to_party", "from_participant_id",
              "to_participant_id", "handoff_at", "handoff_reason",
              "inferred_from_action_id", "confidence", "created_at"],
             insert_rows,
@@ -487,6 +493,7 @@ def rebuild_ticket_wait_states(ticket_ids: list[int]) -> int:
 
     now = datetime.now(timezone.utc)
     count = 0
+    tnum_map = db.ticket_numbers_for_ids(ticket_ids)
 
     for tid in ticket_ids:
         rows = db.fetch_all(
@@ -515,7 +522,7 @@ def rebuild_ticket_wait_states(ticket_ids: list[int]) -> int:
             if prev_start is not None and cat and prev_state is not None:
                 dur = (cat - prev_start).total_seconds() / 60.0
                 segments.append((
-                    tid, prev_state, prev_start, cat, round(dur, 2),
+                    tid, tnum_map.get(tid), prev_state, prev_start, cat, round(dur, 2),
                     json.dumps(prev_aids), 0.75, "action_class_heuristic",
                     now, now,
                 ))
@@ -530,14 +537,14 @@ def rebuild_ticket_wait_states(ticket_ids: list[int]) -> int:
             if end and prev_start:
                 dur = round((end - prev_start).total_seconds() / 60.0, 2)
             segments.append((
-                tid, prev_state, prev_start, end, dur,
+                tid, tnum_map.get(tid), prev_state, prev_start, end, dur,
                 json.dumps(prev_aids), 0.75, "action_class_heuristic",
                 now, now,
             ))
 
         db.bulk_insert(
             "ticket_wait_states",
-            ["ticket_id", "state_name", "start_at", "end_at", "duration_minutes",
+            ["ticket_id", "ticket_number", "state_name", "start_at", "end_at", "duration_minutes",
              "inferred_from_action_ids", "confidence", "inference_method",
              "created_at", "updated_at"],
             segments,

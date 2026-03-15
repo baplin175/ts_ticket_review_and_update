@@ -152,7 +152,7 @@ def _should_skip(ticket_id: int, force: bool) -> bool:
     return last_hash == current_hash
 
 
-def _persist_to_db(ticket_id: int, technical_core_hash: str | None,
+def _persist_to_db(ticket_id: int, ticket_number: str | None, technical_core_hash: str | None,
                    result: dict, raw_reply: str) -> None:
     """Insert complexity result into DB."""
     import db
@@ -173,6 +173,7 @@ def _persist_to_db(ticket_id: int, technical_core_hash: str | None,
 
     db.insert_complexity(
         ticket_id,
+        ticket_number=ticket_number,
         technical_core_hash=technical_core_hash,
         model_name=MODEL_NAME,
         prompt_name=PROMPT_NAME,
@@ -289,7 +290,7 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
         # 5. Persist to DB
         tid_int = tid_map.get(tnum)
         if tid_int and db_enabled:
-            _persist_to_db(tid_int, hash_map.get(tnum), result, raw_reply)
+            _persist_to_db(tid_int, tnum, hash_map.get(tnum), result, raw_reply)
             _log(f"  [complexity] Persisted to DB for ticket {tnum}.")
 
     _log(f"[complexity] Scored {len(all_results)}/{len(tickets)} ticket(s). Skipped {len(skipped)}.")

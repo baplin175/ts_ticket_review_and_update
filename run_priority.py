@@ -163,7 +163,7 @@ def _should_skip(ticket_id: int, force: bool) -> bool:
     return last_hash == current_hash
 
 
-def _persist_to_db(ticket_id: int, thread_hash: str | None,
+def _persist_to_db(ticket_id: int, ticket_number: str | None, thread_hash: str | None,
                    result: dict, raw_reply: str) -> None:
     """Insert priority result into DB."""
     import db
@@ -176,6 +176,7 @@ def _persist_to_db(ticket_id: int, thread_hash: str | None,
         priority_val = None
     db.insert_priority(
         ticket_id,
+        ticket_number=ticket_number,
         thread_hash=thread_hash,
         model_name=MODEL_NAME,
         prompt_name=PROMPT_NAME,
@@ -311,7 +312,7 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
         # Persist to DB
         tid_int = tid_map.get(tnum)
         if tid_int and db_enabled:
-            _persist_to_db(tid_int, hash_map.get(tnum), result, raw_reply)
+            _persist_to_db(tid_int, tnum, hash_map.get(tnum), result, raw_reply)
             _log(f"  [priority] Persisted to DB for ticket {tnum}.")
 
     # 6. Write back to TeamSupport (only when running standalone)

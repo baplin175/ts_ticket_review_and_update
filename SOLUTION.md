@@ -981,3 +981,50 @@ All per-ticket rebuilds use full-refresh in this first pass. This is safe becaus
 ### Migration
 
 All new tables and views are in `migrations/003_analytics.sql`. Idempotent (`IF NOT EXISTS` / `CREATE OR REPLACE VIEW`). Applied automatically by `db.migrate()` which runs at the start of every command.
+
+---
+
+## Phase 8: `ticket_number` Denormalization
+
+### Overview
+
+Denormalized `ticket_number` (from `tickets` table) into every table and view that references `ticket_id`. This makes `ticket_number` available directly in query results without requiring a JOIN to `tickets` — useful for reporting, debugging, and API responses.
+
+### Migration (`004_add_ticket_number.sql`)
+
+- **13 ALTER TABLE** statements adding `ticket_number TEXT` column (IF NOT EXISTS for idempotency)
+- **13 backfill UPDATEs** populating `ticket_number` from the `tickets` table for existing rows
+- **1 view recreation** (`vw_ticket_wait_profile`) — DROP + CREATE to add `ticket_number` to GROUP BY
+
+Tables modified: `ticket_actions`, `ticket_thread_rollups`, `ticket_metrics`, `ticket_sentiment`, `ticket_priority_scores`, `ticket_complexity_scores`, `ticket_wait_states`, `ticket_participants`, `ticket_handoffs`, `ticket_issue_summaries`, `ticket_embeddings`, `ticket_clusters`, `ticket_interventions`.
+
+### Write Path Changes
+
+All functions that INSERT or UPDATE rows into the above tables now include `ticket_number`:
+
+| File | Function | Change |
+|---|---|---|
+| `db.py` | `ticket_numbers_for_ids()` | **New** — bulk reverse-mapping `{ticket_id: ticket_number}` |
+| `db.py` | `upsert_action()` | Added `ticket_number` to INSERT + ON CONFLICT |
+| `db.py` | `upsert_ticket_with_actions()` | Added `ticket_number` to action INSERT |
+| `db.py` | `insert_sentiment()` | Added `ticket_number` keyword parameter |
+| `db.py` | `insert_priority()` | Added `ticket_number` keyword parameter |
+| `db.py` | `insert_complexity()` | Added `ticket_number` keyword parameter |
+| `run_rollups.py` | `rebuild_rollups()` | Fetches `tnum_map`, includes in upsert |
+| `run_rollups.py` | `rebuild_metrics()` | Fetches `tnum_map`, includes in upsert |
+| `run_rollups.py` | `rebuild_ticket_participants()` | Fetches `tnum_map`, includes in bulk_insert |
+| `run_rollups.py` | `rebuild_ticket_handoffs()` | Fetches `tnum_map`, includes in bulk_insert |
+| `run_rollups.py` | `rebuild_ticket_wait_states()` | Fetches `tnum_map`, includes in bulk_insert |
+| `run_sentiment.py` | `_persist_to_db()` | Accepts + passes `ticket_number` |
+| `run_priority.py` | `_persist_to_db()` | Accepts + passes `ticket_number` |
+| `run_complexity.py` | `_persist_to_db()` | Accepts + passes `ticket_number` |
+| `run_ingest.py` | `_sync()` loop | Sets `action_row["ticket_number"] = tnum` |
+| `run_csv_import.py` | `run_import()` | Adds `ticket_number` to action dict |
+
+### Views
+
+- **4 `vw_latest_*` views** — auto-inherit via `SELECT *` (no change needed)
+- **`vw_ticket_analytics_core`** — already had `t.ticket_number` (no change)
+- **`vw_ticket_complexity_breakdown`** — already had `t.ticket_number` (no change)
+- **`vw_ticket_wait_profile`** — rebuilt with `ticket_number` in SELECT + GROUP BY
+- **Aggregate views** (`vw_customer_support_risk`, `vw_product_pain_patterns`, `vw_intervention_opportunities`) — excluded (group by customer/product, not per-ticket)

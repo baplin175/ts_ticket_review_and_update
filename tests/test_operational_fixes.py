@@ -261,8 +261,8 @@ def test_upsert_ticket_with_actions_single_commit(patch_pool):
     now = datetime(2026, 3, 13, 12, 0, 0, tzinfo=timezone.utc)
     ticket = {"ticket_id": 12345, "ticket_number": "29696"}
     actions = [
-        {"action_id": 1, "ticket_id": 12345, "is_empty": False},
-        {"action_id": 2, "ticket_id": 12345, "is_empty": False},
+        {"action_id": 1, "ticket_id": 12345, "ticket_number": "29696", "is_empty": False},
+        {"action_id": 2, "ticket_id": 12345, "ticket_number": "29696", "is_empty": False},
     ]
 
     db.upsert_ticket_with_actions(ticket, actions, now=now)
@@ -291,7 +291,7 @@ def test_upsert_ticket_with_actions_rollback_on_error(patch_pool):
 
     now = datetime(2026, 3, 13, 12, 0, 0, tzinfo=timezone.utc)
     ticket = {"ticket_id": 12345, "ticket_number": "29696"}
-    actions = [{"action_id": 1, "ticket_id": 12345, "is_empty": False}]
+    actions = [{"action_id": 1, "ticket_id": 12345, "ticket_number": "29696", "is_empty": False}]
 
     with pytest.raises(Exception, match="DB error on action"):
         db.upsert_ticket_with_actions(ticket, actions, now=now)

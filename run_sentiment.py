@@ -129,7 +129,7 @@ def _should_skip(ticket_id: int, force: bool) -> bool:
     return False
 
 
-def _persist_to_db(ticket_id: int, thread_hash: str | None,
+def _persist_to_db(ticket_id: int, ticket_number: str | None, thread_hash: str | None,
                    response_obj: dict, source_file: str | None) -> None:
     """Insert sentiment result into DB."""
     import db
@@ -137,6 +137,7 @@ def _persist_to_db(ticket_id: int, thread_hash: str | None,
         return
     db.insert_sentiment(
         ticket_id,
+        ticket_number=ticket_number,
         thread_hash=thread_hash,
         model_name=MODEL_NAME,
         prompt_name=PROMPT_NAME,
@@ -247,7 +248,7 @@ Output format (strict JSON):
 
         # 5. Persist to DB
         if ticket_id and db_enabled:
-            _persist_to_db(ticket_id, thread_hash, response_obj,
+            _persist_to_db(ticket_id, tkt_num, thread_hash, response_obj,
                            os.path.basename(activities_file) if activities_file else None)
             _log(f"[sentiment] Persisted to DB for ticket {tkt_num}.")
 
