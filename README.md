@@ -26,4 +26,42 @@ pip install pytest
 python -m pytest tests/ -v
 ```
 
+## Pass 1 — Phenomenon Extraction
+
+Pass 1 reads `full_thread_text` from `ticket_thread_rollups`, sends it to the Matcha LLM endpoint, and extracts a structured `phenomenon` statement describing the observable system behavior. Results are stored in `ticket_llm_pass_results`.
+
+**Requires** `DATABASE_URL` to be set.
+
+```bash
+# Apply migrations (creates ticket_llm_pass_results table + view)
+python db.py migrate
+
+# Run all pending tickets (with optional limit)
+python run_ticket_pass1.py --limit 100
+
+# Run for specific ticket(s)
+python run_ticket_pass1.py --ticket-id 99784
+python run_ticket_pass1.py --ticket-id 99784,98154,100289
+
+# Run only for tickets created after a date
+python run_ticket_pass1.py --since 2026-03-01
+
+# Rerun only previously failed tickets
+python run_ticket_pass1.py --failed-only
+
+# Force rerun (overwrite existing success results)
+python run_ticket_pass1.py --force
+
+# Combine flags
+python run_ticket_pass1.py --limit 50 --force
+```
+
+Results can be queried via the `vw_ticket_pass1_results` view:
+
+```sql
+SELECT ticket_id, phenomenon, pass1_status, latest_error
+FROM vw_ticket_pass1_results
+WHERE pass1_status = 'success';
+```
+
 See [SOLUTION.md](SOLUTION.md) for full architecture docs, configuration, and operational notes.
