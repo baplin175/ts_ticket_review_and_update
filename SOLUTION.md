@@ -805,3 +805,179 @@ Red-team review of the pipeline identified and fixed the following production fa
 ### Tests
 
 All fixes are covered by `tests/test_operational_fixes.py` (11 tests).
+
+---
+
+## Phase 7 — Analytics Extension
+
+### Overview
+
+Phase 7 adds 13 new tables, 15 views, and 6 rebuild functions that turn the raw ticket/action data into a query-ready analytics layer. The extension integrates into the existing migration, rollup, and ingestion patterns — no parallel pipeline.
+
+### Table Categories
+
+The full schema (`tickets_ai`) is now organized into five categories:
+
+| Category | Tables | Purpose |
+|---|---|---|
+| **Source truth** | `tickets`, `ticket_actions`, `sync_state`, `ingest_runs` | Raw data from TeamSupport API / CSV import |
+| **Derived (per-ticket)** | `ticket_thread_rollups`, `ticket_metrics`, `ticket_participants`, `ticket_handoffs`, `ticket_wait_states` | Deterministic rebuilds from action stream |
+| **Enrichment (append-only)** | `ticket_sentiment`, `ticket_priority_scores`, `ticket_complexity_scores`, `ticket_issue_summaries`, `ticket_embeddings`, `ticket_interventions`, `enrichment_runs` | LLM-scored analytics, append-only with hash-based skip |
+| **Clustering** | `cluster_runs`, `ticket_clusters`, `cluster_catalog` | Grouping tickets by similarity; populated by future clustering pipeline |
+| **Snapshot / Health** | `ticket_snapshots_daily`, `customer_ticket_health`, `product_ticket_health` | Point-in-time backlog snapshots and customer/product health rollups |
+
+### New Derived Tables
+
+#### ticket_participants
+Populated from `ticket_actions`. Tracks each unique participant per ticket:
+- `participant_id`: `creator_id` when available, else synthetic `{party}:{creator_name}`
+- `participant_type`: `inhance` or `customer` (derived from `party`)
+- `first_response_flag`: TRUE for the inh participant who sent the first response after the first customer action
+- Full-refresh per ticket (DELETE + INSERT)
+
+#### ticket_handoffs
+Inferred from transitions in the action stream:
+- A handoff occurs when a different party or participant sends the next action
+- `handoff_reason`: `party_switch:inh->cust` or `participant_switch_within_inh`
+- `confidence`: 0.8 (heuristic-based)
+- Full-refresh per ticket
+
+#### ticket_wait_states
+Deterministic wait segments inferred from action stream and lifecycle:
+- Each action opens a new segment; the previous segment is closed at the new action's timestamp
+- State mapping: `action_class` → state name, with party-based fallback
+  - `customer_problem_statement` → `waiting_on_support`
+  - `technical_work`, `status_update`, `delivery_confirmation` → `active_work`
+  - `waiting_on_customer` → `waiting_on_customer`
+  - `scheduling` → `scheduled`
+  - Fallback: cust action → `waiting_on_support`, inh action → `waiting_on_customer`
+- Final segment is closed with `tickets.closed_at` if ticket is closed; otherwise left open (`end_at IS NULL`)
+- `confidence`: 0.75, `inference_method`: `action_class_heuristic`
+- Full-refresh per ticket
+
+### Snapshot / Health Tables
+
+#### ticket_snapshots_daily
+Purpose: **Support historical backlog analysis** such as "backlog per week over the year."
+
+Each row is a point-in-time snapshot of a ticket's state on a given date. On each normal run, today's rows are created/upserted for all touched tickets (or all tickets when run manually). Joins latest priority score, complexity score, and wait state.
+
+- `open_flag`: TRUE if status is not Closed/Resolved
+- `high_priority_flag`: TRUE if priority ≤ 3
+- `high_complexity_flag`: TRUE if overall_complexity ≥ 4
+- `waiting_state`: latest inferred state from `ticket_wait_states`
+
+#### customer_ticket_health
+Per-customer health rollup for a given date. Full-refresh. Includes:
+- Open/high-priority/high-complexity ticket counts
+- Average complexity and elapsed drag
+- Frustration count (from sentiment analysis)
+- Top cluster IDs and products (JSONB arrays)
+- `ticket_load_pressure_score`: `open + 2×high_priority + 1.5×high_complexity + 3×frustration` (simple first-pass formula)
+- `reopen_count_90d`: placeholder (0) — not currently inferable from available data
+
+#### product_ticket_health
+Per-product health rollup for a given date. Full-refresh. Includes:
+- Ticket volume, average complexity/coordination_load/elapsed_drag
+- `dev_touched_rate`: fraction of tickets with at least one `technical_work` action
+- `customer_wait_rate`: fraction of tickets whose latest wait state is `waiting_on_customer`
+- Top clusters and mechanisms (JSONB arrays)
+
+### Enrichment / Clustering Tables (Schema-Only)
+
+These tables are created by the migration but are **not yet populated** by the normal run. They are designed for future enrichment stages:
+
+- `ticket_issue_summaries`: LLM-generated issue/cause/mechanism/resolution summaries
+- `ticket_embeddings`: Vector embeddings for similarity search
+- `cluster_runs`, `ticket_clusters`, `cluster_catalog`: Ticket clustering results
+- `ticket_interventions`: Recommended interventions per ticket
+- `enrichment_runs`: Audit log for enrichment batches (UUID PK generated in Python)
+
+### Views
+
+15 views provide query-ready analytics:
+
+| View | Source | Purpose |
+|---|---|---|
+| `vw_latest_ticket_sentiment` | `ticket_sentiment` | Latest sentiment per ticket |
+| `vw_latest_ticket_priority` | `ticket_priority_scores` | Latest priority per ticket |
+| `vw_latest_ticket_complexity` | `ticket_complexity_scores` | Latest complexity per ticket |
+| `vw_latest_ticket_issue_summary` | `ticket_issue_summaries` | Latest issue summary per ticket |
+| `vw_ticket_analytics_core` | tickets + metrics + rollups + 4 latest views | Master analytics join |
+| `vw_ticket_complexity_breakdown` | tickets + latest complexity | Detailed complexity dimensions |
+| `vw_ticket_wait_profile` | `ticket_wait_states` | Per-ticket wait time aggregation |
+| `vw_customer_support_risk` | tickets + priority/complexity/sentiment + clusters | 90-day customer risk rollup |
+| `vw_product_pain_patterns` | tickets + clusters + issue summaries | Product-level pain grouping |
+| `vw_intervention_opportunities` | interventions + tickets + clusters | Intervention impact grouping |
+| `vw_backlog_daily` | `ticket_snapshots_daily` | Daily open/HP/HC backlog counts |
+| `vw_backlog_weekly` | `ticket_snapshots_daily` | Weekly backlog averages |
+| `vw_backlog_weekly_eow` | `ticket_snapshots_daily` | End-of-week backlog from latest snapshot per week |
+| `vw_backlog_aging_current` | `ticket_snapshots_daily` | Age buckets (0-6, 7-13, 14-29, 30-59, 60-89, 90+) |
+| `vw_backlog_weekly_from_dates` | `tickets` | Fallback weekly backlog from ticket created/closed dates |
+
+#### How "Backlog Per Week Over the Year" Is Answered
+
+Three approaches, depending on data availability:
+
+1. **`vw_backlog_weekly`** — Averages daily snapshot counts within each week. Requires daily snapshots to have been running.
+2. **`vw_backlog_weekly_eow`** — Uses only the latest snapshot per ticket per week. Best for end-of-week point-in-time view.
+3. **`vw_backlog_weekly_from_dates`** — Fallback that uses only `tickets.date_created` and `tickets.closed_at` with a generated weekly series. Works even with zero snapshots but is less accurate (doesn't capture status changes mid-life).
+
+### Normal Run Flow
+
+After `run_ingest.py sync` completes successfully, the post-sync hook automatically runs:
+
+```
+1. sync changed tickets/actions         (run_ingest.py _sync)
+2. classify actions for touched tickets  (run_rollups.classify_actions)
+3. rebuild thread rollups               (run_rollups.rebuild_rollups)
+4. rebuild ticket_metrics               (run_rollups.rebuild_metrics)
+5. rebuild ticket_participants          (run_rollups.rebuild_ticket_participants)
+6. rebuild ticket_handoffs              (run_rollups.rebuild_ticket_handoffs)
+7. rebuild ticket_wait_states           (run_rollups.rebuild_ticket_wait_states)
+8. write today's ticket_snapshots_daily (run_rollups.snapshot_tickets_daily)
+9. refresh customer_ticket_health       (run_rollups.rebuild_customer_ticket_health)
+10. refresh product_ticket_health       (run_rollups.rebuild_product_ticket_health)
+```
+
+Steps 2-7 are scoped to the touched ticket_ids. Steps 9-10 are full-refresh for the current date (they aggregate across all customers/products).
+
+### Manual CLI Commands
+
+```bash
+# Run all analytics for a single ticket
+python run_rollups.py analytics --ticket 109683
+
+# Run everything (classify + rollups + metrics + analytics)
+python run_rollups.py full --ticket 109683
+
+# Run everything for all tickets (no --ticket flag)
+python run_rollups.py full
+
+# Individual stages
+python run_rollups.py participants --ticket 109683
+python run_rollups.py handoffs --ticket 109683
+python run_rollups.py wait_states --ticket 109683
+python run_rollups.py snapshot --ticket 109683
+python run_rollups.py health
+```
+
+### Incremental vs Full-Refresh
+
+| Function | Scope | Strategy |
+|---|---|---|
+| `classify_actions` | Per ticket_id list | Full-refresh per ticket |
+| `rebuild_rollups` | Per ticket_id list | Full-refresh per ticket |
+| `rebuild_metrics` | Per ticket_id list | Full-refresh per ticket |
+| `rebuild_ticket_participants` | Per ticket_id list | Full-refresh per ticket (DELETE + INSERT) |
+| `rebuild_ticket_handoffs` | Per ticket_id list | Full-refresh per ticket (DELETE + INSERT) |
+| `rebuild_ticket_wait_states` | Per ticket_id list | Full-refresh per ticket (DELETE + INSERT) |
+| `snapshot_tickets_daily` | Per ticket_id list or all | Upsert (ON CONFLICT DO UPDATE) |
+| `rebuild_customer_ticket_health` | All customers | Full-refresh for given date |
+| `rebuild_product_ticket_health` | All products | Full-refresh for given date |
+
+All per-ticket rebuilds use full-refresh in this first pass. This is safe because hash-based skipping in the enrichment layer prevents redundant LLM calls, and the derived tables are deterministic from the action stream.
+
+### Migration
+
+All new tables and views are in `migrations/003_analytics.sql`. Idempotent (`IF NOT EXISTS` / `CREATE OR REPLACE VIEW`). Applied automatically by `db.migrate()` which runs at the start of every command.
