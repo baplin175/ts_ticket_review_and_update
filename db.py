@@ -1022,6 +1022,234 @@ def upsert_product_health(row: Dict[str, Any]) -> None:
         put_conn(conn)
 
 
+# ── LLM multi-pass pipeline helpers ──────────────────────────────────
+
+def insert_pass_result(
+    ticket_id: int,
+    *,
+    pass_name: str,
+    prompt_version: str,
+    model_name: Optional[str] = None,
+    input_text: Optional[str] = None,
+    status: str = "pending",
+    raw_response_text: Optional[str] = None,
+    parsed_json: Any = None,
+    phenomenon: Optional[str] = None,
+    error_message: Optional[str] = None,
+    started_at: Optional[datetime] = None,
+    completed_at: Optional[datetime] = None,
+) -> int:
+    """Insert a new LLM pass result row.  Returns the new row id.
+
+    For idempotent success: uses ON CONFLICT on the partial unique index
+    (ticket_id, pass_name, prompt_version WHERE status='success') to
+    update the existing success row rather than creating a duplicate.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO ticket_llm_pass_results (
+                    ticket_id, pass_name, prompt_version, model_name,
+                    input_text, status, raw_response_text, parsed_json,
+                    phenomenon, error_message, started_at, completed_at,
+                    updated_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()
+                )
+                RETURNING id;
+            """, (
+                ticket_id, pass_name, prompt_version, model_name,
+                input_text, status, raw_response_text,
+                psycopg2.extras.Json(parsed_json) if parsed_json is not None else None,
+                phenomenon, error_message, started_at, completed_at,
+            ))
+            row_id = cur.fetchone()[0]
+        conn.commit()
+        return row_id
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def update_pass_result(
+    row_id: int,
+    *,
+    status: str,
+    raw_response_text: Optional[str] = None,
+    parsed_json: Any = None,
+    phenomenon: Optional[str] = None,
+    error_message: Optional[str] = None,
+    completed_at: Optional[datetime] = None,
+) -> None:
+    """Update an existing pass result row (e.g. pending → success/failed)."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE ticket_llm_pass_results
+                   SET status            = %s,
+                       raw_response_text  = %s,
+                       parsed_json        = %s,
+                       phenomenon         = %s,
+                       error_message      = %s,
+                       completed_at       = %s,
+                       updated_at         = now()
+                 WHERE id = %s;
+            """, (
+                status, raw_response_text,
+                psycopg2.extras.Json(parsed_json) if parsed_json is not None else None,
+                phenomenon, error_message, completed_at, row_id,
+            ))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def delete_prior_failed_pass(
+    ticket_id: int, pass_name: str, prompt_version: str
+) -> int:
+    """Remove any previous failed/pending rows for the ticket+pass+version.
+
+    This keeps the table clean before inserting a fresh attempt.
+    Returns the number of rows deleted.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                DELETE FROM ticket_llm_pass_results
+                 WHERE ticket_id = %s
+                   AND pass_name = %s
+                   AND prompt_version = %s
+                   AND status IN ('pending', 'failed');
+            """, (ticket_id, pass_name, prompt_version))
+            deleted = cur.rowcount
+        conn.commit()
+        return deleted
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def get_latest_pass_result(
+    ticket_id: int, pass_name: str, prompt_version: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Return the latest pass result for a ticket.
+
+    If *prompt_version* is given, filter by that version.
+    Prefers 'success' rows; falls back to most recent by updated_at.
+    """
+    if prompt_version:
+        row = fetch_one(
+            "SELECT id, status, phenomenon, error_message, completed_at "
+            "FROM ticket_llm_pass_results "
+            "WHERE ticket_id = %s AND pass_name = %s AND prompt_version = %s "
+            "ORDER BY CASE WHEN status = 'success' THEN 0 ELSE 1 END, "
+            "         updated_at DESC LIMIT 1;",
+            (ticket_id, pass_name, prompt_version),
+        )
+    else:
+        row = fetch_one(
+            "SELECT id, status, phenomenon, error_message, completed_at "
+            "FROM ticket_llm_pass_results "
+            "WHERE ticket_id = %s AND pass_name = %s "
+            "ORDER BY CASE WHEN status = 'success' THEN 0 ELSE 1 END, "
+            "         updated_at DESC LIMIT 1;",
+            (ticket_id, pass_name),
+        )
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "status": row[1],
+        "phenomenon": row[2],
+        "error_message": row[3],
+        "completed_at": row[4],
+    }
+
+
+def fetch_pending_pass1_tickets(
+    prompt_version: str,
+    *,
+    limit: int = 0,
+    ticket_ids: Optional[List[int]] = None,
+    failed_only: bool = False,
+    force: bool = False,
+    since: Optional[str] = None,
+) -> List[Tuple]:
+    """Return (ticket_id, full_thread_text) rows eligible for Pass 1.
+
+    Selection logic:
+      - ticket has non-null full_thread_text in rollups
+      - no successful pass1_phenomenon result for current prompt_version
+        (unless *force* is True)
+      - optionally filtered to specific ticket_ids
+      - optionally limited to failed-only reruns
+      - optionally limited to tickets created after *since* date
+
+    Returns list of (ticket_id, full_thread_text) tuples.
+    """
+    conditions = ["r.full_thread_text IS NOT NULL"]
+    params: list = []
+
+    if ticket_ids:
+        placeholders = ",".join(["%s"] * len(ticket_ids))
+        conditions.append(f"t.ticket_id IN ({placeholders})")
+        params.extend(ticket_ids)
+
+    if since:
+        conditions.append("t.date_created >= %s")
+        params.append(since)
+
+    if not force:
+        # Exclude tickets that already have a successful pass1 for this version
+        conditions.append("""
+            NOT EXISTS (
+                SELECT 1 FROM ticket_llm_pass_results lp
+                 WHERE lp.ticket_id = t.ticket_id
+                   AND lp.pass_name = 'pass1_phenomenon'
+                   AND lp.prompt_version = %s
+                   AND lp.status = 'success'
+            )
+        """)
+        params.append(prompt_version)
+
+    if failed_only:
+        # Only pick tickets that have a failed pass1 for this version
+        conditions.append("""
+            EXISTS (
+                SELECT 1 FROM ticket_llm_pass_results lp
+                 WHERE lp.ticket_id = t.ticket_id
+                   AND lp.pass_name = 'pass1_phenomenon'
+                   AND lp.prompt_version = %s
+                   AND lp.status = 'failed'
+            )
+        """)
+        params.append(prompt_version)
+
+    where_clause = " AND ".join(conditions)
+    sql = (
+        f"SELECT t.ticket_id, r.full_thread_text "
+        f"FROM tickets t "
+        f"JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id "
+        f"WHERE {where_clause} "
+        f"ORDER BY t.ticket_id"
+    )
+    if limit > 0:
+        sql += f" LIMIT {limit}"
+    sql += ";"
+
+    return fetch_all(sql, tuple(params))
+
+
 # ── CLI entry point ──────────────────────────────────────────────────
 
 if __name__ == "__main__":

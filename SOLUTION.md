@@ -1081,3 +1081,88 @@ All functions that INSERT or UPDATE rows into the above tables now include `tick
 - **`vw_ticket_complexity_breakdown`** — already had `t.ticket_number` (no change)
 - **`vw_ticket_wait_profile`** — rebuilt with `ticket_number` in SELECT + GROUP BY
 - **Aggregate views** (`vw_customer_support_risk`, `vw_product_pain_patterns`, `vw_intervention_opportunities`) — excluded (group by customer/product, not per-ticket)
+
+---
+
+## Pass 1 — Phenomenon Extraction (LLM Multi-Pass Pipeline)
+
+### Overview
+
+Pass 1 extracts the observable system behavior (phenomenon) from each ticket's `full_thread_text` using the Matcha LLM endpoint. This is the first stage of a planned multi-pass LLM pipeline.
+
+### Architecture
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| Migration | `migrations/005_llm_pass_results.sql` | Creates `ticket_llm_pass_results` table + `vw_ticket_pass1_results` view |
+| Prompt | `prompts/pass1_phenomenon.txt` | Pass 1 prompt template with `{{input_text}}` placeholder |
+| Parser | `pass1_parser.py` | Strict JSON validation for `{"phenomenon": "..."}` responses |
+| Orchestrator | `run_ticket_pass1.py` | CLI entrypoint + batch processing logic |
+| DB helpers | `db.py` | `insert_pass_result`, `update_pass_result`, `delete_prior_failed_pass`, `get_latest_pass_result`, `fetch_pending_pass1_tickets` |
+| Tests | `tests/test_pass1.py` | 35 focused tests (parser, selection, idempotency, persistence, malformed handling) |
+
+### Data Flow
+
+```
+ticket_thread_rollups.full_thread_text
+    → load prompt template (prompts/pass1_phenomenon.txt)
+    → substitute {{input_text}} with full_thread_text
+    → call Matcha endpoint
+    → parse JSON response → extract "phenomenon"
+    → store in ticket_llm_pass_results (raw + parsed + status)
+```
+
+### Table: ticket_llm_pass_results
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | BIGSERIAL PK | Row identifier |
+| ticket_id | BIGINT FK | References tickets(ticket_id) |
+| pass_name | TEXT | Stage name (e.g. `pass1_phenomenon`) |
+| input_text | TEXT | The full_thread_text sent to the model |
+| prompt_version | TEXT | Version identifier for the prompt |
+| model_name | TEXT | Model identifier (e.g. `matcha-27301`) |
+| raw_response_text | TEXT | Raw text response from Matcha |
+| parsed_json | JSONB | Parsed JSON payload |
+| phenomenon | TEXT | Extracted phenomenon (projected column) |
+| status | TEXT | `pending` / `success` / `failed` |
+| error_message | TEXT | Error details on failure |
+| started_at | TIMESTAMPTZ | When processing began |
+| completed_at | TIMESTAMPTZ | When processing finished |
+| created_at | TIMESTAMPTZ | Row creation time |
+| updated_at | TIMESTAMPTZ | Last update time |
+
+**Uniqueness:** A partial unique index `(ticket_id, pass_name, prompt_version) WHERE status = 'success'` ensures at most one successful result per ticket per pass per prompt version.
+
+### Idempotency
+
+- Rerunning without `--force` skips tickets that already have a successful result for the current prompt version.
+- Prior `pending`/`failed` rows are cleaned up before each new attempt.
+- The `--force` flag removes existing success rows to allow a fresh run.
+
+### CLI Usage
+
+```bash
+python run_ticket_pass1.py --limit 100
+python run_ticket_pass1.py --ticket-id 99784
+python run_ticket_pass1.py --ticket-id 99784,98154,100289
+python run_ticket_pass1.py --since 2026-03-01
+python run_ticket_pass1.py --failed-only
+python run_ticket_pass1.py --force
+```
+
+### Analytics View: vw_ticket_pass1_results
+
+```sql
+SELECT ticket_id, phenomenon, pass1_status, latest_error
+FROM vw_ticket_pass1_results
+WHERE pass1_status = 'success';
+```
+
+### Extending to Pass 2 and Pass 3
+
+The `ticket_llm_pass_results` table is designed for multi-pass use:
+- Each pass uses a distinct `pass_name` (e.g. `pass2_root_cause`, `pass3_resolution`)
+- The same table, DB helpers, and CLI patterns can be reused
+- New parsers can be added per pass (e.g. `pass2_parser.py`)
+- New prompt files go in `prompts/` (e.g. `pass2_root_cause.txt`)

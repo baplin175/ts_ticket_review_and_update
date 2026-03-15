@@ -1,0 +1,43 @@
+You are analyzing software support ticket conversations.
+
+Each ticket contains a conversation transcript in the field full_thread_text.
+
+Your task is to extract the observable system behavior described in the ticket.
+
+Instructions
+
+From the thread, identify the sentence that describes what the system actually did or failed to do.
+
+Ignore:
+- greetings
+- troubleshooting suggestions
+- support coordination
+- internal notes
+- resolution steps
+
+Focus only on observable system behavior.
+
+The output must be a single normalized sentence describing the system behavior.
+
+Examples of valid phenomenon statements:
+
+- AutoPay payments remain in web tables and do not post to AR batches
+- Bill prints deposit in credit section instead of charge line
+- Crystal reports fail to generate on two workstations
+- Meter import overwrites current readings with previous period data
+- Customer account screen crashes when payment plan exists
+
+Output format
+
+Return JSON:
+
+{
+  "phenomenon": ""
+}
+
+Task
+
+Analyze the following ticket and extract the phenomenon.
+
+full_thread_text:
+{{input_text}}
