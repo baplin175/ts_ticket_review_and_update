@@ -732,7 +732,8 @@ The Postgres database is the **canonical store** for all ticket data, action his
 - **Idempotent upserts**: Re-ingesting a ticket converges to the same state. No duplicates.
 - **Append-only enrichment**: Enrichment tables (`ticket_sentiment`, `ticket_priority_scores`, `ticket_complexity_scores`) are append-only. Each scoring run adds a new row. Historical scores are never deleted.
 - **Hash-based skipping**: Content hashes (`thread_hash`, `technical_core_hash`) in `ticket_thread_rollups` are compared against the most recent enrichment row. If unchanged, the LLM call is skipped. Use `--force` to override.
-- **Replay/resync**: Run `python run_ingest.py sync --ticket <num>` to re-fetch from the TS API, then `python run_rollups.py all --ticket <num>` to rebuild derived data. Enrichments will automatically detect the hash change and rescore on next run.
+- **Replay/resync**: Run `python run_ingest.py sync --ticket <num>` to re-fetch from the TS API; rollups and analytics are automatically rebuilt for all touched tickets. Enrichments will automatically detect the hash change and rescore on next run.
+- **Post-sync rollup rebuild**: Both `run_ingest.py` (API sync) and `run_csv_import.py` (CSV import) automatically rebuild all rollups and analytics (classify → rollups → metrics → participants → handoffs → wait_states → snapshot → health) for every upserted ticket after a successful sync. No manual `run_rollups.py` step is required.
 
 ### Compatibility Notes
 
@@ -764,6 +765,7 @@ Test coverage includes:
 - **Hash-based skipping** (9 tests): all three enrichment types, force override, missing rollups
 - **Write-back** (5 tests): LastInhComment/LastCustComment timestamp derivation
 - **Operational fixes** (11 tests): cache poisoning, atomic writes, retry logic, transaction batching
+- **Post-sync rollups** (4 tests): CSV import returns upserted IDs, rollup rebuild triggered after import, skipped on dry-run
 
 ## Audit Summary (2026-03-13)
 

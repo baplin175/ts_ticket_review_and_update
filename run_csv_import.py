@@ -356,6 +356,7 @@ def run_import(
                          f"({stats['tickets_upserted']:,} tickets, {stats['actions_upserted']:,} actions)")
 
         stats["tickets_seen"] = len(tickets_upserted)
+        stats["upserted_ids"] = sorted(tickets_upserted)
 
         # Complete the ingest run
         if run_id and not dry_run:
@@ -431,12 +432,27 @@ def main():
     _log(f"  Tickets upserted:  {stats['tickets_upserted']:,}")
     _log(f"  Actions upserted:  {stats['actions_upserted']:,}")
 
+    # ── Post-import: rebuild rollups + analytics for touched tickets ──
     if not args.dry_run:
+        upserted = stats.get("upserted_ids", [])
+        if upserted:
+            from run_rollups import (
+                classify_actions, rebuild_rollups, rebuild_metrics,
+                run_analytics_for_tickets,
+            )
+            _log(
+                f"\n[csv-import] Post-import: rebuilding rollups + analytics "
+                f"for {len(upserted)} ticket(s)\u2026"
+            )
+            classify_actions(upserted)
+            rebuild_rollups(upserted)
+            rebuild_metrics(upserted)
+            run_analytics_for_tickets(upserted)
+
         _log("\n[csv-import] Next steps:")
-        _log("  1. python run_rollups.py all          # build thread rollups + hashes")
-        _log("  2. python run_sentiment.py            # sentiment scoring")
-        _log("  3. python run_priority.py             # priority scoring")
-        _log("  4. python run_complexity.py           # complexity scoring")
+        _log("  1. python run_sentiment.py            # sentiment scoring")
+        _log("  2. python run_priority.py             # priority scoring")
+        _log("  3. python run_complexity.py           # complexity scoring")
 
 
 if __name__ == "__main__":
