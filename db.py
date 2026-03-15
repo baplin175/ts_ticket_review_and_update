@@ -810,6 +810,173 @@ def fetch_ticket_numbers_by_status(status: str) -> list[str]:
     return [str(r[0]) for r in rows]
 
 
+# ── Analytics rebuild helpers ────────────────────────────────────────
+
+def delete_for_tickets(table: str, ticket_ids: list[int]) -> int:
+    """DELETE all rows in *table* for the given ticket_ids.  Returns count deleted."""
+    if not ticket_ids:
+        return 0
+    placeholders = ",".join(["%s"] * len(ticket_ids))
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"DELETE FROM {table} WHERE ticket_id IN ({placeholders});",
+                tuple(ticket_ids),
+            )
+            deleted = cur.rowcount
+        conn.commit()
+        return deleted
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def bulk_insert(table: str, columns: list[str], rows: list[tuple]) -> int:
+    """INSERT multiple rows into *table*.  Returns count inserted."""
+    if not rows:
+        return 0
+    cols = ", ".join(columns)
+    placeholders = ", ".join(["%s"] * len(columns))
+    sql = f"INSERT INTO {table} ({cols}) VALUES ({placeholders});"
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            for row in rows:
+                cur.execute(sql, row)
+        conn.commit()
+        return len(rows)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def upsert_snapshot_daily(row: Dict[str, Any]) -> None:
+    """Upsert a single ticket_snapshots_daily row."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO ticket_snapshots_daily (
+                    snapshot_date, ticket_id, ticket_number, ticket_name,
+                    status, owner, product_name, customer,
+                    open_flag, age_days, days_since_modified,
+                    priority, overall_complexity, waiting_state,
+                    high_priority_flag, high_complexity_flag,
+                    source_updated_at
+                ) VALUES (
+                    %(snapshot_date)s, %(ticket_id)s, %(ticket_number)s, %(ticket_name)s,
+                    %(status)s, %(owner)s, %(product_name)s, %(customer)s,
+                    %(open_flag)s, %(age_days)s, %(days_since_modified)s,
+                    %(priority)s, %(overall_complexity)s, %(waiting_state)s,
+                    %(high_priority_flag)s, %(high_complexity_flag)s,
+                    %(source_updated_at)s
+                )
+                ON CONFLICT (snapshot_date, ticket_id) DO UPDATE SET
+                    ticket_number      = EXCLUDED.ticket_number,
+                    ticket_name        = EXCLUDED.ticket_name,
+                    status             = EXCLUDED.status,
+                    owner              = EXCLUDED.owner,
+                    product_name       = EXCLUDED.product_name,
+                    customer           = EXCLUDED.customer,
+                    open_flag          = EXCLUDED.open_flag,
+                    age_days           = EXCLUDED.age_days,
+                    days_since_modified= EXCLUDED.days_since_modified,
+                    priority           = EXCLUDED.priority,
+                    overall_complexity = EXCLUDED.overall_complexity,
+                    waiting_state      = EXCLUDED.waiting_state,
+                    high_priority_flag = EXCLUDED.high_priority_flag,
+                    high_complexity_flag= EXCLUDED.high_complexity_flag,
+                    source_updated_at  = EXCLUDED.source_updated_at;
+            """, row)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def upsert_customer_health(row: Dict[str, Any]) -> None:
+    """Upsert a customer_ticket_health row."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO customer_ticket_health (
+                    as_of_date, customer,
+                    open_ticket_count, high_priority_count, high_complexity_count,
+                    avg_complexity, avg_elapsed_drag,
+                    reopen_count_90d, frustration_count_90d,
+                    top_cluster_ids, top_products,
+                    ticket_load_pressure_score
+                ) VALUES (
+                    %(as_of_date)s, %(customer)s,
+                    %(open_ticket_count)s, %(high_priority_count)s, %(high_complexity_count)s,
+                    %(avg_complexity)s, %(avg_elapsed_drag)s,
+                    %(reopen_count_90d)s, %(frustration_count_90d)s,
+                    %(top_cluster_ids)s, %(top_products)s,
+                    %(ticket_load_pressure_score)s
+                )
+                ON CONFLICT (as_of_date, customer) DO UPDATE SET
+                    open_ticket_count   = EXCLUDED.open_ticket_count,
+                    high_priority_count = EXCLUDED.high_priority_count,
+                    high_complexity_count= EXCLUDED.high_complexity_count,
+                    avg_complexity      = EXCLUDED.avg_complexity,
+                    avg_elapsed_drag    = EXCLUDED.avg_elapsed_drag,
+                    reopen_count_90d    = EXCLUDED.reopen_count_90d,
+                    frustration_count_90d= EXCLUDED.frustration_count_90d,
+                    top_cluster_ids     = EXCLUDED.top_cluster_ids,
+                    top_products        = EXCLUDED.top_products,
+                    ticket_load_pressure_score = EXCLUDED.ticket_load_pressure_score;
+            """, row)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def upsert_product_health(row: Dict[str, Any]) -> None:
+    """Upsert a product_ticket_health row."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO product_ticket_health (
+                    as_of_date, product_name,
+                    ticket_volume, avg_complexity, avg_coordination_load,
+                    avg_elapsed_drag, top_clusters, top_mechanisms,
+                    dev_touched_rate, customer_wait_rate
+                ) VALUES (
+                    %(as_of_date)s, %(product_name)s,
+                    %(ticket_volume)s, %(avg_complexity)s, %(avg_coordination_load)s,
+                    %(avg_elapsed_drag)s, %(top_clusters)s, %(top_mechanisms)s,
+                    %(dev_touched_rate)s, %(customer_wait_rate)s
+                )
+                ON CONFLICT (as_of_date, product_name) DO UPDATE SET
+                    ticket_volume       = EXCLUDED.ticket_volume,
+                    avg_complexity      = EXCLUDED.avg_complexity,
+                    avg_coordination_load= EXCLUDED.avg_coordination_load,
+                    avg_elapsed_drag    = EXCLUDED.avg_elapsed_drag,
+                    top_clusters        = EXCLUDED.top_clusters,
+                    top_mechanisms      = EXCLUDED.top_mechanisms,
+                    dev_touched_rate    = EXCLUDED.dev_touched_rate,
+                    customer_wait_rate  = EXCLUDED.customer_wait_rate;
+            """, row)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
 # ── CLI entry point ──────────────────────────────────────────────────
 
 if __name__ == "__main__":

@@ -181,6 +181,7 @@ def _sync(
     tickets_upserted = 0
     actions_seen = 0
     actions_upserted = 0
+    upserted_ids: list[int] = []
     errors: list[str] = []
 
     try:
@@ -261,6 +262,7 @@ def _sync(
                     db.upsert_ticket_with_actions(ticket_row, action_rows, now=now)
                     tickets_upserted += 1
                     actions_upserted += len(action_rows)
+                    upserted_ids.append(tid)
 
             except Exception as exc:
                 msg = f"Error processing ticket #{tnum} (id={tid_str}): {exc}"
@@ -310,6 +312,7 @@ def _sync(
         "tickets_upserted": tickets_upserted,
         "actions_seen": actions_seen,
         "actions_upserted": actions_upserted,
+        "upserted_ids": upserted_ids,
         "errors": errors,
     }
 
@@ -434,6 +437,24 @@ def main():
         dry_run=args.dry_run,
         verbose=args.verbose,
     )
+
+    # ── Post-sync: rebuild rollups + analytics for touched tickets ──
+    if not args.dry_run and result["status"] == "completed":
+        upserted = result.get("upserted_ids", [])
+        if upserted:
+            from run_rollups import (
+                classify_actions, rebuild_rollups, rebuild_metrics,
+                run_analytics_for_tickets,
+            )
+            print(
+                f"\n[ingest] Post-sync: rebuilding rollups + analytics "
+                f"for {len(upserted)} ticket(s)\u2026",
+                flush=True,
+            )
+            classify_actions(upserted)
+            rebuild_rollups(upserted)
+            rebuild_metrics(upserted)
+            run_analytics_for_tickets(upserted)
 
     if result["status"] != "completed":
         sys.exit(1)
