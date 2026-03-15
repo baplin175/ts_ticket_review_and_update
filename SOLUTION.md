@@ -26,6 +26,57 @@ run_complexity.py      — Part 4: complexity analysis via Matcha (DB persistenc
 migrations/            — Numbered SQL migration files applied by db.py
 ```
 
+## Data Dictionary
+
+All database objects live in the `tickets_ai` schema. Every table that references a ticket carries both `ticket_id` (integer PK from TeamSupport) and `ticket_number` (human-readable, denormalised in Phase 8).
+
+### Tables (22)
+
+| Table | Category | Purpose |
+|-------|----------|---------|
+| `tickets` | Source truth | Canonical ticket rows keyed by `ticket_id` |
+| `ticket_actions` | Source truth | Canonical action/activity rows keyed by `action_id` |
+| `sync_state` | Source truth | Per-source watermark / cursor tracking |
+| `ingest_runs` | Source truth | Audit log of each ingestion run |
+| `ticket_thread_rollups` | Derived | Concatenated thread texts and content hashes per ticket |
+| `ticket_metrics` | Derived | Computed counts, timestamps, and response-time metrics per ticket |
+| `ticket_participants` | Derived | Each unique participant per ticket with action counts |
+| `ticket_handoffs` | Derived | Inferred transitions when party/participant changes between actions |
+| `ticket_wait_states` | Derived | Deterministic wait segments from action stream and lifecycle |
+| `ticket_sentiment` | Enrichment | LLM sentiment scores (append-only, hash-gated) |
+| `ticket_priority_scores` | Enrichment | LLM priority scores (append-only, hash-gated) |
+| `ticket_complexity_scores` | Enrichment | LLM complexity scores (append-only, hash-gated) |
+| `ticket_issue_summaries` | Enrichment | LLM issue/cause/mechanism/resolution summaries (schema-only) |
+| `ticket_embeddings` | Enrichment | Vector embeddings for similarity search (schema-only) |
+| `ticket_interventions` | Enrichment | Recommended interventions per ticket (schema-only) |
+| `enrichment_runs` | Enrichment | Audit log for enrichment batches (schema-only) |
+| `cluster_runs` | Clustering | Clustering run metadata (schema-only) |
+| `ticket_clusters` | Clustering | Ticket-to-cluster assignments (schema-only) |
+| `cluster_catalog` | Clustering | Cluster descriptions and patterns (schema-only) |
+| `ticket_snapshots_daily` | Snapshot/Health | Point-in-time snapshot of ticket state on a given date |
+| `customer_ticket_health` | Snapshot/Health | Per-customer health rollup (open/HP/HC counts, pressure score) |
+| `product_ticket_health` | Snapshot/Health | Per-product health rollup (volume, complexity, dev-touched rate) |
+
+### Views (15)
+
+| View | Purpose |
+|------|---------|
+| `vw_latest_ticket_sentiment` | Latest sentiment row per ticket |
+| `vw_latest_ticket_priority` | Latest priority row per ticket |
+| `vw_latest_ticket_complexity` | Latest complexity row per ticket |
+| `vw_latest_ticket_issue_summary` | Latest issue summary per ticket |
+| `vw_ticket_analytics_core` | Master join: tickets + metrics + rollups + 4 latest views |
+| `vw_ticket_complexity_breakdown` | Detailed complexity dimension breakdown |
+| `vw_ticket_wait_profile` | Per-ticket wait-time aggregation by wait type |
+| `vw_customer_support_risk` | 90-day customer risk rollup |
+| `vw_product_pain_patterns` | Product-level pain/complexity grouping |
+| `vw_intervention_opportunities` | Intervention impact scoring and grouping |
+| `vw_backlog_daily` | Daily open/HP/HC backlog counts from snapshots |
+| `vw_backlog_weekly` | Weekly backlog averages |
+| `vw_backlog_weekly_eow` | End-of-week backlog from latest snapshot per week |
+| `vw_backlog_aging_current` | Current backlog by age buckets (0–6d through 90+d) |
+| `vw_backlog_weekly_from_dates` | Fallback weekly backlog from created/closed dates |
+
 ## Data Flow
 
 1. **Fetch tickets** — `ts_client.fetch_open_tickets(ticket_number=...)` queries the TeamSupport `/Tickets` endpoint. When `TARGET_TICKET` is set, the ticket is fetched by number regardless of open/closed status. When no target is set, only open tickets are returned (`isClosed=False`) with full pagination. If the API returns 403 (rate limit), the pipeline falls back to `Activities.csv`.
