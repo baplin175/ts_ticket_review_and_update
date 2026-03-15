@@ -16,7 +16,7 @@ Usage:
     TARGET_TICKET=29696 python run_all.py
     TARGET_TICKET=29696 python run_all.py --force
     RUN_SENTIMENT=0 RUN_COMPLEXITY=0 python run_all.py
-    python run_all.py --no-writeback        # skip TS write-back (dry-run)
+    python run_all.py --no-writeback   # skip TS write-back (dry-run); TS_WRITEBACK=0 in config always wins
 """
 
 import argparse
@@ -72,7 +72,10 @@ def _setup_log_file() -> None:
 
 def main(*, force: bool = False, no_writeback: bool = False) -> None:
     _setup_log_file()
-    write_back = TS_WRITEBACK and not no_writeback
+    if not TS_WRITEBACK:
+        write_back = False  # config says off — hard lock, CLI cannot override
+    else:
+        write_back = not no_writeback  # config says on — CLI can suppress with --no-writeback
     _log("=" * 60)
     _log("[orchestrator] Starting pipeline")
     if force:

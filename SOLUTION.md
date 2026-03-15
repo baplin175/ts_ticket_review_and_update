@@ -746,7 +746,7 @@ The Postgres database is the **canonical store** for all ticket data, action his
 
 Two config flags control side-effects:
 
-- **`TS_WRITEBACK`** (default `0`): When `0`, no enrichment data is written back to TeamSupport — even via `run_all.py`. The `--no-writeback` CLI flag always wins (overrides `TS_WRITEBACK=1`). When run standalone, `run_priority.py` and `run_complexity.py` also respect this default (their `write_back` parameter defaults to `TS_WRITEBACK` when not explicitly passed).
+- **`TS_WRITEBACK`** (default `0`): When `0`, no enrichment data is written back to TeamSupport — this is a **hard lock** that the `--no-writeback` CLI flag cannot override. `TS_WRITEBACK=0` in config always wins, regardless of CLI flags. When `1`, write-back is enabled but can be suppressed for a specific run using `--no-writeback`. When run standalone, `run_priority.py` and `run_complexity.py` also respect this default (their `write_back` parameter defaults to `TS_WRITEBACK` when not explicitly passed).
 
 - **`SKIP_OUTPUT_FILES`** (default `0`): When `1`, **no** files are written to the `output/` directory during enrichment — this includes activities JSON, enrichment result JSON, pipeline log files, and API call logs. This is useful when the DB is the canonical store and file artifacts are unwanted. When `0`, all files are written as usual.
 
