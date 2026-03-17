@@ -1,0 +1,91 @@
+PASS 3 PROMPT — Failure Mechanism Inference
+
+You are given a standardized operational failure produced from a software support ticket.
+
+Your task is to infer the most plausible system mechanism that would produce this failure.
+
+This mechanism should describe the internal system behavior or technical condition that causes the observed failure.
+
+The mechanism must remain implementation-neutral and generalizable so that similar tickets produce similar mechanism descriptions.
+
+INPUT
+
+You will receive the following structured failure:
+
+<Component> + <Operation> + <Unexpected State>
+
+DEFINITION
+
+Mechanism
+
+A short description of the underlying system behavior that explains the failure.
+
+Mechanisms usually involve:
+- data validation failure
+- configuration mismatch
+- integration mapping error
+- schema mismatch
+- missing dependency
+- incorrect business rule logic
+- background job failure
+- file format incompatibility
+- permission or access restriction
+- synchronization failure
+- cache or state inconsistency
+- calculation logic error
+- field mapping error
+- interface communication failure
+- scheduling or job execution failure
+
+The mechanism should describe how the system behaves internally, not the user-visible symptom.
+
+GOOD MECHANISM EXAMPLES
+
+Canonical failure:
+Invoice Cloud integration + upload + files fail to upload
+
+Mechanism:
+Invoice Cloud integration rejects file upload due to failed authentication or API validation
+
+Canonical failure:
+Work Order screen + display + map does not appear
+
+Mechanism:
+Work Order UI fails to load map component due to missing or invalid map service response
+
+Canonical failure:
+Billing module + print + service charge prints twice
+
+Mechanism:
+Billing calculation logic applies service charge rule twice during bill generation
+
+Canonical failure:
+Meter import process + import + import fails due to file format mismatch
+
+Mechanism:
+Meter import parser rejects input file due to schema mismatch with expected import format
+
+IMPORTANT RULES
+
+- Focus on the system mechanism, not the symptom
+- Do NOT repeat the canonical failure
+- Do NOT speculate about human actions or support workflow
+- Do NOT mention tickets, customers, agents, or troubleshooting steps
+- Prefer technical system behaviors such as validation failures, logic errors, integration errors, or data inconsistencies
+- Keep the mechanism concise (1 sentence)
+- Normalize wording so similar failures produce similar mechanisms
+
+OUTPUT FORMAT
+
+Return JSON only.
+
+{
+  "mechanism": ""
+}
+
+TASK
+
+Infer the most plausible system mechanism for the following canonical failure.
+
+canonical_failure:
+{{input_text}}

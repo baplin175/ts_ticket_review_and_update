@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-from config import OUTPUT_DIR, RUN_PRIORITY, TARGET_TICKETS, MATCHA_MISSION_ID, TS_WRITEBACK, SKIP_OUTPUT_FILES
+from config import FORCE_ENRICHMENT, OUTPUT_DIR, RUN_PRIORITY, TARGET_TICKETS, MATCHA_MISSION_ID, TS_WRITEBACK, SKIP_OUTPUT_FILES
 from matcha_client import call_matcha
 from ts_client import update_ticket
 
@@ -288,12 +288,13 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
 
     ticket_fields: dict[str, dict] = {}  # return value
 
-    for result in results:
+    total_results = len(results)
+    for idx, result in enumerate(results, 1):
         tnum = str(result.get("ticket_number", "")).strip()
         priority = str(result.get("priority", "")).strip()
         explanation = str(result.get("priority_explanation", "")).strip()
         if not priority or not explanation:
-            _log(f"  [priority] Missing priority or explanation for {tnum}; skipping.")
+            _log(f"  [priority] ticket count {idx}/{total_results} — Missing priority or explanation for {tnum}; skipping.")
             continue
 
         fields = {
@@ -313,7 +314,7 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
         tid_int = tid_map.get(tnum)
         if tid_int and db_enabled:
             _persist_to_db(tid_int, tnum, hash_map.get(tnum), result, raw_reply)
-            _log(f"  [priority] Persisted to DB for ticket {tnum}.")
+            _log(f"  [priority] ticket count {idx}/{total_results} — Persisted to DB for ticket {tnum}.")
 
     # 6. Write back to TeamSupport (only when running standalone)
     updated = 0
@@ -363,4 +364,4 @@ if __name__ == "__main__":
         parser.add_argument("--force", action="store_true",
                             help="Force rerun even if thread_hash is unchanged.")
         args = parser.parse_args()
-        main(force=args.force)
+        main(force=args.force or FORCE_ENRICHMENT)

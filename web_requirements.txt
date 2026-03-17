@@ -1,0 +1,6 @@
+dash>=2.14
+dash-mantine-components>=0.14
+dash-ag-grid>=31.0
+dash-iconify>=0.1.2
+plotly>=5.18
+psycopg2-binary>=2.9

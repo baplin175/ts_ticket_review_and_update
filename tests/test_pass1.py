@@ -107,10 +107,12 @@ class TestPass1Parser:
         with pytest.raises(Pass1ParseError, match="must be a string"):
             parse_pass1_response('{"phenomenon": 42}')
 
-    def test_null_phenomenon_raises(self):
-        from pass1_parser import parse_pass1_response, Pass1ParseError
-        with pytest.raises(Pass1ParseError, match="must be a string"):
-            parse_pass1_response('{"phenomenon": null}')
+    def test_null_phenomenon_accepted(self):
+        from pass1_parser import parse_pass1_response
+        raw = '{"phenomenon": null}'
+        parsed, phenomenon = parse_pass1_response(raw)
+        assert phenomenon is None
+        assert parsed["phenomenon"] is None
 
     def test_array_response_raises(self):
         from pass1_parser import parse_pass1_response, Pass1ParseError
@@ -330,7 +332,7 @@ class TestMalformedHandling:
         import db
 
         with patch("run_ticket_pass1.call_matcha", return_value="not valid json"):
-            with patch("db.migrate"):
+            with patch("db.migrate", return_value=[]):
                 from run_ticket_pass1 import process_ticket
                 result = process_ticket(
                     ticket_id=100,
@@ -350,7 +352,7 @@ class TestMalformedHandling:
         import db
 
         with patch("run_ticket_pass1.call_matcha", return_value='{"phenomenon": ""}'):
-            with patch("db.migrate"):
+            with patch("db.migrate", return_value=[]):
                 from run_ticket_pass1 import process_ticket
                 result = process_ticket(
                     ticket_id=100,
@@ -378,7 +380,7 @@ class TestSuccessFlow:
 
         matcha_response = '{"phenomenon": "AutoPay payments remain in web tables"}'
         with patch("run_ticket_pass1.call_matcha", return_value=matcha_response):
-            with patch("db.migrate"):
+            with patch("db.migrate", return_value=[]):
                 from run_ticket_pass1 import process_ticket
                 result = process_ticket(
                     ticket_id=100,
@@ -398,7 +400,7 @@ class TestSuccessFlow:
         import db
 
         with patch("run_ticket_pass1.call_matcha", side_effect=Exception("Timeout")):
-            with patch("db.migrate"):
+            with patch("db.migrate", return_value=[]):
                 from run_ticket_pass1 import process_ticket
                 result = process_ticket(
                     ticket_id=100,

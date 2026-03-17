@@ -16,7 +16,12 @@ Usage:
     python run_rollups.py wait_states               # rebuild ticket_wait_states
     python run_rollups.py snapshot                  # write today's ticket_snapshots_daily
     python run_rollups.py health                    # refresh customer + product health
-    python run_rollups.py analytics                 # participants + handoffs + wait_states + snapshot + health
+    python run_rollups.py daily_open_counts          # compute today's daily open counts (skips if exists)
+    python run_rollups.py daily_open_counts --date 2026-03-01   # compute a specific date
+    python run_rollups.py daily_open_counts --from 2026-01-01 --to 2026-03-16  # date range
+    python run_rollups.py daily_open_counts --all-dates          # all dates with ticket data
+    python run_rollups.py daily_open_counts --force              # recompute even if already exists
+    python run_rollups.py analytics                 # participants + handoffs + wait_states + snapshot + health + daily_open_counts
     python run_rollups.py full                      # all + analytics (everything)
 
 Requires DATABASE_URL to be set and data to be ingested via run_ingest.py.
@@ -51,6 +56,32 @@ def _ticket_ids(ticket_number: str | None = None) -> list[int]:
     else:
         rows = db.fetch_all("SELECT ticket_id FROM tickets ORDER BY ticket_id;")
         return [r[0] for r in rows]
+
+
+def run_full_rollups(ticket_ids: list[int] | None = None) -> None:
+    """Run the complete rollup pipeline (classify → rollups → metrics → analytics).
+
+    Callable programmatically — used as a post-migration hook so that
+    derived tables stay consistent after schema changes.
+    """
+    if not db._is_enabled():
+        return
+    tids = ticket_ids or _ticket_ids()
+    if not tids:
+        print("[rollups] No tickets to process.", flush=True)
+        return
+    print(f"[rollups] Running full rollups for {len(tids)} ticket(s) …", flush=True)
+    classify_actions(tids)
+    rebuild_rollups(tids)
+    rebuild_metrics(tids)
+    rebuild_ticket_participants(tids)
+    rebuild_ticket_handoffs(tids)
+    rebuild_ticket_wait_states(tids)
+    snapshot_tickets_daily(ticket_ids=tids)
+    rebuild_customer_ticket_health()
+    rebuild_product_ticket_health()
+    rebuild_daily_open_counts()
+    print("[rollups] Full rollups complete.", flush=True)
 
 
 def _sha256(text: str) -> str:
@@ -535,6 +566,9 @@ def rebuild_ticket_wait_states(ticket_ids: list[int]) -> int:
             end = closed_at
             dur = None
             if end and prev_start:
+                # Guard: closed_at before last action → clamp to start
+                if end < prev_start:
+                    end = prev_start
                 dur = round((end - prev_start).total_seconds() / 60.0, 2)
             segments.append((
                 tid, tnum_map.get(tid), prev_state, prev_start, end, dur,
@@ -847,12 +881,133 @@ def rebuild_product_ticket_health(as_of_date: date | None = None) -> int:
     return count
 
 
+# ── J. Daily open counts ─────────────────────────────────────────────
+
+def rebuild_daily_open_counts(
+    target_date: date | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    all_dates: bool = False,
+    force: bool = False,
+) -> int:
+    """Rebuild daily_open_counts — aggregated open-ticket counts by product,
+    status, and assigned_to.
+
+    Modes:
+      - target_date only   → compute that single date
+      - date_from/date_to  → compute the range (inclusive)
+      - all_dates=True      → compute every date for which snapshot data exists
+      - default (no args)   → today only
+
+    Dates already present in the table are skipped unless *force* is True.
+
+    A ticket is counted as "open on date D" when:
+      - date_created <= D, AND
+      - (closed_at IS NULL OR closed_at::date > D)
+    """
+    # Determine the set of dates to process
+    if all_dates:
+        rows = db.fetch_all("""
+            SELECT DISTINCT d::date
+            FROM (
+                SELECT date_created::date AS d FROM tickets WHERE date_created IS NOT NULL
+                UNION
+                SELECT closed_at::date FROM tickets WHERE closed_at IS NOT NULL
+            ) sub
+            ORDER BY d;
+        """)
+        dates_to_process = [r[0] for r in rows]
+        if not dates_to_process:
+            # Fallback: use today
+            dates_to_process = [date.today()]
+    elif date_from and date_to:
+        from datetime import timedelta
+        d = date_from
+        dates_to_process = []
+        while d <= date_to:
+            dates_to_process.append(d)
+            d += timedelta(days=1)
+    elif target_date:
+        dates_to_process = [target_date]
+    else:
+        dates_to_process = [date.today()]
+
+    # Skip dates already computed (unless force)
+    if not force:
+        existing = db.daily_open_counts_existing_dates()
+        dates_to_process = [d for d in dates_to_process if d not in existing]
+
+    if not dates_to_process:
+        print("[rollups] daily_open_counts: all requested dates already computed — nothing to do.", flush=True)
+        return 0
+
+    # When forcing, delete existing rows for the dates we're about to recompute
+    # so stale group combinations don't linger.
+    if force:
+        for d in dates_to_process:
+            db.execute("DELETE FROM daily_open_counts WHERE snapshot_date = %s;", (d,))
+
+    total_rows = 0
+    for d in dates_to_process:
+        rows = db.fetch_all("""
+            SELECT
+                COALESCE(t.product_name, '')   AS product_name,
+                COALESCE(t.status, '')         AS status,
+                COALESCE(p.participant_id, '') AS participant_id,
+                COALESCE(p.participant_name, '') AS participant_name,
+                COALESCE(p.participant_type, '') AS participant_type,
+                COUNT(*)                       AS open_count
+            FROM tickets t
+            LEFT JOIN LATERAL (
+                SELECT tp.participant_id, tp.participant_name, tp.participant_type
+                FROM ticket_participants tp
+                WHERE tp.ticket_id = t.ticket_id
+                  AND tp.last_seen_at::date <= %s
+                ORDER BY tp.last_seen_at DESC
+                LIMIT 1
+            ) p ON TRUE
+            WHERE t.date_created IS NOT NULL
+              AND t.date_created::date <= %s
+              AND (
+                  -- Ticket has a closed_at date: open if closed_at is after this date
+                  (t.closed_at IS NOT NULL AND t.closed_at::date > %s)
+                  OR
+                  -- Ticket has no closed_at: open only if status is not Closed/Resolved
+                  (t.closed_at IS NULL
+                   AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved'))
+              )
+            GROUP BY
+                COALESCE(t.product_name, ''),
+                COALESCE(t.status, ''),
+                COALESCE(p.participant_id, ''),
+                COALESCE(p.participant_name, ''),
+                COALESCE(p.participant_type, '');
+        """, (d, d, d))
+
+        for product, status, pid, pname, ptype, cnt in rows:
+            db.upsert_daily_open_count({
+                "snapshot_date": d,
+                "product_name": product,
+                "status": status,
+                "participant_id": pid,
+                "participant_name": pname,
+                "participant_type": ptype,
+                "open_count": cnt,
+            })
+            total_rows += 1
+
+        print(f"[rollups] daily_open_counts for {d}: {len(rows)} group(s).", flush=True)
+
+    print(f"[rollups] daily_open_counts: {total_rows} row(s) across {len(dates_to_process)} date(s).", flush=True)
+    return total_rows
+
+
 # ── Public orchestration helpers (called by run_ingest post-sync) ────
 
 def run_analytics_for_tickets(ticket_ids: list[int]) -> None:
     """Run all analytics rebuild steps for the given ticket_ids.
 
-    Steps: participants → handoffs → wait_states → snapshot → health.
+    Steps: participants → handoffs → wait_states → snapshot → health → daily_open_counts.
     Called by run_ingest.py after a successful sync.
     """
     if not ticket_ids:
@@ -864,6 +1019,7 @@ def run_analytics_for_tickets(ticket_ids: list[int]) -> None:
     snapshot_tickets_daily(ticket_ids=ticket_ids)
     rebuild_customer_ticket_health()
     rebuild_product_ticket_health()
+    rebuild_daily_open_counts()  # today only; skips if already computed
     print("[analytics] Done.", flush=True)
 
 
@@ -885,12 +1041,21 @@ def main():
         "wait_states":  "Rebuild ticket_wait_states.",
         "snapshot":     "Write today's ticket_snapshots_daily rows.",
         "health":       "Refresh customer + product ticket health.",
-        "analytics":    "Participants + handoffs + wait_states + snapshot + health.",
+        "daily_open_counts": "Rebuild daily_open_counts (today, range, or all).",
+        "analytics":    "Participants + handoffs + wait_states + snapshot + health + daily_open_counts.",
         "full":         "All + analytics (everything).",
     }
     for cmd, helptext in _ALL_CMDS.items():
         p = sub.add_parser(cmd, help=helptext)
         p.add_argument("--ticket", "-t", help="Process only this ticket number.")
+        if cmd == "daily_open_counts":
+            p.add_argument("--date", help="Single date to compute (YYYY-MM-DD). Default: today.")
+            p.add_argument("--from", dest="date_from", help="Start of date range (YYYY-MM-DD).")
+            p.add_argument("--to", dest="date_to", help="End of date range (YYYY-MM-DD).")
+            p.add_argument("--all-dates", action="store_true",
+                           help="Compute for every date that has ticket data.")
+            p.add_argument("--force", action="store_true",
+                           help="Recompute even for dates already in the table.")
 
     args = parser.parse_args()
 
@@ -903,7 +1068,9 @@ def main():
         sys.exit(1)
 
     # Ensure schema and tables exist
-    db.migrate()
+    applied = db.migrate()
+    if applied:
+        run_full_rollups()
 
     ticket_number = getattr(args, "ticket", None)
     tids = _ticket_ids(ticket_number)
@@ -942,6 +1109,33 @@ def main():
     if cmd in ("health", "analytics", "full"):
         rebuild_customer_ticket_health()
         rebuild_product_ticket_health()
+
+    if cmd in ("daily_open_counts", "analytics", "full"):
+        # Parse daily_open_counts-specific flags (only present when cmd is daily_open_counts)
+        target_date = None
+        date_from = None
+        date_to = None
+        all_dates = getattr(args, "all_dates", False)
+        force = getattr(args, "force", False)
+
+        raw_date = getattr(args, "date", None)
+        raw_from = getattr(args, "date_from", None)
+        raw_to = getattr(args, "date_to", None)
+
+        if raw_date:
+            target_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+        if raw_from:
+            date_from = datetime.strptime(raw_from, "%Y-%m-%d").date()
+        if raw_to:
+            date_to = datetime.strptime(raw_to, "%Y-%m-%d").date()
+
+        rebuild_daily_open_counts(
+            target_date=target_date,
+            date_from=date_from,
+            date_to=date_to,
+            all_dates=all_dates,
+            force=force,
+        )
 
     print("[rollups] Done.", flush=True)
 

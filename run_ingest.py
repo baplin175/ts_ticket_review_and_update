@@ -2,7 +2,7 @@
 run_ingest.py — Incremental TeamSupport ticket + action ingestion into Postgres.
 
 Usage:
-    python run_ingest.py sync                       # incremental sync (watermark-based)
+    python run_ingest.py sync                       # incremental sync (watermark-based; includes created-since)
     python run_ingest.py sync --ticket 29696        # resync one ticket by number
     python run_ingest.py sync --ticket 29696,110554 # resync multiple tickets
     python run_ingest.py sync --ticket-id 123456    # resync one ticket by internal ID
@@ -31,6 +31,7 @@ Incremental sync logic:
 
 import argparse
 import json
+import os
 import sys
 import traceback
 from datetime import datetime, timezone, timedelta
@@ -39,12 +40,48 @@ import config
 import db
 from ts_client import (
     fetch_open_tickets,
+    fetch_tickets_created_since,
     fetch_ticket_by_id,
     fetch_all_activities,
     fetch_inhance_user_ids,
     ticket_id as extract_ticket_id,
 )
 from activity_cleaner import clean_activity_dict
+
+
+# ── Tee-style logger (stdout + file) ─────────────────────────────────
+
+class _TeeWriter:
+    """Write to both the original stream and a log file."""
+
+    def __init__(self, stream, log_file):
+        self._stream = stream
+        self._log_file = log_file
+
+    def write(self, data):
+        self._stream.write(data)
+        self._log_file.write(data)
+        self._log_file.flush()
+
+    def flush(self):
+        self._stream.flush()
+        self._log_file.flush()
+
+    # Delegate attribute lookups (e.g. fileno, isatty) to the real stream
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def _start_log_file():
+    """Open a timestamped log file in OUTPUT_DIR and tee stdout+stderr to it."""
+    os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = os.path.join(config.OUTPUT_DIR, f"ingest_{ts}.log")
+    log_fh = open(log_path, "w", encoding="utf-8")
+    sys.stdout = _TeeWriter(sys.__stdout__, log_fh)
+    sys.stderr = _TeeWriter(sys.__stderr__, log_fh)
+    print(f"[ingest] Logging to {log_path}", flush=True)
+    return log_fh
 
 
 # ── Datetime parsing (duplicated from run_pull_activities to avoid coupling) ─
@@ -175,6 +212,7 @@ def _sync(
     max_tickets: int | None = None,
     dry_run: bool = False,
     verbose: bool = False,
+    new_only: bool = False,
 ) -> dict:
     """Run one ingestion cycle.  Returns a summary dict.
 
@@ -182,24 +220,45 @@ def _sync(
     - *ticket_numbers*: resync specific tickets by TicketNumber.
     - *ticket_ids*: resync specific tickets by internal TicketID.
     - *since*: replay all tickets modified since a given timestamp.
+    - *new_only*: only tickets *created* (not just modified) since the
+      watermark or the explicit *since* date.
     - default: true incremental sync using the stored watermark.
+      Also fetches tickets *created* since the watermark (open or closed)
+      so that tickets opened and closed between syncs are captured.
 
     Watermark semantics:
-    - Only a normal incremental sync (no --ticket/--ticket-id/--since/--days)
+    - Only a normal incremental sync (no --ticket/--ticket-id/--since/--days/--new-only)
       advances last_successful_sync_at on success.
-    - Single-ticket and replay syncs do NOT advance the watermark because
-      they cover a subset of data and must not imply "everything is caught up".
+    - Single-ticket, replay, and new-only syncs do NOT advance the watermark
+      because they cover a subset of data and must not imply "everything is
+      caught up".
     """
     now = datetime.now(timezone.utc)
 
     # Determine whether this is a "targeted" (single-ticket / replay) sync.
     # Targeted syncs must NOT advance the global watermark.
-    is_targeted = bool(ticket_numbers or ticket_ids or since)
+    is_targeted = bool(ticket_numbers or ticket_ids or since or new_only)
 
     # ── Resolve the effective from_ts for incremental filtering ──
     # When no explicit filter is provided, read the watermark from sync_state
     # and apply the safety buffer.
     effective_since = since
+
+    # new_only mode: read the watermark if no explicit --since was given
+    if new_only and not since and not dry_run:
+        state = db.get_sync_state(SOURCE_NAME)
+        watermark = state["last_successful_sync_at"] if state else None
+        if watermark:
+            effective_since = watermark - timedelta(minutes=config.SAFETY_BUFFER_MINUTES)
+            print(
+                f"[ingest] New-only mode: watermark {watermark.isoformat()}, "
+                f"safety buffer {config.SAFETY_BUFFER_MINUTES}min → "
+                f"tickets created since {effective_since.isoformat()}",
+                flush=True,
+            )
+        else:
+            print("[ingest] New-only mode: no prior watermark — will fetch all open tickets.", flush=True)
+
     if not is_targeted and not dry_run:
         state = db.get_sync_state(SOURCE_NAME)
         watermark = state["last_successful_sync_at"] if state else None
@@ -234,6 +293,7 @@ def _sync(
         "since": effective_since.isoformat() if effective_since else None,
         "max_tickets": max_tickets,
         "dry_run": dry_run,
+        "new_only": new_only,
         "is_targeted": is_targeted,
         "safety_buffer_minutes": config.SAFETY_BUFFER_MINUTES,
         "ts_base": config.TS_BASE,
@@ -265,24 +325,55 @@ def _sync(
                 raw_tickets.extend(fetch_ticket_by_id(tid_str))
         elif ticket_numbers:
             raw_tickets = fetch_open_tickets(ticket_numbers=ticket_numbers)
+        elif new_only and effective_since:
+            # Server-side DateCreated filter — returns open + closed tickets
+            # created after the cutoff.  No local post-filter needed.
+            raw_tickets = fetch_tickets_created_since(effective_since)
+        elif new_only:
+            # No cutoff date — fall back to all open tickets
+            raw_tickets = fetch_open_tickets()
         else:
             raw_tickets = fetch_open_tickets()
 
+            # Also fetch tickets *created* since the watermark so that
+            # tickets opened and closed between syncs are captured.
+            # Deduplicate by TicketID — upserts are idempotent, but this
+            # avoids fetching actions twice for the same ticket.
+            if effective_since:
+                created_tickets = fetch_tickets_created_since(effective_since)
+                if created_tickets:
+                    seen_ids = {str(t.get("TicketID") or "") for t in raw_tickets}
+                    new_count = 0
+                    for ct in created_tickets:
+                        ct_id = str(ct.get("TicketID") or "")
+                        if ct_id and ct_id not in seen_ids:
+                            raw_tickets.append(ct)
+                            seen_ids.add(ct_id)
+                            new_count += 1
+                    if new_count:
+                        print(
+                            f"[ingest] Merged {new_count} created-since ticket(s) "
+                            f"(opened+closed between syncs).",
+                            flush=True,
+                        )
+
         # ── Filter by effective_since (local post-filter).
-        # The TeamSupport API does not support a server-side "modified since"
-        # filter, so we fetch all qualifying tickets and filter locally.
-        # Combined with the safety overlap buffer this is the safest practical
-        # approach for incremental sync.
-        if effective_since:
+        # The TeamSupport API supports server-side date filtering using the
+        # format YYYYMMDDHHMMSS on any date field.  For new_only mode, the
+        # server already filtered by DateCreated so we skip the local filter.
+        # For normal sync we still post-filter by DateModified locally.
+        if effective_since and not new_only:
             before_count = len(raw_tickets)
+            filter_field = "DateCreated" if new_only else "DateModified"
+            filter_label = "created" if new_only else "modified"
             raw_tickets = [
                 t for t in raw_tickets
-                if _parse_ts_datetime(str(t.get("DateModified") or "")) is not None
-                and _parse_ts_datetime(str(t.get("DateModified") or "")) >= effective_since
+                if _parse_ts_datetime(str(t.get(filter_field) or "")) is not None
+                and _parse_ts_datetime(str(t.get(filter_field) or "")) >= effective_since
             ]
             print(
                 f"[ingest] Filtered {before_count} → {len(raw_tickets)} ticket(s) "
-                f"modified since {effective_since.isoformat()}.",
+                f"{filter_label} since {effective_since.isoformat()}.",
                 flush=True,
             )
 
@@ -400,6 +491,74 @@ def _sync(
     }
 
 
+# ── Closed-ticket reconciliation ─────────────────────────────────────
+
+def _reconcile_closed(upserted_ids: list[int], verbose: bool = False) -> list[int]:
+    """Re-fetch tickets the DB thinks are open but were NOT returned by TS.
+
+    After a full sync that fetched all open tickets, any ticket still marked
+    open in the DB but absent from the sync results has likely been closed in
+    TeamSupport.  This function re-fetches each one individually and upserts
+    the current state so that closed_at / status are updated.
+
+    Returns the list of ticket_ids that were reconciled.
+    """
+    db_open_ids = set(db.get_open_ticket_ids())
+    synced_ids = set(upserted_ids)
+    missing_ids = sorted(db_open_ids - synced_ids)
+
+    if not missing_ids:
+        print("[reconcile] All DB-open tickets were seen in sync — nothing to reconcile.", flush=True)
+        return []
+
+    print(
+        f"[reconcile] {len(missing_ids)} ticket(s) open in DB but not returned by TS — "
+        f"re-fetching to check if closed…",
+        flush=True,
+    )
+
+    now = datetime.now(timezone.utc)
+    reconciled = []
+
+    for tid in missing_ids:
+        try:
+            raw_tickets = fetch_ticket_by_id(str(tid))
+            if not raw_tickets:
+                if verbose:
+                    print(f"  [reconcile] ticket_id={tid}: not found in TS — skipping.", flush=True)
+                continue
+
+            ticket_raw = raw_tickets[0]
+            ticket_row = _extract_ticket_row(ticket_raw, now)
+            tnum = ticket_row.get("ticket_number") or "?"
+
+            # Fetch + clean actions
+            raw_actions = fetch_all_activities(str(tid))
+            action_rows = []
+            for action_raw in raw_actions:
+                cleaned = clean_activity_dict(action_raw)
+                if not cleaned.get("action_id"):
+                    continue
+                action_row = _extract_action_row(action_raw, tid, cleaned)
+                action_row["ticket_number"] = tnum
+                action_rows.append(action_row)
+
+            db.upsert_ticket_with_actions(ticket_row, action_rows, now=now)
+            reconciled.append(tid)
+
+            status = ticket_row.get("status") or "unknown"
+            closed = ticket_row.get("closed_at")
+            label = f"CLOSED ({closed})" if closed else f"status={status}"
+            if verbose:
+                print(f"  [reconcile] #{tnum} (id={tid}): {label}", flush=True)
+
+        except Exception as exc:
+            print(f"  [reconcile] ERROR ticket_id={tid}: {exc}", flush=True)
+
+    print(f"[reconcile] Reconciled {len(reconciled)} ticket(s).", flush=True)
+    return reconciled
+
+
 # ── Status display ───────────────────────────────────────────────────
 
 def _show_status():
@@ -483,6 +642,14 @@ def main():
         "--verbose", "-v", action="store_true",
         help="Print per-ticket/action detail.",
     )
+    p_sync.add_argument(
+        "--no-reconcile", action="store_true",
+        help="Skip closed-ticket reconciliation after sync.",
+    )
+    p_sync.add_argument(
+        "--new-only", action="store_true",
+        help="Only sync tickets created (not just modified) since the watermark or --since date.",
+    )
 
     # status
     sub.add_parser("status", help="Show sync state and recent ingest runs.")
@@ -498,17 +665,25 @@ def main():
         return
 
     # ── sync command ──
+    log_fh = _start_log_file()
+
     if not db._is_enabled():
         print("ERROR: DATABASE_URL is not set.", file=sys.stderr)
         sys.exit(1)
 
     # Ensure schema and tables exist before syncing
-    db.migrate()
+    applied = db.migrate()
+    if applied:
+        from run_rollups import run_full_rollups
+        run_full_rollups()
 
-    # Parse --ticket
+    # Parse --ticket (CLI takes precedence over config.TARGET_TICKETS)
     ticket_numbers = None
     if args.ticket:
         ticket_numbers = [t.strip() for t in args.ticket.split(",") if t.strip()]
+    elif config.TARGET_TICKETS:
+        ticket_numbers = config.TARGET_TICKETS
+        print(f"[ingest] Using TARGET_TICKET from config: {', '.join(ticket_numbers)}", flush=True)
 
     # Parse --ticket-id
     ticket_ids = None
@@ -540,28 +715,51 @@ def main():
         max_tickets=max_tickets,
         dry_run=args.dry_run,
         verbose=args.verbose,
+        new_only=args.new_only,
     )
+
+    # ── Post-sync: reconcile closed tickets ──
+    # Only safe when we fetched ALL open tickets (not a targeted/partial sync).
+    is_full_sync = not (args.ticket or args.ticket_id or args.since or args.days or args.new_only)
+    effective_max = 0 if args.all else config.MAX_TICKETS
+    can_reconcile = (
+        is_full_sync
+        and not effective_max          # 0 = unlimited
+        and not args.dry_run
+        and not args.no_reconcile
+        and result["status"] == "completed"
+    )
+
+    reconciled_ids = []
+    if can_reconcile:
+        reconciled_ids = _reconcile_closed(
+            result.get("upserted_ids", []),
+            verbose=args.verbose,
+        )
 
     # ── Post-sync: rebuild rollups + analytics for touched tickets ──
     if not args.dry_run and result["status"] == "completed":
-        upserted = result.get("upserted_ids", [])
-        if upserted:
+        all_touched = result.get("upserted_ids", []) + reconciled_ids
+        if all_touched:
             from run_rollups import (
                 classify_actions, rebuild_rollups, rebuild_metrics,
                 run_analytics_for_tickets,
             )
             print(
                 f"\n[ingest] Post-sync: rebuilding rollups + analytics "
-                f"for {len(upserted)} ticket(s)\u2026",
+                f"for {len(all_touched)} ticket(s)\u2026",
                 flush=True,
             )
-            classify_actions(upserted)
-            rebuild_rollups(upserted)
-            rebuild_metrics(upserted)
-            run_analytics_for_tickets(upserted)
+            classify_actions(all_touched)
+            rebuild_rollups(all_touched)
+            rebuild_metrics(all_touched)
+            run_analytics_for_tickets(all_touched)
 
     if result["status"] != "completed":
+        log_fh.close()
         sys.exit(1)
+
+    log_fh.close()
 
 
 if __name__ == "__main__":

@@ -4,33 +4,54 @@
 
 Pull open-ticket activities from TeamSupport, cleanse the text, classify each activity by party (inHANCE team vs customer), write them to a timestamped JSON file, run sentiment analysis, AI priority scoring, and complexity analysis via Matcha LLM.
 
+## Domain Model
+
+See [DOMAIN_MODEL.md](DOMAIN_MODEL.md) for the complete operational domain model, including system purpose, end-to-end data pipeline, table semantics, LLM pipeline design, failure ontology, clustering system, intervention model, and product/domain knowledge.
+
 ## Architecture
 
 ```
-config.py              — Centralised settings (API creds, limits, target ticket, output dir, stage toggles, DATABASE_URL, SAFETY_BUFFER_MINUTES, INITIAL_BACKFILL_DAYS)
+config.py              — Centralised settings (API creds, limits, target ticket, output dir, stage toggles, FORCE_ENRICHMENT, DATABASE_URL, SAFETY_BUFFER_MINUTES, INITIAL_BACKFILL_DAYS)
 ts_client.py           — TeamSupport REST API client (fetch tickets, activities, inHANCE users, all-users name→ID mapping, update_ticket with auto LastInhComment/LastCustComment, fetch_ticket_by_id)
 activity_cleaner.py    — Text-cleaning pipeline (HTML→text, boilerplate/signature removal)
 matcha_client.py       — Matcha LLM API client (send prompts, extract responses)
 db.py                  — Postgres data-access layer (connection pool, migration runner, upsert helpers, enrichment persistence, get_sync_state watermark reader)
-run_ingest.py          — DB-backed incremental ingestion CLI (watermark-based sync, single-ticket resync, replay mode, status)
+run_ingest.py          — DB-backed incremental ingestion CLI (watermark-based sync with automatic created-since merge for opened+closed tickets, single-ticket resync, replay mode, status)
 action_classifier.py   — Deterministic rule-based action classification (no LLM; action_type='Description' → customer_problem_statement)
-run_rollups.py         — Rebuild action classification, thread rollups, and metrics from DB state
+run_rollups.py         — Rebuild action classification, thread rollups, metrics, and daily open counts from DB state; run_full_rollups() auto-triggers after any new migration
 run_all.py             — Orchestrator: runs all stages in sequence, merges fields, single API call per ticket (--force, --no-writeback)
-run_enrich_db.py       — DB-only enrichment: score all closed (or filtered) tickets from Postgres, no TS API calls
-run_csv_import.py      — Bulk-import Activities.csv into DB (synthetic action IDs, streaming, idempotent)
+run_enrich_db.py       — DB-only enrichment: score tickets from Postgres (priority + complexity + sentiment by default), no TS API calls
+run_csv_import.py      — Bulk-import Activities.csv into DB (synthetic action IDs, streaming, idempotent, derives closed_at from Days Closed)
 run_export.py          — Export canonical DB state to timestamped JSON artifacts
 run_pull_activities.py — Part 1: fetch, clean, classify activities → activities JSON
 run_sentiment.py       — Part 2: sentiment analysis via Matcha (DB persistence + hash-based skipping when DB available)
 run_priority.py        — Part 3: AI priority scoring via Matcha (DB persistence + hash-based skipping when DB available)
 run_complexity.py      — Part 4: complexity analysis via Matcha (DB persistence + hash-based skipping when DB available)
+run_ticket_pass1.py    — Pass 1: phenomenon extraction from full_thread_text via Matcha (DB-only, idempotent, prompt-versioned)
+pass1_parser.py        — Pass 1 response parser (strict JSON validation, phenomenon extraction; null phenomenon accepted as valid "no observable behavior")
+run_ticket_pass2.py    — Pass 2: canonical failure grammar from Pass 1 phenomenon via Matcha (DB-only, idempotent, prompt-versioned)
+pass2_parser.py        — Pass 2 response parser (strict JSON validation, operation normalization, canonical_failure reconstruction)
+run_ticket_pass3.py    — Pass 3: failure mechanism inference from Pass 2 canonical_failure via Matcha (DB-only, idempotent, prompt-versioned)
+pass3_parser.py        — Pass 3 response parser (strict JSON validation, mechanism extraction, lightweight restatement/admin-text rejection)
 migrations/            — Numbered SQL migration files applied by db.py
+web/app.py             — Dash + Mantine web dashboard entry point (read-only, live Postgres queries)
+web/dashboard.yaml     — YAML-driven dashboard configuration (pages, nav, queries, grids, charts, stat cards)
+web/renderer.py        — YAML config renderer: parses dashboard.yaml, builds Dash layouts for YAML-driven pages, imports custom page modules
+web/data.py            — Data access layer for the web dashboard (SELECT-only for analytics, plus dashboard-local CRUD for saved reports; no TS writes)
+web/pages/overview.py  — Overview page: KPI stat cards, backlog trend chart, aging distribution, open-by-product, chart drill-down (custom)
+web/pages/tickets.py   — Ticket explorer: AG Grid with filters, sorting, row-click navigation to detail, saved filter reports (custom)
+web/pages/ticket_detail.py — Ticket detail: metadata header, thread timeline, score cards, wait profile chart, issue summary (custom)
+web/pages/health.py    — Health dashboards: Customer and Product health AG Grid tables (kept for reference; now YAML-driven)
+web/pages/root_cause.py — Root Cause analysis: AG Grid of pass-processed tickets, detail view with Pass 1 (phenomenon), Pass 2 (grammar decomposition), Pass 3 placeholder, cleaned thread text (custom)
+web/pages/config_view.py — Pipeline config viewer (read-only display of all settings + sync status, custom)
+web_requirements.txt   — Python dependencies for the web dashboard (dash, dash-mantine-components, dash-ag-grid, PyYAML, etc.)
 ```
 
 ## Data Dictionary
 
 All database objects live in the `tickets_ai` schema. Every table that references a ticket carries both `ticket_id` (integer PK from TeamSupport) and `ticket_number` (human-readable, denormalised in Phase 8).
 
-### Tables (22)
+### Tables (23)
 
 | Table | Category | Purpose |
 |-------|----------|---------|
@@ -43,7 +64,7 @@ All database objects live in the `tickets_ai` schema. Every table that reference
 | `ticket_participants` | Derived | Each unique participant per ticket with action counts |
 | `ticket_handoffs` | Derived | Inferred transitions when party/participant changes between actions |
 | `ticket_wait_states` | Derived | Deterministic wait segments from action stream and lifecycle |
-| `ticket_sentiment` | Enrichment | LLM sentiment scores (append-only, hash-gated) |
+| `ticket_sentiment` | Enrichment | LLM sentiment scores (append-only, hash-gated); includes `frustrated_reason` |
 | `ticket_priority_scores` | Enrichment | LLM priority scores (append-only, hash-gated) |
 | `ticket_complexity_scores` | Enrichment | LLM complexity scores (append-only, hash-gated) |
 | `ticket_issue_summaries` | Enrichment | LLM issue/cause/mechanism/resolution summaries (schema-only) |
@@ -56,8 +77,10 @@ All database objects live in the `tickets_ai` schema. Every table that reference
 | `ticket_snapshots_daily` | Snapshot/Health | Point-in-time snapshot of ticket state on a given date |
 | `customer_ticket_health` | Snapshot/Health | Per-customer health rollup (open/HP/HC counts, pressure score) |
 | `product_ticket_health` | Snapshot/Health | Per-product health rollup (volume, complexity, dev-touched rate) |
+| `daily_open_counts` | Snapshot/Health | Aggregated daily counts of open tickets by product, status, and last-active participant (from ticket_participants) |
+| `saved_reports` | Dashboard | Named saved filter presets for the ticket explorer grid |
 
-### Views (15)
+### Views (17)
 
 | View | Purpose |
 |------|---------|
@@ -71,18 +94,26 @@ All database objects live in the `tickets_ai` schema. Every table that reference
 | `vw_customer_support_risk` | 90-day customer risk rollup |
 | `vw_product_pain_patterns` | Product-level pain/complexity grouping |
 | `vw_intervention_opportunities` | Intervention impact scoring and grouping |
-| `vw_backlog_daily` | Daily open/HP/HC backlog counts from snapshots |
-| `vw_backlog_weekly` | Weekly backlog averages |
-| `vw_backlog_weekly_eow` | End-of-week backlog from latest snapshot per week |
-| `vw_backlog_aging_current` | Current backlog by age buckets (0–6d through 90+d) |
-| `vw_backlog_weekly_from_dates` | Fallback weekly backlog from created/closed dates |
+| `vw_backlog_daily` | Daily open backlog from daily_open_counts; HP/HC from snapshots (newest first) |
+| `vw_backlog_weekly` | Weekly backlog averages from daily_open_counts; HP/HC from snapshots (newest first) |
+| `vw_backlog_weekly_eow` | End-of-week backlog from daily_open_counts; HP/HC from snapshots (newest first) |
+| `vw_backlog_daily_by_severity` | Daily open backlog by severity tier (High/Medium/Low) from tickets + daily_open_counts date spine |
+| `vw_backlog_aging_current` | Current backlog by age buckets from tickets table (status-aware) |
+| `vw_backlog_daily_by_participant_type` | Daily open backlog grouped by participant type (newest first) |
+| `vw_backlog_daily_by_participant_type_product` | Daily open backlog grouped by participant type + product (newest first) |
+| `vw_backlog_daily_by_participant_type_product_powman` | Same as above but products starting with "PM" or containing "Power" (case-insensitive) collapsed to "PowerMan" |
+| `vw_backlog_weekly_from_dates` | Weekly backlog from daily_open_counts (newest first) |
+| `vw_ticket_pass1_results` | Latest Pass 1 phenomenon result per ticket |
+| `vw_ticket_pass2_results` | Latest Pass 2 grammar result per ticket (joined with Pass 1 phenomenon) |
+| `vw_ticket_pass3_results` | Latest Pass 3 mechanism result per ticket (joined with Pass 1 + Pass 2) |
+| `vw_ticket_pass_pipeline` | Full pipeline status: Pass 1 + Pass 2 + Pass 3 side-by-side per ticket |
 
 ## Data Flow
 
 1. **Fetch tickets** — `ts_client.fetch_open_tickets(ticket_number=...)` queries the TeamSupport `/Tickets` endpoint. When `TARGET_TICKET` is set, the ticket is fetched by number regardless of open/closed status. When no target is set, only open tickets are returned (`isClosed=False`) with full pagination. If the API returns 403 (rate limit), the pipeline falls back to `Activities.csv`.
 2. **CSV fallback** — When the API is rate-limited or unavailable, `run_pull_activities.py` reads `Activities.csv` from the project root. Party classification uses cached inHANCE names from prior activity JSON files; if none exist, party is set to `"unknown"`. Some metadata fields (`ticket_id`, `status`, `severity`, `assignee`, `date_created`, `date_modified`) are unavailable from CSV.
 2. **Limit tickets** — When not targeting a specific ticket, `config.MAX_TICKETS` (default **5**) caps how many are processed. Set to `0` for unlimited.
-3. **Fetch activities per ticket** — `ts_client.fetch_all_activities(ticket_id)` pages through `/Tickets/{id}/Actions`.
+3. **Fetch activities per ticket** — `ts_client.fetch_all_activities(ticket_id)` pages through `/Tickets/{id}/Actions`. Deduplicates by action ID to guard against the TS API recycling pages past the real end, with a 500-page safety cap.
 4. **Load inHANCE user IDs** — `ts_client.fetch_inhance_user_ids()` calls `/Users?Organization=inHANCE` once and caches the set of CS-team user IDs.
 5. **Cleanse & classify each activity** — `activity_cleaner.clean_activity_dict(action)` runs the full pipeline:
    - HTML → plain text conversion (with double-encoded entity handling)
@@ -101,6 +132,7 @@ All database objects live in the `tickets_ai` schema. Every table that reference
 7. **Extract customer comments** — `run_sentiment.py` reads the latest activities JSON, filters to `party=cust` with non-empty descriptions, and takes the last N (default **4**).
 8. **Build prompt** — The instructions from `prompts/sentiment.md` are combined with the customer comments as a JSON input block.
 9. **Call Matcha** — `matcha_client.call_matcha()` sends the prompt to the Matcha LLM API with retry logic for transient failures.
+9a. **Parse response** — `run_sentiment.py` strips markdown code fences (`` ```json `` blocks) from Matcha responses before JSON parsing, with regex fallback extraction. This matches the robust parsing already used in `run_priority.py` and `run_complexity.py`. The response now includes `frustrated_reason` — a one-sentence explanation of the frustration classification.
 10. **Write sentiment JSON** — The response is written to `output/sentiment_YYYYMMDD_HHMMSS.json`.
 
 ## Activities JSON Schema
@@ -397,6 +429,9 @@ python run_ingest.py sync --ticket 29696
 # Resync multiple tickets by TicketNumber
 python run_ingest.py sync --ticket 29696,110554
 
+# Use TARGET_TICKET from config.py (fallback when --ticket is not provided)
+TARGET_TICKET=29696 python run_ingest.py sync
+
 # Resync a single ticket by internal TicketID
 python run_ingest.py sync --ticket-id 12345
 
@@ -411,6 +446,12 @@ python run_ingest.py sync --all
 
 # Dry-run — fetch from TS API but don't write to DB
 python run_ingest.py sync --ticket 29696 --dry-run --verbose
+
+# Only sync tickets CREATED since the last watermark (includes open + closed)
+python run_ingest.py sync --new-only
+
+# Only sync tickets CREATED since a specific date (includes open + closed)
+python run_ingest.py sync --new-only --since 2026-03-01
 
 # Show sync state and recent ingest runs
 python run_ingest.py status
@@ -440,7 +481,29 @@ python run_ingest.py status
 - Raw TS payloads are stored in `source_payload` JSONB columns.
 - `ingest_runs` records start/finish/counts/errors for each run.
 - `sync_state` tracks last successful sync.
-- The TS API does not support server-side `DateModifiedSince` filtering; the sync fetches all qualifying tickets and filters locally.
+- The TS API supports server-side date filtering on any date field using the format `YYYYMMDDHHMMSS` (UTC, 24-hour). The normal sync still post-filters by `DateModified` locally; `--new-only` uses server-side `DateCreated` filtering.
+
+**New-only mode (`--new-only`):**
+
+Uses the TeamSupport server-side `DateCreated` filter to fetch only tickets
+(open **and** closed) created after the watermark or `--since` date. This is
+efficient — only newly-created tickets are returned by the API, not the entire
+ticket archive. Captures tickets that were created and closed between sync runs.
+Does not advance the watermark.
+
+**Closed-ticket reconciliation:**
+
+When a full unrestricted sync completes (no `--ticket`/`--since`/`--days` and
+`MAX_TICKETS=0` or `--all`), the sync automatically detects tickets that are
+marked open in the DB (`closed_at IS NULL`) but were **not** returned by
+TeamSupport. These are presumed closed in TS. Each missing ticket is re-fetched
+individually via `fetch_ticket_by_id()` and upserted, updating `status`,
+`closed_at`, and all actions. Reconciled tickets are included in the post-sync
+rollup rebuild.
+
+- Reconciliation only runs on full syncs — partial syncs (`--ticket`, `--since`,
+  `--days`, `MAX_TICKETS > 0`) are excluded because missing tickets are expected.
+- Use `--no-reconcile` to skip reconciliation on a full sync.
 
 ### Analytical Derived Layer (run_rollups.py)
 
@@ -620,10 +683,10 @@ TARGET_TICKET=29696 python run_all.py --no-writeback  # dry-run
 
 ### Mode 3: DB-Only Enrichment (no TS API calls)
 
-Score all closed tickets using data already in Postgres. Only Matcha LLM calls are made. Hash-based skipping ensures only new/changed tickets are scored.
+Score all closed tickets using data already in Postgres. Only Matcha LLM calls are made. Hash-based skipping ensures only new/changed tickets are scored. Sentiment analysis is included by default.
 
 ```bash
-# Score all closed tickets (priority + complexity)
+# Score all closed tickets (priority + complexity + sentiment)
 python run_enrich_db.py
 
 # Limit to first 100 tickets
@@ -635,19 +698,21 @@ python run_enrich_db.py --priority-only --batch-size 10
 # Complexity only
 python run_enrich_db.py --complexity-only
 
-# Include sentiment
-python run_enrich_db.py --sentiment
+# Exclude sentiment
+python run_enrich_db.py --no-sentiment
 
 # Force rescore (ignore hash-based skip)
 python run_enrich_db.py --force --limit 50
 
 # Target Open tickets instead of Closed
+# (matches all non-closed tickets via closed_at IS NULL)
 python run_enrich_db.py --status Open
 ```
 
 **Key behaviours:**
 - **No TS API calls** — reads entirely from the Postgres DB.
 - **Hash-based skipping** — tickets already scored with the same content hash are skipped automatically. Use `--force` to override.
+- **Ticket counter logging** — each enrichment script logs `ticket count X/N` per ticket processed, enabling validation that the run stays within expected bounds.
 - **Batched priority** — priority scoring sends `--batch-size` tickets (default 20) per Matcha call.
 - **Per-ticket complexity** — complexity processes one ticket per Matcha call (inherent to the prompt design).
 - **Resilient** — errors in one batch don't stop the pipeline; processing continues with the next batch.
@@ -688,6 +753,7 @@ TARGET_TICKET=109683 python run_complexity.py
 | `Severity` | `tickets.severity` | |
 | `Date Ticket Created` | `tickets.date_created` | Parsed to UTC |
 | `Is Closed` | `tickets.status` | Mapped to Open/Closed |
+| `Days Closed` | `tickets.closed_at` | Integer; derived as `csv_export_date - timedelta(days=N)` |
 | `Group Name` | `tickets.assignee` | |
 | `Action Description` | `ticket_actions.description` | Raw + cleaned |
 | `Action Type` | `ticket_actions.action_type` | |
@@ -696,6 +762,7 @@ TARGET_TICKET=109683 python run_complexity.py
 
 **Key behaviours:**
 - **No Action ID in CSV**: Synthetic deterministic `action_id` generated from SHA-256 of `(ticket_id, date_created, description[:200])`. Re-importing the same CSV produces identical IDs.
+- **closed_at derivation**: CSV contains `Days Closed` (integer relative to export date) instead of an absolute close date. The import pre-scans all rows to find the latest `Date Ticket Created`, infers that as the CSV export date, then computes `closed_at = export_date - timedelta(days=Days_Closed)` for each closed ticket.
 - **Creator ID resolution**: `creator_id` is resolved via `ts_client.fetch_all_users()` which provides a name→ID mapping from the TS API. Party detection uses the inHANCE user ID set for authoritative `inh`/`cust` classification.
 - **Streaming**: CSV is processed row-by-row; the entire file is never loaded into memory.
 - **Idempotent**: Re-running the import converges to the same state (upsert semantics).
@@ -724,6 +791,8 @@ TARGET_TICKET=109683 python run_complexity.py
 | **Score closed (limit 100)** | `python run_enrich_db.py --limit 100` |
 | **Priority only (DB)** | `python run_enrich_db.py --priority-only` |
 | **Complexity only (DB)** | `python run_enrich_db.py --complexity-only` |
+| **Exclude sentiment (DB)** | `python run_enrich_db.py --no-sentiment` |
+| **Score open tickets (DB)** | `python run_enrich_db.py --status Open` |
 
 ### Canonical DB Concept
 
@@ -733,7 +802,7 @@ The Postgres database is the **canonical store** for all ticket data, action his
 - **Append-only enrichment**: Enrichment tables (`ticket_sentiment`, `ticket_priority_scores`, `ticket_complexity_scores`) are append-only. Each scoring run adds a new row. Historical scores are never deleted.
 - **Hash-based skipping**: Content hashes (`thread_hash`, `technical_core_hash`) in `ticket_thread_rollups` are compared against the most recent enrichment row. If unchanged, the LLM call is skipped. Use `--force` to override.
 - **Replay/resync**: Run `python run_ingest.py sync --ticket <num>` to re-fetch from the TS API; rollups and analytics are automatically rebuilt for all touched tickets. Enrichments will automatically detect the hash change and rescore on next run.
-- **Post-sync rollup rebuild**: Both `run_ingest.py` (API sync) and `run_csv_import.py` (CSV import) automatically rebuild all rollups and analytics (classify → rollups → metrics → participants → handoffs → wait_states → snapshot → health) for every upserted ticket after a successful sync. No manual `run_rollups.py` step is required.
+- **Post-sync rollup rebuild**: Both `run_ingest.py` (API sync) and `run_csv_import.py` (CSV import) automatically rebuild all rollups and analytics (classify → rollups → metrics → participants → handoffs → wait_states → snapshot → health → daily_open_counts) for every upserted ticket after a successful sync. No manual `run_rollups.py` step is required.
 
 ### Compatibility Notes
 
@@ -749,6 +818,61 @@ Two config flags control side-effects:
 - **`TS_WRITEBACK`** (default `0`): When `0`, no enrichment data is written back to TeamSupport — this is a **hard lock** that the `--no-writeback` CLI flag cannot override. `TS_WRITEBACK=0` in config always wins, regardless of CLI flags. When `1`, write-back is enabled but can be suppressed for a specific run using `--no-writeback`. When run standalone, `run_priority.py` and `run_complexity.py` also respect this default (their `write_back` parameter defaults to `TS_WRITEBACK` when not explicitly passed).
 
 - **`SKIP_OUTPUT_FILES`** (default `0`): When `1`, **no** files are written to the `output/` directory during enrichment — this includes activities JSON, enrichment result JSON, pipeline log files, and API call logs. This is useful when the DB is the canonical store and file artifacts are unwanted. When `0`, all files are written as usual.
+
+## Web Dashboard
+
+A live analytics dashboard built with Dash + Dash Mantine Components + AG Grid. Reads directly from the Postgres database — **no writes to the DB or TeamSupport**. All queries are SELECT-only through `web/data.py`.
+
+### Running
+
+```bash
+# Install dashboard dependencies
+pip install -r web_requirements.txt
+
+# Start the dashboard (default: http://localhost:8050)
+python3 web/app.py
+
+# Override port or disable debug mode
+WEB_PORT=9000 WEB_DEBUG=0 python3 web/app.py
+
+# For production (gunicorn)
+gunicorn web.app:server -b 0.0.0.0:8050
+```
+
+Requires `DATABASE_URL` to be set (reads from the `tickets_ai` schema).
+
+### Pages
+
+| Page | URL | Data Source | Description |
+|------|-----|------------|-------------|
+| Overview | `/` | `vw_ticket_analytics_core`, `vw_backlog_daily`, `vw_backlog_daily_by_severity`, `vw_backlog_aging_current` | KPI stat cards (open/HP/HC/frustrated), backlog trend stacked-area chart (severity breakdown: High=red, Medium=amber, Low=blue with total line overlay), aging distribution bar chart, open-by-product breakdown. **Click any bar** to drill down into the underlying tickets in a modal grid. |
+| Tickets | `/tickets` | `vw_ticket_analytics_core` | AG Grid explorer with column filters, sorting, floating filters. Click any row to navigate to detail. |
+| Ticket Detail | `/ticket/{id}` | `vw_ticket_analytics_core`, `ticket_actions`, `vw_ticket_wait_profile` | Metadata header, tabbed view: Thread (chronological action cards with party-colored borders), Scores (priority/complexity/sentiment cards), Wait Profile (horizontal bar chart of time per state), Summary (issue/cause/mechanism/resolution) |
+| Health | `/health` | `customer_ticket_health`, `product_ticket_health` | Tabbed AG Grid tables: Customer Health (pressure score, frustration, HP/HC counts) and Product Health (volume, complexity, dev-touched rate, customer wait rate) |
+| Config | `/config` | `config.*` attributes, `sync_state` | Read-only display of all pipeline settings grouped by category, plus sync status |
+
+### Architecture
+
+```
+web/
+├── app.py              ← Entry point: Mantine AppShell, routing, nav callbacks
+├── data.py             ← Read-only query layer (imports db.py, returns serialised dicts)
+└── pages/
+    ├── overview.py     ← KPI cards + Plotly charts
+    ├── tickets.py      ← AG Grid ticket list
+    ├── ticket_detail.py ← Full ticket view with tabs
+    ├── health.py       ← Customer + Product health grids
+    └── config_view.py  ← Pipeline config display
+```
+
+- **No modifications to existing code** — the dashboard imports `db.get_conn()`/`db.put_conn()` and `config.*` read-only.
+- **No TeamSupport API calls** — purely database-driven.
+- **Dash 4.x** with `suppress_callback_exceptions=True` for dynamic page content.
+- **Mantine v7** theming via `dash-mantine-components` for a polished UI.
+- **AG Grid** (`dash-ag-grid`) for high-performance data tables with built-in sort/filter/pagination.
+- **Chart drill-down** — clicking a bar in the Aging, Open-by-Product, or per-product Aging breakdown charts opens a modal with matching tickets in an AG Grid. Per-product aging bars filter by both product and age bucket. Click a row in the modal to navigate to the ticket detail page. Powered by `data.get_drilldown_tickets()` which filters by product (with PowerMan consolidation), severity tier, and/or age bucket.
+- **KPI card drill-down** — clicking any of the four overview stat cards (Open Tickets, High Priority, High Complexity, Frustrated) opens the same drill-down modal with the corresponding filtered ticket list.
+- **CSV export** — every AG Grid table (YAML-driven and code-driven) has an "Export CSV" button that triggers AG Grid's built-in CSV download. Callbacks are registered dynamically from the YAML config + known code-driven grid IDs.
 
 ## Tests
 
@@ -766,6 +890,8 @@ Test coverage includes:
 - **Write-back** (5 tests): LastInhComment/LastCustComment timestamp derivation
 - **Operational fixes** (11 tests): cache poisoning, atomic writes, retry logic, transaction batching
 - **Post-sync rollups** (4 tests): CSV import returns upserted IDs, rollup rebuild triggered after import, skipped on dry-run
+- **Pass 1 — phenomenon** (35 tests): parser, selection logic, idempotency, DB persistence, malformed handling, success flow, prompt template
+- **Pass 2 — grammar** (51 tests): parser, operation normalization, canonical failure reconstruction, selection logic, idempotency, DB persistence, malformed handling, success flow, prompt template
 
 ## Audit Summary (2026-03-13)
 
@@ -905,6 +1031,7 @@ Deterministic wait segments inferred from action stream and lifecycle:
   - `scheduling` → `scheduled`
   - Fallback: cust action → `waiting_on_support`, inh action → `waiting_on_customer`
 - Final segment is closed with `tickets.closed_at` if ticket is closed; otherwise left open (`end_at IS NULL`)
+- Guard: if `closed_at` predates the last action, `end_at` is clamped to `start_at` (zero-duration close) to satisfy the `chk_wait_state_end` constraint
 - `confidence`: 0.75, `inference_method`: `action_class_heuristic`
 - Full-refresh per ticket
 
@@ -963,6 +1090,7 @@ These tables are created by the migration but are **not yet populated** by the n
 | `vw_product_pain_patterns` | tickets + clusters + issue summaries | Product-level pain grouping |
 | `vw_intervention_opportunities` | interventions + tickets + clusters | Intervention impact grouping |
 | `vw_backlog_daily` | `ticket_snapshots_daily` | Daily open/HP/HC backlog counts |
+| `vw_backlog_daily_by_severity` | `tickets` + `daily_open_counts` | Daily open backlog by severity tier (High/Medium/Low) |
 | `vw_backlog_weekly` | `ticket_snapshots_daily` | Weekly backlog averages |
 | `vw_backlog_weekly_eow` | `ticket_snapshots_daily` | End-of-week backlog from latest snapshot per week |
 | `vw_backlog_aging_current` | `ticket_snapshots_daily` | Age buckets (0-6, 7-13, 14-29, 30-59, 60-89, 90+) |
@@ -1118,13 +1246,17 @@ ticket_thread_rollups.full_thread_text
 |--------|------|-------------|
 | id | BIGSERIAL PK | Row identifier |
 | ticket_id | BIGINT FK | References tickets(ticket_id) |
-| pass_name | TEXT | Stage name (e.g. `pass1_phenomenon`) |
-| input_text | TEXT | The full_thread_text sent to the model |
+| pass_name | TEXT | Stage name (e.g. `pass1_phenomenon`, `pass2_grammar`) |
+| input_text | TEXT | The text sent to the model (full_thread_text for Pass 1, phenomenon for Pass 2) |
 | prompt_version | TEXT | Version identifier for the prompt |
 | model_name | TEXT | Model identifier (e.g. `matcha-27301`) |
 | raw_response_text | TEXT | Raw text response from Matcha |
 | parsed_json | JSONB | Parsed JSON payload |
-| phenomenon | TEXT | Extracted phenomenon (projected column) |
+| phenomenon | TEXT | Pass 1 output; NULL for other passes |
+| component | TEXT | Pass 2 output: subsystem/module involved |
+| operation | TEXT | Pass 2 output: normalized operation verb |
+| unexpected_state | TEXT | Pass 2 output: unexpected system outcome |
+| canonical_failure | TEXT | Pass 2 output: `<Component> + <Operation> + <Unexpected State>` |
 | status | TEXT | `pending` / `success` / `failed` |
 | error_message | TEXT | Error details on failure |
 | started_at | TIMESTAMPTZ | When processing began |
@@ -1159,10 +1291,94 @@ FROM vw_ticket_pass1_results
 WHERE pass1_status = 'success';
 ```
 
-### Extending to Pass 2 and Pass 3
+### Extending to Pass 3+
 
 The `ticket_llm_pass_results` table is designed for multi-pass use:
-- Each pass uses a distinct `pass_name` (e.g. `pass2_root_cause`, `pass3_resolution`)
+- Each pass uses a distinct `pass_name` (e.g. `pass3_resolution`)
 - The same table, DB helpers, and CLI patterns can be reused
-- New parsers can be added per pass (e.g. `pass2_parser.py`)
-- New prompt files go in `prompts/` (e.g. `pass2_root_cause.txt`)
+- New parsers can be added per pass (e.g. `pass3_parser.py`)
+- New prompt files go in `prompts/` (e.g. `pass3_resolution.txt`)
+- New columns can be added via migration for pass-specific projected fields
+
+---
+
+## Pass 2 — Canonical Failure Grammar (LLM Multi-Pass Pipeline)
+
+### Overview
+
+Pass 2 converts each Pass 1 phenomenon into the standardized operational grammar:
+
+`<Component> + <Operation> + <Unexpected State>`
+
+This produces structured, normalized failure descriptions suitable for aggregation and root-cause analysis.
+
+### Architecture
+
+| Component | File | Purpose |
+|-----------|------|---------||
+| Migration | `migrations/015_pass2_grammar.sql` | Adds `component`, `operation`, `unexpected_state`, `canonical_failure` columns + `vw_ticket_pass2_results` and `vw_ticket_pass_pipeline` views |
+| Prompt | `prompts/pass2_grammar.txt` | Pass 2 prompt template with `{{input_text}}` placeholder (receives phenomenon) |
+| Parser | `pass2_parser.py` | Strict JSON validation, operation normalization via synonym map, canonical_failure reconstruction |
+| Orchestrator | `run_ticket_pass2.py` | CLI entrypoint + batch processing logic |
+| DB helpers | `db.py` | Extended `update_pass_result` (component/operation/unexpected_state/canonical_failure), `fetch_pending_pass2_tickets` |
+| Tests | `tests/test_pass2.py` | 51 focused tests (parser, normalization, reconstruction, selection, idempotency, persistence, malformed handling) |
+
+### Data Flow
+
+```
+ticket_llm_pass_results.phenomenon (from successful Pass 1)
+    → load prompt template (prompts/pass2_grammar.txt)
+    → substitute {{input_text}} with phenomenon
+    → call Matcha endpoint
+    → parse JSON response → extract component, operation, unexpected_state
+    → normalize operation verb (synonym mapping)
+    → reconstruct canonical_failure from parsed fields
+    → store in ticket_llm_pass_results (raw + parsed + status + projected columns)
+```
+
+### Pass 2 Output Fields
+
+| Field | Description | Example |
+|-------|-------------|----------|
+| component | Subsystem/module involved | `WebShare AutoPay transfer job` |
+| operation | Normalized verb from vocabulary | `transfer` |
+| unexpected_state | Unexpected system outcome | `payments remain in web tables` |
+| canonical_failure | Reconstructed `component + operation + unexpected_state` | `WebShare AutoPay transfer job + transfer + payments remain in web tables` |
+
+### Operation Normalization
+
+Operations are normalized to a fixed vocabulary: `post`, `import`, `export`, `print`, `load`, `transfer`, `calculate`, `attach`, `generate`, `recover`, `create`, `update`.
+
+Near-synonyms are mapped automatically (e.g. `upload` → `import`, `build` → `generate`, `modify` → `update`). Unknown operations cause a validation failure.
+
+### Selection Logic
+
+- Requires a successful Pass 1 result with non-null, non-empty phenomenon for the configured Pass 1 prompt version
+- Excludes tickets with an existing successful Pass 2 result for the current Pass 2 prompt version (unless `--force`)
+- `--failed-only` restricts to tickets with a prior failed Pass 2 attempt
+
+### CLI Usage
+
+```bash
+python run_ticket_pass2.py --limit 100
+python run_ticket_pass2.py --ticket-id 99784
+python run_ticket_pass2.py --ticket-id 99784,98154,100289
+python run_ticket_pass2.py --failed-only
+python run_ticket_pass2.py --force
+```
+
+### Analytics Views
+
+```sql
+-- Pass 2 results with Pass 1 phenomenon
+SELECT ticket_id, phenomenon, component, operation, unexpected_state,
+       canonical_failure, pass2_status
+FROM vw_ticket_pass2_results
+WHERE pass2_status = 'success';
+
+-- Full pipeline status at a glance
+SELECT ticket_id, ticket_number, phenomenon, pass1_status,
+       canonical_failure, pass2_status
+FROM vw_ticket_pass_pipeline
+WHERE pass1_status = 'success';
+```

@@ -19,7 +19,7 @@ import hashlib
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -159,7 +159,10 @@ def run_import(
         sys.exit(1)
 
     # Ensure schema/tables exist
-    db.migrate()
+    applied = db.migrate()
+    if applied:
+        from run_rollups import run_full_rollups
+        run_full_rollups()
 
     inh_names = _load_known_inh_names()
     if inh_names:
@@ -197,6 +200,23 @@ def run_import(
     seen_action_ids: set = set()
 
     try:
+        # Pre-scan: determine CSV export date from the latest ticket creation date.
+        # Days Closed values are relative to this date.
+        csv_export_date = None
+        with open(csv_path, "r", encoding="utf-8") as f:
+            for pre_row in csv.DictReader(f):
+                dtc = (pre_row.get("Date Ticket Created") or "").strip()
+                if dtc:
+                    dt = _parse_ts_date(dtc)
+                    if dt and (csv_export_date is None or dt > csv_export_date):
+                        csv_export_date = dt
+        if csv_export_date is None:
+            csv_export_date = datetime.now(timezone.utc)
+        # Use just the date portion (closed_at is a date, not datetime)
+        if hasattr(csv_export_date, 'date'):
+            csv_export_date = csv_export_date.date()
+        _log(f"[csv-import] Inferred CSV export date: {csv_export_date}")
+
         with open(csv_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
 
@@ -234,10 +254,20 @@ def run_import(
                     ticket_type = (row.get("Ticket Type") or "").strip()
                     is_closed_raw = (row.get("Is Closed") or "").strip().lower()
                     date_created_raw = (row.get("Date Ticket Created") or "").strip()
+                    days_closed_raw = (row.get("Days Closed") or "").strip()
                     days_opened_raw = (row.get("Days Opened") or "").strip()
                     days_since_mod_raw = (row.get("Days Since Ticket was Last Modified") or "").strip()
 
                     date_created = _parse_ts_date(date_created_raw)
+
+                    # Derive closed_at from Days Closed (relative to CSV export date)
+                    closed_at = None
+                    if is_closed_raw in ("true", "yes", "1") and days_closed_raw:
+                        try:
+                            days_closed_int = int(days_closed_raw)
+                            closed_at = csv_export_date - timedelta(days=days_closed_int)
+                        except (ValueError, TypeError):
+                            pass
 
                     # Derive status from Is Closed flag
                     status = None
@@ -270,6 +300,7 @@ def run_import(
                         "assignee": group_name or None,
                         "customer": customer or None,
                         "date_created": date_created,
+                        "closed_at": closed_at,
                         "days_opened": days_opened,
                         "days_since_modified": days_since_mod,
                         "source_payload": {

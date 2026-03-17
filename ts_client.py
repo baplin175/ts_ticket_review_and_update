@@ -63,27 +63,33 @@ def _ts_headers() -> Dict[str, str]:
 
 def ts_get(url: str, params=None) -> Any:
     try:
+        print(f"[api] GET {url}" + (f" params={params}" if params else ""), flush=True)
         r = requests.get(url, headers=_ts_headers(), params=params or {}, timeout=60)
         _log_api_call("GET", url, params=params, status=r.status_code)
+        print(f"[api] GET {url} → {r.status_code}", flush=True)
         r.raise_for_status()
         return r.json()
     except requests.exceptions.HTTPError:
         raise
     except Exception as exc:
+        print(f"[api] GET {url} → ERROR: {exc}", flush=True)
         _log_api_call("GET", url, params=params, error=str(exc))
         raise
 
 
 def ts_put(url: str, payload: Dict[str, Any]) -> Any:
     try:
+        print(f"[api] PUT {url}", flush=True)
         headers = {**_ts_headers(), "Content-Type": "application/json"}
         r = requests.put(url, headers=headers, json=payload, timeout=30)
         _log_api_call("PUT", url, payload=payload, status=r.status_code)
+        print(f"[api] PUT {url} → {r.status_code}", flush=True)
         r.raise_for_status()
         return r.json()
     except requests.exceptions.HTTPError:
         raise
     except Exception as exc:
+        print(f"[api] PUT {url} → ERROR: {exc}", flush=True)
         _log_api_call("PUT", url, payload=payload, error=str(exc))
         raise
 
@@ -166,6 +172,36 @@ def fetch_open_tickets(ticket_numbers: List[str] | None = None) -> List[Dict[str
     return all_tickets
 
 
+def fetch_tickets_created_since(since: datetime) -> List[Dict[str, Any]]:
+    """Return tickets (open + closed) created after *since* (server-side filter).
+
+    The TeamSupport API supports date filters on any date field using the
+    format ``YYYYMMDDHHMMSS`` (UTC, 24-hour).  Results include tickets with
+    ``DateCreated`` strictly greater than the given timestamp.
+    """
+    ts_date = since.strftime("%Y%m%d%H%M%S")
+    all_tickets: List[Dict[str, Any]] = []
+    page, page_size = 1, 500
+
+    while True:
+        params = {
+            "DateCreated": ts_date,
+            "pageNumber": page,
+            "pageSize": page_size,
+        }
+        data = ts_get(f"{TS_BASE}/Tickets", params=params)
+        page_items = _normalize_ticket_list(data)
+        if not page_items:
+            break
+        all_tickets.extend(page_items)
+        if len(page_items) < page_size:
+            break
+        page += 1
+
+    print(f"[ts] Fetched {len(all_tickets)} ticket(s) created since {since.isoformat()}.", flush=True)
+    return all_tickets
+
+
 def fetch_ticket_by_id(ticket_id: str) -> List[Dict[str, Any]]:
     """Fetch a single ticket by its internal TicketID.
 
@@ -185,7 +221,9 @@ def fetch_ticket_by_id(ticket_id: str) -> List[Dict[str, Any]]:
 def fetch_all_activities(ticket_id: str) -> List[Dict[str, Any]]:
     """Return every activity/action for a ticket (paginated, oldest→newest)."""
     all_actions: List[Dict[str, Any]] = []
+    seen_ids: set = set()
     page, page_size = 1, 100
+    MAX_PAGES = 500  # safety cap: 50,000 actions max per ticket
 
     while True:
         params = [("page", page), ("pageSize", page_size)]
@@ -193,8 +231,26 @@ def fetch_all_activities(ticket_id: str) -> List[Dict[str, Any]]:
         page_items = _normalize_action_list(data)
         if not page_items:
             break
-        all_actions.extend(page_items)
+
+        # Deduplicate: stop if the API is recycling pages past the real end
+        new_items = []
+        for item in page_items:
+            aid = str(item.get("ID") or item.get("ActionID") or "")
+            if aid and aid in seen_ids:
+                continue
+            if aid:
+                seen_ids.add(aid)
+            new_items.append(item)
+
+        if not new_items:
+            print(f"[ts] Ticket {ticket_id}: page {page} returned only duplicates — stopping.", flush=True)
+            break
+
+        all_actions.extend(new_items)
         if len(page_items) < page_size:
+            break
+        if page >= MAX_PAGES:
+            print(f"[ts] Ticket {ticket_id}: hit {MAX_PAGES}-page safety cap ({len(all_actions)} actions).", flush=True)
             break
         page += 1
 

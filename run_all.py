@@ -24,7 +24,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
-from config import LOG_TO_FILE, OUTPUT_DIR, RUN_COMPLEXITY, RUN_PRIORITY, RUN_SENTIMENT, SKIP_OUTPUT_FILES, TS_WRITEBACK
+from config import FORCE_ENRICHMENT, LOG_TO_FILE, OUTPUT_DIR, RUN_COMPLEXITY, RUN_PRIORITY, RUN_SENTIMENT, SKIP_OUTPUT_FILES, TS_WRITEBACK
 from run_pull_activities import main as pull_activities
 from run_sentiment import main as run_sentiment
 from run_priority import main as run_priority
@@ -71,6 +71,7 @@ def _setup_log_file() -> None:
 
 
 def main(*, force: bool = False, no_writeback: bool = False) -> None:
+    force = force or FORCE_ENRICHMENT
     _setup_log_file()
     if not TS_WRITEBACK:
         write_back = False  # config says off — hard lock, CLI cannot override

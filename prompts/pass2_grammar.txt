@@ -1,0 +1,199 @@
+PASS 2 PROMPT — Canonical Failure Grammar
+
+You are given a phenomenon statement extracted from a software support ticket.
+
+Your task is to convert that statement into a standardized operational failure grammar:
+
+<Component> + <Operation> + <Unexpected State>
+
+This grammar is used for clustering operational failures across many tickets, so outputs must be consistent, normalized, and structurally comparable.
+
+
+DEFINITIONS
+
+Component
+The system module, subsystem, workflow, report, integration, screen, process, interface, or job involved in the behavior.
+
+Prefer subsystem or workflow names rather than tiny field labels.
+
+Good component examples:
+- Invoice Cloud integration
+- Billing module
+- Work Order screen
+- Meter import process
+- Meter removal workflow
+- Payment display fields
+- Bank reconciliation report
+- Lockbox file import
+- Impresa → QuickBooks interface
+- Warranty date calculation
+
+Avoid overly small or weak components such as:
+- field names by themselves
+- individual columns
+- generic nouns with no system meaning
+
+If the phenomenon mentions only a field or value, infer the owning module or workflow when possible.
+
+Examples:
+Bad: Account description
+Better: Payment display fields
+
+Bad: Warranty dates
+Better: Warranty date calculation
+
+
+Operation
+The action the system was performing.
+
+Normalize operations to the following vocabulary whenever possible:
+
+display
+save
+upload
+import
+export
+print
+load
+transfer
+calculate
+generate
+create
+remove
+post
+validate
+sync
+update
+
+Choose the closest logical system action.
+
+Prefer these mappings when applicable:
+- does not save / fails to save / changes not saved → save
+- does not show / does not appear / appears incorrectly / displays incorrectly / shows wrong value → display
+- fails to upload / upload error → upload
+- fails to import / file not imported / import error → import
+- fails to export → export
+- prints incorrectly / prints twice / not printed → print
+- fails when removing / cannot remove → remove
+- value calculated incorrectly / wrong calculation → calculate
+- data not transferred / transfer did not run → transfer
+- records not updated / value not updated → update
+
+Avoid generic verbs like:
+- update
+- process
+- handle
+
+Only use "update" if no more specific operation fits.
+
+
+Unexpected State
+A short description of the incorrect observable system behavior.
+
+Keep this concise, factual, and behavior-focused.
+
+Examples:
+- files fail to upload
+- map does not appear
+- service charge prints twice
+- changes do not save when using return or tab
+- payment method displays incorrectly
+- meter removal fails with upload error
+- warranty date is set to install date instead of 10 years out
+
+Do not describe root cause.
+Do not describe troubleshooting steps.
+Do not include ticket history, dates, names, environments, or process notes unless essential to the behavior.
+
+
+CANONICAL FAILURE
+
+Combine the three fields exactly as:
+
+<Component> + <Operation> + <Unexpected State>
+
+Example:
+
+Input phenomenon:
+Files fail to upload to Invoice Cloud
+
+Output:
+Invoice Cloud integration + upload + files fail to upload
+
+
+NORMALIZATION GUIDELINES
+
+When possible:
+- normalize synonyms
+- remove environment details
+- remove ticket-specific wording
+- remove dates, IDs, names, and usernames
+- remove unnecessary context like “after script execution” unless it is essential to the behavior
+- keep wording stable so similar issues produce similar outputs
+
+Examples:
+
+Bad:
+Map on the desktop no longer appears on the work order
+
+Better:
+Work Order screen + display + map does not appear
+
+Bad:
+Renaming a field in Impresa does not save when using return or tab keys
+
+Better:
+Impresa field renaming + save + changes do not save when using return or tab
+
+Bad:
+Removing a meter from a service location fails with an upload error
+
+Better:
+Meter removal workflow + remove + meter removal fails with upload error
+
+Bad:
+Warranty dates are updated with install dates instead of 10 years from install dates
+
+Better:
+Warranty date calculation + calculate + warranty date is set to install date instead of 10 years out
+
+
+IMPORTANT RULES
+
+- Always return all four fields.
+- Keep wording consistent across similar issues.
+- Prefer system modules, workflows, and screens over tiny field labels.
+- Prefer specific operations over generic verbs.
+- Use "display" for show/appear/value-display issues when appropriate.
+- Use "save" for changes not being retained.
+- Use "upload" for upload failures.
+- Use "remove" for removal failures.
+- Keep unexpected_state short and factual.
+- Do not explain the cause.
+- Do not add commentary.
+- Return JSON only.
+
+
+OUTPUT FORMAT
+
+Return JSON exactly in this structure:
+
+{
+  "component": "",
+  "operation": "",
+  "unexpected_state": "",
+  "canonical_failure": ""
+}
+
+Where:
+
+canonical_failure =
+<Component> + <Operation> + <Unexpected State>
+
+
+TASK
+
+Convert the following phenomenon into canonical failure grammar.
+
+phenomenon:
+{{input_text}}

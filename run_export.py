@@ -242,7 +242,10 @@ def main():
         sys.exit(1)
 
     # Ensure schema and tables exist
-    db.migrate()
+    applied = db.migrate()
+    if applied:
+        from run_rollups import run_full_rollups
+        run_full_rollups()
 
     ticket = getattr(args, "ticket", None)
 

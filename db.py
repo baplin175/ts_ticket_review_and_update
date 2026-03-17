@@ -648,6 +648,7 @@ def insert_sentiment(
     prompt_name: Optional[str] = None,
     prompt_version: Optional[str] = None,
     frustrated: Optional[str] = None,
+    frustrated_reason: Optional[str] = None,
     activity_id: Optional[str] = None,
     created_at: Optional[str] = None,
     source_file: Optional[str] = None,
@@ -660,12 +661,12 @@ def insert_sentiment(
             cur.execute("""
                 INSERT INTO ticket_sentiment (
                     ticket_id, ticket_number, thread_hash, model_name, prompt_name,
-                    prompt_version, frustrated, activity_id, created_at,
+                    prompt_version, frustrated, frustrated_reason, activity_id, created_at,
                     source_file, raw_response
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """, (
                 ticket_id, ticket_number, thread_hash, model_name, prompt_name,
-                prompt_version, frustrated, activity_id, created_at,
+                prompt_version, frustrated, frustrated_reason, activity_id, created_at,
                 source_file,
                 psycopg2.extras.Json(raw_response) if raw_response is not None else None,
             ))
@@ -843,16 +844,41 @@ def ticket_numbers_for_ids(ticket_ids: list[int]) -> Dict[int, str]:
 
 
 def fetch_ticket_numbers_by_status(status: str) -> list[str]:
-    """Return all ticket_numbers matching the given status that have rollups."""
-    rows = fetch_all(
-        """SELECT t.ticket_number
-             FROM tickets t
-             JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
-            WHERE t.status = %s AND r.thread_hash IS NOT NULL
-            ORDER BY t.ticket_number;""",
-        (status,),
-    )
+    """Return all ticket_numbers matching the given status that have rollups.
+
+    Special values:
+      - ``"Open"`` — all non-closed tickets (closed_at IS NULL and status
+        NOT IN ('Closed', 'Closed with Survey')).
+      - Any other string — exact status match.
+    """
+    if status == "Open":
+        rows = fetch_all(
+            """SELECT t.ticket_number
+                 FROM tickets t
+                 JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
+                WHERE t.closed_at IS NULL
+                  AND COALESCE(t.status, '') NOT IN ('Closed', 'Closed with Survey')
+                  AND r.thread_hash IS NOT NULL
+                ORDER BY t.ticket_number;""",
+        )
+    else:
+        rows = fetch_all(
+            """SELECT t.ticket_number
+                 FROM tickets t
+                 JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
+                WHERE t.status = %s AND r.thread_hash IS NOT NULL
+                ORDER BY t.ticket_number;""",
+            (status,),
+        )
     return [str(r[0]) for r in rows]
+
+
+def get_open_ticket_ids() -> list[int]:
+    """Return ticket_ids for all tickets the DB considers still open (closed_at IS NULL)."""
+    rows = fetch_all(
+        "SELECT ticket_id FROM tickets WHERE closed_at IS NULL ORDER BY ticket_id;"
+    )
+    return [r[0] for r in rows]
 
 
 # ── Analytics rebuild helpers ────────────────────────────────────────
@@ -1022,6 +1048,41 @@ def upsert_product_health(row: Dict[str, Any]) -> None:
         put_conn(conn)
 
 
+def upsert_daily_open_count(row: Dict[str, Any]) -> None:
+    """Upsert a single daily_open_counts row."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO daily_open_counts (
+                    snapshot_date, product_name, status,
+                    participant_id, participant_name, participant_type,
+                    open_count
+                ) VALUES (
+                    %(snapshot_date)s, %(product_name)s, %(status)s,
+                    %(participant_id)s, %(participant_name)s, %(participant_type)s,
+                    %(open_count)s
+                )
+                ON CONFLICT (snapshot_date, product_name, status, participant_id)
+                DO UPDATE SET
+                    participant_name = EXCLUDED.participant_name,
+                    participant_type = EXCLUDED.participant_type,
+                    open_count       = EXCLUDED.open_count;
+            """, row)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def daily_open_counts_existing_dates() -> set:
+    """Return the set of snapshot_dates already present in daily_open_counts."""
+    rows = fetch_all("SELECT DISTINCT snapshot_date FROM daily_open_counts;")
+    return {r[0] for r in rows}
+
+
 # ── LLM multi-pass pipeline helpers ──────────────────────────────────
 
 def insert_pass_result(
@@ -1083,8 +1144,18 @@ def update_pass_result(
     phenomenon: Optional[str] = None,
     error_message: Optional[str] = None,
     completed_at: Optional[datetime] = None,
+    component: Optional[str] = None,
+    operation: Optional[str] = None,
+    unexpected_state: Optional[str] = None,
+    canonical_failure: Optional[str] = None,
+    mechanism: Optional[str] = None,
 ) -> None:
-    """Update an existing pass result row (e.g. pending → success/failed)."""
+    """Update an existing pass result row (e.g. pending → success/failed).
+
+    Pass 1 callers use *phenomenon*; Pass 2 callers use *component*,
+    *operation*, *unexpected_state*, *canonical_failure*; Pass 3 callers
+    use *mechanism*.  Unused kwargs default to None and are written as NULL.
+    """
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -1096,12 +1167,20 @@ def update_pass_result(
                        phenomenon         = %s,
                        error_message      = %s,
                        completed_at       = %s,
+                       component          = %s,
+                       operation          = %s,
+                       unexpected_state   = %s,
+                       canonical_failure  = %s,
+                       mechanism          = %s,
                        updated_at         = now()
                  WHERE id = %s;
             """, (
                 status, raw_response_text,
                 psycopg2.extras.Json(parsed_json) if parsed_json is not None else None,
-                phenomenon, error_message, completed_at, row_id,
+                phenomenon, error_message, completed_at,
+                component, operation, unexpected_state, canonical_failure,
+                mechanism,
+                row_id,
             ))
         conn.commit()
     except Exception:
@@ -1240,6 +1319,154 @@ def fetch_pending_pass1_tickets(
         f"SELECT t.ticket_id, r.full_thread_text "
         f"FROM tickets t "
         f"JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id "
+        f"WHERE {where_clause} "
+        f"ORDER BY t.ticket_id"
+    )
+    if limit > 0:
+        sql += f" LIMIT {limit}"
+    sql += ";"
+
+    return fetch_all(sql, tuple(params))
+
+
+def fetch_pending_pass2_tickets(
+    pass2_prompt_version: str,
+    *,
+    pass1_pass_name: str = "pass1_phenomenon",
+    pass1_prompt_version: str = "1",
+    limit: int = 0,
+    ticket_ids: Optional[List[int]] = None,
+    failed_only: bool = False,
+    force: bool = False,
+) -> List[Tuple]:
+    """Return (ticket_id, phenomenon) rows eligible for Pass 2.
+
+    Selection logic:
+      - ticket has a successful Pass 1 result with non-null phenomenon
+      - no successful pass2_grammar result for current prompt_version
+        (unless *force* is True)
+      - optionally filtered to specific ticket_ids
+      - optionally limited to failed-only reruns
+
+    Returns list of (ticket_id, phenomenon) tuples.
+    """
+    conditions = [
+        "p1.pass_name = %s",
+        "p1.prompt_version = %s",
+        "p1.status = 'success'",
+        "p1.phenomenon IS NOT NULL",
+        "p1.phenomenon != ''",
+    ]
+    params: list = [pass1_pass_name, pass1_prompt_version]
+
+    if ticket_ids:
+        placeholders = ",".join(["%s"] * len(ticket_ids))
+        conditions.append(f"t.ticket_id IN ({placeholders})")
+        params.extend(ticket_ids)
+
+    if not force:
+        conditions.append("""
+            NOT EXISTS (
+                SELECT 1 FROM ticket_llm_pass_results lp
+                 WHERE lp.ticket_id = t.ticket_id
+                   AND lp.pass_name = 'pass2_grammar'
+                   AND lp.prompt_version = %s
+                   AND lp.status = 'success'
+            )
+        """)
+        params.append(pass2_prompt_version)
+
+    if failed_only:
+        conditions.append("""
+            EXISTS (
+                SELECT 1 FROM ticket_llm_pass_results lp
+                 WHERE lp.ticket_id = t.ticket_id
+                   AND lp.pass_name = 'pass2_grammar'
+                   AND lp.prompt_version = %s
+                   AND lp.status = 'failed'
+            )
+        """)
+        params.append(pass2_prompt_version)
+
+    where_clause = " AND ".join(conditions)
+    sql = (
+        f"SELECT t.ticket_id, p1.phenomenon "
+        f"FROM tickets t "
+        f"JOIN ticket_llm_pass_results p1 ON p1.ticket_id = t.ticket_id "
+        f"WHERE {where_clause} "
+        f"ORDER BY t.ticket_id"
+    )
+    if limit > 0:
+        sql += f" LIMIT {limit}"
+    sql += ";"
+
+    return fetch_all(sql, tuple(params))
+
+
+def fetch_pending_pass3_tickets(
+    pass3_prompt_version: str,
+    *,
+    pass2_pass_name: str = "pass2_grammar",
+    pass2_prompt_version: str = "1",
+    limit: int = 0,
+    ticket_ids: Optional[List[int]] = None,
+    failed_only: bool = False,
+    force: bool = False,
+) -> List[Tuple]:
+    """Return (ticket_id, canonical_failure) rows eligible for Pass 3.
+
+    Selection logic:
+      - ticket has a successful Pass 2 result with non-null canonical_failure
+      - no successful pass3_mechanism result for current prompt_version
+        (unless *force* is True)
+      - optionally filtered to specific ticket_ids
+      - optionally limited to failed-only reruns
+
+    Returns list of (ticket_id, canonical_failure) tuples.
+    """
+    conditions = [
+        "p2.pass_name = %s",
+        "p2.prompt_version = %s",
+        "p2.status = 'success'",
+        "p2.canonical_failure IS NOT NULL",
+        "p2.canonical_failure != ''",
+    ]
+    params: list = [pass2_pass_name, pass2_prompt_version]
+
+    if ticket_ids:
+        placeholders = ",".join(["%s"] * len(ticket_ids))
+        conditions.append(f"t.ticket_id IN ({placeholders})")
+        params.extend(ticket_ids)
+
+    if not force:
+        conditions.append("""
+            NOT EXISTS (
+                SELECT 1 FROM ticket_llm_pass_results lp
+                 WHERE lp.ticket_id = t.ticket_id
+                   AND lp.pass_name = 'pass3_mechanism'
+                   AND lp.prompt_version = %s
+                   AND lp.status = 'success'
+            )
+        """)
+        params.append(pass3_prompt_version)
+
+    if failed_only:
+        conditions.append("""
+            EXISTS (
+                SELECT 1 FROM ticket_llm_pass_results lp
+                 WHERE lp.ticket_id = t.ticket_id
+                   AND lp.pass_name = 'pass3_mechanism'
+                   AND lp.prompt_version = %s
+                   AND lp.status = 'failed'
+            )
+        """)
+        params.append(pass3_prompt_version)
+
+    where_clause = " AND ".join(conditions)
+    sql = (
+        f"SELECT t.ticket_id, p2.canonical_failure "
+        f"FROM tickets t "
+        f"JOIN ticket_llm_pass_results p2 ON p2.ticket_id = t.ticket_id "
         f"WHERE {where_clause} "
         f"ORDER BY t.ticket_id"
     )

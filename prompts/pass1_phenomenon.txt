@@ -1,43 +1,142 @@
 You are analyzing software support ticket conversations.
 
-Each ticket contains a conversation transcript in the field full_thread_text.
+Each ticket contains a conversation transcript in the field:
+
+full_thread_text
 
 Your task is to extract the observable system behavior described in the ticket.
 
-Instructions
+The goal is to identify what the system actually did or failed to do.
 
-From the thread, identify the sentence that describes what the system actually did or failed to do.
+You are NOT diagnosing the problem and you are NOT explaining the cause.
 
-Ignore:
-- greetings
-- troubleshooting suggestions
-- support coordination
-- internal notes
-- resolution steps
+--------------------------------
+WHAT TO EXTRACT
+--------------------------------
 
-Focus only on observable system behavior.
+Extract a single normalized sentence describing the observable system behavior.
 
-The output must be a single normalized sentence describing the system behavior.
+A valid phenomenon describes:
 
-Examples of valid phenomenon statements:
+• a system component  
+• performing an operation  
+• resulting in an unexpected or incorrect state
 
-- AutoPay payments remain in web tables and do not post to AR batches
-- Bill prints deposit in credit section instead of charge line
-- Crystal reports fail to generate on two workstations
-- Meter import overwrites current readings with previous period data
-- Customer account screen crashes when payment plan exists
+Focus only on behavior visible to the user or system.
 
-Output format
+Examples of valid phenomena:
 
-Return JSON:
+AutoPay payments remain in web tables and do not post to AR batches
+
+Bill prints deposit in credit section instead of charge line
+
+Crystal Reports fail to generate on two workstations
+
+Meter import overwrites current readings with previous period data
+
+Customer account screen crashes when payment plan exists
+
+Files fail to upload to Invoice Cloud
+
+Service charge prints twice on bills for level billing customers
+
+--------------------------------
+WHAT TO IGNORE
+--------------------------------
+
+Ignore any content that does NOT describe system behavior.
+
+This includes:
+
+Support workflow events
+Ticket closed due to inactivity  
+Ticket closed due to no response  
+Customer added a review  
+Ticket assigned to another agent  
+
+Project or sales updates
+Customer is testing the system  
+Project is on hold  
+Quote was accepted or rejected  
+
+General statements
+Everything appears to be working  
+No issues reported  
+Work completed successfully  
+
+Administrative or coordination notes
+A separate ticket was created  
+Waiting for customer response  
+Work delivered to production  
+
+--------------------------------
+WHEN NO PHENOMENON EXISTS
+--------------------------------
+
+If the thread does NOT contain observable system behavior,
+return:
 
 {
-  "phenomenon": ""
+  "phenomenon": null
 }
 
-Task
+Do NOT explain why.
+Do NOT describe the ticket.
+Do NOT produce commentary.
+
+--------------------------------
+NORMALIZATION RULES
+--------------------------------
+
+The phenomenon should:
+
+• be a single sentence
+• describe observable behavior only
+• avoid root cause explanations
+• avoid support process language
+• be phrased in neutral system language
+• be concise and normalized so similar issues produce similar wording
+
+Prefer wording that highlights:
+
+<Component> + <operation> + <unexpected state>
+
+Example normalization:
+
+Instead of:
+
+"The customer says that when they upload the Neptune file the system gives an error"
+
+Write:
+
+Meter import fails when uploading Neptune file
+
+--------------------------------
+OUTPUT FORMAT
+--------------------------------
+
+Return ONLY JSON.
+
+Valid outputs:
+
+{
+  "phenomenon": "Meter import overwrites current readings with previous period data"
+}
+
+or
+
+{
+  "phenomenon": null
+}
+
+Do not return any additional text.
+
+--------------------------------
+TASK
+--------------------------------
 
 Analyze the following ticket and extract the phenomenon.
 
 full_thread_text:
+
 {{input_text}}

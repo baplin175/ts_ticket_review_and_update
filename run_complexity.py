@@ -25,7 +25,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import OUTPUT_DIR, RUN_COMPLEXITY, TARGET_TICKETS, MATCHA_MISSION_ID, TS_WRITEBACK, SKIP_OUTPUT_FILES
+from config import FORCE_ENRICHMENT, OUTPUT_DIR, RUN_COMPLEXITY, TARGET_TICKETS, MATCHA_MISSION_ID, TS_WRITEBACK, SKIP_OUTPUT_FILES
 from matcha_client import call_matcha
 from ts_client import update_ticket
 
@@ -259,10 +259,11 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
 
     prompt_template = _load_prompt()
     all_results = []
+    total_tickets = len(tickets)
 
-    for ticket in tickets:
+    for idx, ticket in enumerate(tickets, 1):
         tnum = ticket.get("ticket_number", "?")
-        _log(f"[complexity] Scoring ticket {tnum}...")
+        _log(f"[complexity] ticket count {idx}/{total_tickets} — Scoring ticket {tnum}...")
 
         # 2. Build prompt with ticket history
         ticket_history = _build_ticket_history(ticket)
@@ -363,4 +364,4 @@ if __name__ == "__main__":
         parser.add_argument("--force", action="store_true",
                             help="Force rerun even if technical_core_hash is unchanged.")
         args = parser.parse_args()
-        main(force=args.force)
+        main(force=args.force or FORCE_ENRICHMENT)

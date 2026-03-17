@@ -40,7 +40,7 @@ def test_csv_run_import_returns_upserted_ids(tmp_path):
     )
 
     with patch("db._is_enabled", return_value=True), \
-         patch("db.migrate"), \
+         patch("db.migrate", return_value=[]), \
          patch("db.create_ingest_run", return_value="run-1"), \
          patch("db.complete_ingest_run"), \
          patch("db.upsert_ticket"), \
@@ -70,7 +70,7 @@ def test_csv_dry_run_returns_upserted_ids(tmp_path):
     )
 
     with patch("db._is_enabled", return_value=True), \
-         patch("db.migrate"), \
+         patch("db.migrate", return_value=[]), \
          patch("run_csv_import._load_known_inh_names", return_value=set()), \
          patch("ts_client.fetch_all_users", return_value={}):
 
@@ -105,7 +105,7 @@ def test_csv_main_triggers_rollup_rebuild_after_import(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.argv", ["run_csv_import.py", "--csv", str(csv_file)])
 
     with patch("db._is_enabled", return_value=True), \
-         patch("db.migrate"), \
+         patch("db.migrate", return_value=[]), \
          patch("db.create_ingest_run", return_value="run-1"), \
          patch("db.complete_ingest_run"), \
          patch("db.upsert_ticket"), \
@@ -145,7 +145,7 @@ def test_csv_main_skips_rollup_on_dry_run(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.argv", ["run_csv_import.py", "--csv", str(csv_file), "--dry-run"])
 
     with patch("db._is_enabled", return_value=True), \
-         patch("db.migrate"), \
+         patch("db.migrate", return_value=[]), \
          patch("run_csv_import._load_known_inh_names", return_value=set()), \
          patch("ts_client.fetch_all_users", return_value={}), \
          patch("run_rollups.classify_actions", mock_classify):

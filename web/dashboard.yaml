@@ -1,0 +1,185 @@
+# TS Ticket Analytics — Dashboard Configuration
+#
+# Pages with 'module' use existing Python layout functions (custom pages).
+# Pages with 'components' or 'tabs' are rendered automatically from this config.
+#
+# To add a new page:   append an entry under 'pages'.
+# To add a chart/grid: append a component under 'components' (or inside a tab).
+# To add a data source: add a named query under 'queries'.
+#
+# Component types:
+#   alert     — colored banner with optional icon
+#   grid      — AG Grid table backed by a query
+#   chart     — Plotly chart (bar, horizontal_bar, stacked_bar, line, area)
+#   stat_row  — row of KPI stat cards from a single query
+#
+# Chart types:  bar | horizontal_bar | stacked_bar | line | area
+#
+# Grid columns use AG Grid property names (camelCase).
+# Convenience aliases: header → headerName, min_width → minWidth,
+#   max_width → maxWidth, cell_style → cellStyle,
+#   value_formatter → valueFormatter.
+
+# ─── Named SQL Queries ──────────────────────────────────────────────
+
+queries:
+
+  customer_health:
+    sql: |
+      SELECT * FROM customer_ticket_health
+      WHERE as_of_date = (SELECT MAX(as_of_date) FROM customer_ticket_health)
+      ORDER BY ticket_load_pressure_score DESC NULLS LAST
+
+  product_health:
+    sql: |
+      SELECT * FROM product_ticket_health
+      WHERE as_of_date = (SELECT MAX(as_of_date) FROM product_ticket_health)
+      ORDER BY ticket_volume DESC NULLS LAST
+
+# ─── Pages ──────────────────────────────────────────────────────────
+# Order here determines sidebar navigation order.
+
+pages:
+
+  # ── Custom code-driven pages ──────────────────────────────────────
+
+  - label: Overview
+    route: /
+    icon: tabler:dashboard
+    aliases: [/overview]
+    module: pages.overview
+    layout_func: overview_layout
+
+  - label: Tickets
+    route: /tickets
+    icon: tabler:ticket
+    match_prefix: /ticket/
+    module: pages.tickets
+    layout_func: tickets_layout
+
+  # ── YAML-driven pages ────────────────────────────────────────────
+
+  - label: Health
+    route: /health
+    icon: tabler:heart-rate-monitor
+    title: Health Dashboards
+    tabs:
+      - label: Customer Health
+        value: customer
+        components:
+          - type: grid
+            query: customer_health
+            id: customer-health-grid
+            height: "calc(100vh - 280px)"
+            columns:
+              - field: customer
+                headerName: Customer
+                minWidth: 160
+                flex: 1
+                pinned: left
+              - field: open_ticket_count
+                headerName: Open
+                width: 80
+                type: numericColumn
+              - field: high_priority_count
+                headerName: High Pri
+                width: 90
+                type: numericColumn
+                cellStyle:
+                  function: "params.value > 0 ? {'color': '#e03131', 'fontWeight': 'bold'} : {}"
+              - field: high_complexity_count
+                headerName: High Cmplx
+                width: 100
+                type: numericColumn
+                cellStyle:
+                  function: "params.value > 0 ? {'color': '#e8590c', 'fontWeight': 'bold'} : {}"
+              - field: avg_complexity
+                headerName: Avg Complexity
+                width: 130
+                type: numericColumn
+                valueFormatter:
+                  function: "params.value != null ? Number(params.value).toFixed(1) : ''"
+              - field: frustration_count_90d
+                headerName: Frustrated (90d)
+                width: 140
+                type: numericColumn
+                cellStyle:
+                  function: "params.value > 0 ? {'color': '#c2255c', 'fontWeight': 'bold'} : {}"
+              - field: ticket_load_pressure_score
+                headerName: Pressure Score
+                width: 130
+                type: numericColumn
+                valueFormatter:
+                  function: "params.value != null ? Number(params.value).toFixed(2) : ''"
+                cellStyle:
+                  function: "params.value != null && params.value > 5 ? {'color': '#e03131', 'fontWeight': 'bold'} : {}"
+              - field: as_of_date
+                headerName: As Of
+                width: 110
+                valueFormatter:
+                  function: "params.value ? new Date(params.value).toLocaleDateString() : ''"
+
+      - label: Product Health
+        value: product
+        components:
+          - type: grid
+            query: product_health
+            id: product-health-grid
+            height: "calc(100vh - 280px)"
+            columns:
+              - field: product_name
+                headerName: Product
+                minWidth: 160
+                flex: 1
+                pinned: left
+              - field: ticket_volume
+                headerName: Volume
+                width: 90
+                type: numericColumn
+              - field: avg_complexity
+                headerName: Avg Complexity
+                width: 130
+                type: numericColumn
+                valueFormatter:
+                  function: "params.value != null ? Number(params.value).toFixed(1) : ''"
+              - field: avg_coordination_load
+                headerName: Avg Coord Load
+                width: 140
+                type: numericColumn
+                valueFormatter:
+                  function: "params.value != null ? Number(params.value).toFixed(1) : ''"
+              - field: avg_elapsed_drag
+                headerName: Avg Elapsed Drag
+                width: 140
+                type: numericColumn
+                valueFormatter:
+                  function: "params.value != null ? Number(params.value).toFixed(1) : ''"
+              - field: dev_touched_rate
+                headerName: Dev Touched %
+                width: 130
+                type: numericColumn
+                valueFormatter:
+                  function: "params.value != null ? (Number(params.value) * 100).toFixed(1) + '%' : ''"
+              - field: customer_wait_rate
+                headerName: Cust Wait %
+                width: 120
+                type: numericColumn
+                valueFormatter:
+                  function: "params.value != null ? (Number(params.value) * 100).toFixed(1) + '%' : ''"
+              - field: as_of_date
+                headerName: As Of
+                width: 110
+                valueFormatter:
+                  function: "params.value ? new Date(params.value).toLocaleDateString() : ''"
+
+  - label: Root Cause
+    route: /root-cause
+    icon: tabler:search
+    module: pages.root_cause
+    layout_func: root_cause_layout
+
+  - label: Config
+    route: /config
+    icon: tabler:settings
+    module: pages.config_view
+    layout_func: config_layout

@@ -1,19 +1,19 @@
 """
-Pass 1 — Phenomenon extraction from support ticket threads.
+Pass 3 — Failure mechanism inference from Pass 2 canonical failure.
 
-Reads full_thread_text from ticket_thread_rollups, sends it to Matcha
-with the Pass 1 prompt, parses the JSON response, and stores both the
-raw response and parsed output in ticket_llm_pass_results.
+Reads the canonical_failure from a successful Pass 2 result, sends it to
+Matcha with the Pass 3 prompt, parses the JSON response into a structured
+mechanism field, and stores both the raw response and parsed output in
+ticket_llm_pass_results.
 
 Requires DATABASE_URL to be set (Postgres mode).
 
 Usage:
-    python run_ticket_pass1.py --limit 100
-    python run_ticket_pass1.py --ticket-id 99784
-    python run_ticket_pass1.py --ticket-id 99784,98154,100289
-    python run_ticket_pass1.py --failed-only
-    python run_ticket_pass1.py --force
-    python run_ticket_pass1.py --since 2026-03-01
+    python run_ticket_pass3.py --limit 100
+    python run_ticket_pass3.py --ticket-id 99784
+    python run_ticket_pass3.py --ticket-id 99784,98154,100289
+    python run_ticket_pass3.py --failed-only
+    python run_ticket_pass3.py --force
 """
 
 import argparse
@@ -24,15 +24,19 @@ from datetime import datetime, timezone
 
 from config import MATCHA_MISSION_ID
 from matcha_client import call_matcha
-from pass1_parser import parse_pass1_response, Pass1ParseError
+from pass3_parser import parse_pass3_response, validate_mechanism, Pass3ParseError
 
 PROMPT_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "prompts", "pass1_phenomenon.txt"
+    os.path.dirname(os.path.abspath(__file__)), "prompts", "pass3_mechanism.txt"
 )
 
-PASS_NAME = "pass1_phenomenon"
+PASS_NAME = "pass3_mechanism"
 PROMPT_VERSION = "1"
 MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
+
+# Pass 2 dependency — which Pass 2 result to source canonical_failure from
+PASS2_PASS_NAME = "pass2_grammar"
+PASS2_PROMPT_VERSION = "1"
 
 
 def _log(msg: str) -> None:
@@ -44,28 +48,28 @@ def _load_prompt_template() -> str:
         return f.read()
 
 
-def _build_prompt(template: str, full_thread_text: str) -> str:
+def _build_prompt(template: str, canonical_failure: str) -> str:
     """Replace {{input_text}} placeholder in the prompt template."""
-    return template.replace("{{input_text}}", full_thread_text)
+    return template.replace("{{input_text}}", canonical_failure)
 
 
 def process_ticket(
     ticket_id: int,
-    full_thread_text: str,
+    canonical_failure: str,
     prompt_template: str,
     *,
     force: bool = False,
 ) -> dict:
-    """Process a single ticket through Pass 1.
+    """Process a single ticket through Pass 3.
 
-    Returns a result dict with status, phenomenon, timing, etc.
+    Returns a result dict with status, parsed fields, timing, etc.
     """
     import db
 
     result = {
         "ticket_id": ticket_id,
         "status": "pending",
-        "phenomenon": None,
+        "mechanism": None,
         "error": None,
         "elapsed_s": 0.0,
     }
@@ -73,7 +77,7 @@ def process_ticket(
     started_at = datetime.now(timezone.utc)
     start_time = time.monotonic()
 
-    # If force, clean up prior failed/pending rows to allow fresh attempt
+    # Clean up prior rows
     if force:
         db.delete_prior_failed_pass(ticket_id, PASS_NAME, PROMPT_VERSION)
         # Also remove prior success so the unique index allows a new one
@@ -94,11 +98,10 @@ def process_ticket(
         finally:
             db.put_conn(conn)
     else:
-        # Clean up prior failed/pending rows for a fresh attempt
         db.delete_prior_failed_pass(ticket_id, PASS_NAME, PROMPT_VERSION)
 
     # Build prompt
-    full_prompt = _build_prompt(prompt_template, full_thread_text)
+    full_prompt = _build_prompt(prompt_template, canonical_failure)
 
     # Insert pending row
     row_id = db.insert_pass_result(
@@ -106,7 +109,7 @@ def process_ticket(
         pass_name=PASS_NAME,
         prompt_version=PROMPT_VERSION,
         model_name=MODEL_NAME,
-        input_text=full_thread_text,
+        input_text=canonical_failure,
         status="pending",
         started_at=started_at,
     )
@@ -116,8 +119,11 @@ def process_ticket(
         # Call Matcha
         raw_response = call_matcha(full_prompt)
 
-        # Parse + validate
-        parsed_json, phenomenon = parse_pass1_response(raw_response)
+        # Parse + validate JSON structure
+        parsed_json, mechanism = parse_pass3_response(raw_response)
+
+        # Validate mechanism content (restatement / admin text checks)
+        validate_mechanism(mechanism, canonical_failure)
 
         completed_at = datetime.now(timezone.utc)
         elapsed = time.monotonic() - start_time
@@ -128,17 +134,15 @@ def process_ticket(
             status="success",
             raw_response_text=raw_response,
             parsed_json=parsed_json,
-            phenomenon=phenomenon,
+            mechanism=mechanism,
             completed_at=completed_at,
         )
 
         result["status"] = "success"
-        result["phenomenon"] = phenomenon
+        result["mechanism"] = mechanism
         result["elapsed_s"] = round(elapsed, 2)
-        if phenomenon is None:
-            _log(f"[pass1]   (no observable phenomenon)")
 
-    except Pass1ParseError as exc:
+    except Pass3ParseError as exc:
         completed_at = datetime.now(timezone.utc)
         elapsed = time.monotonic() - start_time
 
@@ -180,44 +184,45 @@ def main(
     limit: int = 0,
     force: bool = False,
     failed_only: bool = False,
-    since: str | None = None,
 ) -> list[dict]:
-    """Run Pass 1 for eligible tickets.
+    """Run Pass 3 for eligible tickets.
 
     Returns a list of result dicts (one per ticket processed).
     """
     import db
 
     if not db._is_enabled():
-        _log("[pass1] DATABASE_URL is not set. Pass 1 requires a Postgres DB.")
+        _log("[pass3] DATABASE_URL is not set. Pass 3 requires a Postgres DB.")
         sys.exit(1)
 
-    # Run migrations to ensure table exists
+    # Run migrations to ensure table/columns exist
     applied = db.migrate()
     if applied:
         from run_rollups import run_full_rollups
         run_full_rollups()
 
     prompt_template = _load_prompt_template()
-    _log(f"[pass1] Loaded prompt from {PROMPT_PATH}")
-    _log(f"[pass1] Pass: {PASS_NAME}  Prompt version: {PROMPT_VERSION}  Model: {MODEL_NAME}")
+    _log(f"[pass3] Loaded prompt from {PROMPT_PATH}")
+    _log(f"[pass3] Pass: {PASS_NAME}  Prompt version: {PROMPT_VERSION}  Model: {MODEL_NAME}")
+    _log(f"[pass3] Requires Pass 2: {PASS2_PASS_NAME} v{PASS2_PROMPT_VERSION}")
 
-    # Fetch eligible tickets
-    rows = db.fetch_pending_pass1_tickets(
+    # Fetch eligible tickets (those with successful Pass 2 canonical_failure)
+    rows = db.fetch_pending_pass3_tickets(
         PROMPT_VERSION,
+        pass2_pass_name=PASS2_PASS_NAME,
+        pass2_prompt_version=PASS2_PROMPT_VERSION,
         limit=limit,
         ticket_ids=ticket_ids,
         failed_only=failed_only,
         force=force,
-        since=since,
     )
 
     total = len(rows)
     if total == 0:
-        _log("[pass1] No eligible tickets found.")
+        _log("[pass3] No eligible tickets found.")
         return []
 
-    _log(f"[pass1] Found {total} ticket(s) to process.")
+    _log(f"[pass3] Found {total} ticket(s) to process.")
     _log("=" * 60)
 
     results = []
@@ -226,12 +231,13 @@ def main(
     skipped = 0
     total_start = time.monotonic()
 
-    for idx, (ticket_id, full_thread_text) in enumerate(rows, 1):
-        _log(f"\n[pass1] [{idx}/{total}] Ticket {ticket_id}")
+    for idx, (ticket_id, canonical_failure) in enumerate(rows, 1):
+        _log(f"\n[pass3] [{idx}/{total}] Ticket {ticket_id}")
+        _log(f"[pass3]   canonical_failure: {canonical_failure[:80]}{'…' if len(canonical_failure) > 80 else ''}")
 
         r = process_ticket(
             ticket_id,
-            full_thread_text,
+            canonical_failure,
             prompt_template,
             force=force,
         )
@@ -239,28 +245,25 @@ def main(
 
         if r["status"] == "success":
             succeeded += 1
-            if r["phenomenon"]:
-                _log(f"[pass1]   ✓ phenomenon: {r['phenomenon'][:80]}{'…' if len(r['phenomenon']) > 80 else ''}")
-            else:
-                _log(f"[pass1]   ✓ no observable phenomenon")
+            _log(f"[pass3]   ✓ {r['mechanism']}")
         elif r["status"] == "failed":
             failed += 1
-            _log(f"[pass1]   ✗ error: {r['error']}")
+            _log(f"[pass3]   ✗ error: {r['error']}")
         else:
             skipped += 1
 
-        _log(f"[pass1]   elapsed: {r['elapsed_s']}s")
+        _log(f"[pass3]   elapsed: {r['elapsed_s']}s")
 
     total_elapsed = time.monotonic() - total_start
 
     # Summary
     _log(f"\n{'=' * 60}")
-    _log(f"[pass1] Run complete.")
-    _log(f"[pass1]   Total:     {total}")
-    _log(f"[pass1]   Succeeded: {succeeded}")
-    _log(f"[pass1]   Failed:    {failed}")
-    _log(f"[pass1]   Skipped:   {skipped}")
-    _log(f"[pass1]   Elapsed:   {total_elapsed:.1f}s")
+    _log("[pass3] Run complete.")
+    _log(f"[pass3]   Total:     {total}")
+    _log(f"[pass3]   Succeeded: {succeeded}")
+    _log(f"[pass3]   Failed:    {failed}")
+    _log(f"[pass3]   Skipped:   {skipped}")
+    _log(f"[pass3]   Elapsed:   {total_elapsed:.1f}s")
     _log("=" * 60)
 
     return results
@@ -268,7 +271,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Pass 1 — Phenomenon extraction from support ticket threads."
+        description="Pass 3 — Failure mechanism inference from Pass 2 canonical failure."
     )
     parser.add_argument(
         "--ticket-id",
@@ -292,12 +295,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Only rerun tickets that previously failed.",
     )
-    parser.add_argument(
-        "--since",
-        type=str,
-        default=None,
-        help="Only process tickets created after this date (ISO 8601, e.g. 2026-03-01).",
-    )
 
     args = parser.parse_args()
 
@@ -311,5 +308,4 @@ if __name__ == "__main__":
         limit=args.limit,
         force=args.force,
         failed_only=args.failed_only,
-        since=args.since,
     )

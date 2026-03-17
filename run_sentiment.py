@@ -22,11 +22,12 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import OUTPUT_DIR, RUN_SENTIMENT, TARGET_TICKETS, MATCHA_MISSION_ID, SKIP_OUTPUT_FILES
+from config import FORCE_ENRICHMENT, OUTPUT_DIR, RUN_SENTIMENT, TARGET_TICKETS, MATCHA_MISSION_ID, SKIP_OUTPUT_FILES
 from matcha_client import call_matcha
 
 CUST_COMMENT_COUNT = int(os.getenv("CUST_COMMENT_COUNT", "4"))
@@ -143,6 +144,7 @@ def _persist_to_db(ticket_id: int, ticket_number: str | None, thread_hash: str |
         prompt_name=PROMPT_NAME,
         prompt_version=PROMPT_VERSION,
         frustrated=response_obj.get("frustrated"),
+        frustrated_reason=response_obj.get("frustrated_reason"),
         activity_id=str(response_obj.get("activity_id", "")) or None,
         created_at=response_obj.get("created_at"),
         source_file=source_file,
@@ -179,9 +181,10 @@ def main(activities_file: str | None = None, *, force: bool = False,
         _log(f"[sentiment] Using activities file: {activities_file}")
 
     all_results = []
+    total_tickets = len(target_tickets)
 
-    for tkt_num in target_tickets:
-        _log(f"[sentiment] Processing ticket {tkt_num}...")
+    for idx, tkt_num in enumerate(target_tickets, 1):
+        _log(f"[sentiment] ticket count {idx}/{total_tickets} — Processing ticket {tkt_num}...")
 
         ticket_id = tid_map.get(tkt_num)
         thread_hash = None
@@ -224,6 +227,7 @@ Input:
 Output format (strict JSON):
 {{
   "frustrated": "Yes" or "No",
+  "frustrated_reason": "<one-sentence reason>" or null,
   "ticket_number": "{tkt_num}",
   "activity_id": "<id>" or null,
   "created_at": "<timestamp>" or null
@@ -244,7 +248,21 @@ Output format (strict JSON):
         try:
             response_obj = json.loads(reply)
         except json.JSONDecodeError:
-            response_obj = {"raw_response": reply}
+            # Strip markdown code fences and retry
+            stripped = re.sub(r"^```(?:json)?\s*\n?", "", reply.strip(), flags=re.MULTILINE)
+            stripped = re.sub(r"\n?```\s*$", "", stripped.strip(), flags=re.MULTILINE)
+            try:
+                response_obj = json.loads(stripped)
+            except json.JSONDecodeError:
+                # Last resort: extract first JSON object via regex
+                m = re.search(r"\{.*\}", reply, re.DOTALL)
+                if m:
+                    try:
+                        response_obj = json.loads(m.group())
+                    except json.JSONDecodeError:
+                        response_obj = {"raw_response": reply}
+                else:
+                    response_obj = {"raw_response": reply}
 
         # 5. Persist to DB
         if ticket_id and db_enabled:
@@ -281,4 +299,4 @@ if __name__ == "__main__":
         parser.add_argument("--force", action="store_true",
                             help="Force rerun even if thread_hash is unchanged.")
         args = parser.parse_args()
-        main(force=args.force)
+        main(force=args.force or FORCE_ENRICHMENT)

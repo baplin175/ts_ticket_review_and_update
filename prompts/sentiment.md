@@ -7,6 +7,8 @@ Your task:
 Determine if the customer is frustrated (Yes or No).
 If frustration is detected, identify the specific activity where it first occurs.
 Return the 'ticket_number', activity_id and the created_at timestamp for that activity.
+If frustrated is "Yes", include a one-sentence reason citing the specific language or behavior that triggered the classification.
+If frustrated is "No", set the reason to null.
 Always return your answer in strict JSON format.
 Always return the same ticket number and content as provided in the input.
 
@@ -70,7 +72,8 @@ Input:
 Output format (strict JSON):  
 {
   "frustrated": "Yes" or "No",
-  "ticket_number":"104872",
+  "frustrated_reason": "Customer requested a status update ('any update on this?')" or null,
+  "ticket_number": "104872",
   "activity_id": "72320658" or null,
   "created_at": "9/3/2025 7:43 PM" or null
 }

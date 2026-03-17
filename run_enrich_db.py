@@ -37,16 +37,19 @@ def main() -> None:
                         help="Run only priority scoring.")
     parser.add_argument("--complexity-only", action="store_true",
                         help="Run only complexity scoring.")
-    parser.add_argument("--sentiment", action="store_true",
-                        help="Include sentiment analysis (off by default).")
+    parser.add_argument("--no-sentiment", action="store_true",
+                        help="Exclude sentiment analysis (on by default).")
     parser.add_argument("--status", default="Closed",
                         help="Ticket status to target (default: Closed).")
     args = parser.parse_args()
 
+    from config import FORCE_ENRICHMENT
+    force = args.force or FORCE_ENRICHMENT
+
     # Determine which stages to run
     run_priority = not args.complexity_only
     run_complexity = not args.priority_only
-    run_sentiment = args.sentiment and not args.priority_only and not args.complexity_only
+    run_sentiment = not args.no_sentiment and not args.priority_only and not args.complexity_only
 
     # ── Verify DB ──
     try:
@@ -91,7 +94,7 @@ def main() -> None:
             try:
                 results = priority_main(
                     write_back=False,
-                    force=args.force,
+                    force=force,
                     ticket_numbers=batch,
                 )
                 scored = len(results)
@@ -125,7 +128,7 @@ def main() -> None:
             try:
                 results = complexity_main(
                     write_back=False,
-                    force=args.force,
+                    force=force,
                     ticket_numbers=batch,
                 )
                 scored = len(results)
@@ -146,7 +149,7 @@ def main() -> None:
         _log(f"\n[enrich] Stage 3: Sentiment analysis ({len(all_tickets)} tickets)")
         from run_sentiment import main as sentiment_main
         try:
-            sentiment_main(force=args.force, ticket_numbers=all_tickets)
+            sentiment_main(force=force, ticket_numbers=all_tickets)
         except SystemExit:
             _log("[enrich] Sentiment stage exited.")
         except Exception as e:
