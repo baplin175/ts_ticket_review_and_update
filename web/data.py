@@ -294,7 +294,7 @@ def get_recent_ingest_runs(limit=10):
 # ── Root Cause (LLM pass results) ───────────────────────────────────
 
 def get_root_cause_tickets():
-    """Return tickets that have at least one pass1 or pass2 result."""
+    """Return tickets that have at least one pass1, pass2, or pass3 result."""
     return query("""
         SELECT
             t.ticket_id,
@@ -311,7 +311,10 @@ def get_root_cause_tickets():
             p2.unexpected_state,
             p2.canonical_failure,
             p2.status        AS pass2_status,
-            p2.completed_at  AS pass2_completed_at
+            p2.completed_at  AS pass2_completed_at,
+            p3.mechanism,
+            p3.status        AS pass3_status,
+            p3.completed_at  AS pass3_completed_at
         FROM tickets t
         LEFT JOIN LATERAL (
             SELECT phenomenon, status, completed_at
@@ -332,8 +335,17 @@ def get_root_cause_tickets():
                      lp.updated_at DESC
             LIMIT 1
         ) p2 ON TRUE
-        WHERE p1.status IS NOT NULL OR p2.status IS NOT NULL
-        ORDER BY COALESCE(p2.completed_at, p1.completed_at) DESC NULLS LAST
+        LEFT JOIN LATERAL (
+            SELECT mechanism, status, completed_at
+            FROM ticket_llm_pass_results lp
+            WHERE lp.ticket_id = t.ticket_id
+              AND lp.pass_name = 'pass3_mechanism'
+            ORDER BY CASE WHEN lp.status = 'success' THEN 0 ELSE 1 END,
+                     lp.updated_at DESC
+            LIMIT 1
+        ) p3 ON TRUE
+        WHERE p1.status IS NOT NULL OR p2.status IS NOT NULL OR p3.status IS NOT NULL
+        ORDER BY COALESCE(p3.completed_at, p2.completed_at, p1.completed_at) DESC NULLS LAST
     """)
 
 
@@ -341,7 +353,7 @@ def get_root_cause_detail(ticket_id):
     """Return full pass results + cleaned thread for a single ticket."""
     passes = query("""
         SELECT id, pass_name, status, phenomenon, component, operation,
-               unexpected_state, canonical_failure, parsed_json,
+               unexpected_state, canonical_failure, mechanism, parsed_json,
                raw_response_text, error_message, prompt_version,
                model_name, started_at, completed_at
         FROM ticket_llm_pass_results

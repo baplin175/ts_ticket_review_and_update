@@ -1,4 +1,4 @@
-"""Root Cause page — LLM pass results (pass1 phenomenon, pass2 grammar, future pass3)."""
+"""Root Cause page — LLM pass results (pass1 phenomenon, pass2 grammar, pass3 mechanism)."""
 
 import json
 
@@ -98,6 +98,8 @@ _GRID_COLS = [
     {"field": "component", "headerName": "Component", "width": 160},
     {"field": "operation", "headerName": "Operation", "width": 120},
     {"field": "unexpected_state", "headerName": "Unexpected State", "minWidth": 180, "flex": 1},
+    {"field": "pass3_status", "headerName": "Pass 3", "width": 90},
+    {"field": "mechanism", "headerName": "Mechanism", "minWidth": 200, "flex": 1},
 ]
 
 
@@ -200,8 +202,23 @@ def register_callbacks(app):
         else:
             pass2_card = _placeholder_card("Pass 2 — Grammar Decomposition", "tabler:puzzle")
 
-        # Pass 3 — placeholder
-        pass3_card = _placeholder_card("Pass 3 — (Future)", "tabler:bulb")
+        # Pass 3 — Mechanism Inference
+        p3 = by_name.get("pass3_mechanism")
+        if p3:
+            pass3_card = _pass_card(
+                "Pass 3 — Mechanism Inference", "tabler:bulb",
+                p3.get("status"),
+                [
+                    ("Mechanism", p3.get("mechanism")),
+                    ("Model", p3.get("model_name")),
+                    ("Prompt Version", p3.get("prompt_version")),
+                    ("Completed", str(p3.get("completed_at", ""))[:19]),
+                ],
+                raw_json=p3.get("parsed_json"),
+                error=p3.get("error_message"),
+            )
+        else:
+            pass3_card = _placeholder_card("Pass 3 — Mechanism Inference", "tabler:bulb")
 
         # Cleaned thread text
         thread_text = thread.get("technical_core_text") or thread.get("full_thread_text") or ""

@@ -42,7 +42,7 @@ web/pages/overview.py  — Overview page: KPI stat cards, backlog trend chart, a
 web/pages/tickets.py   — Ticket explorer: AG Grid with filters, sorting, row-click navigation to detail, saved filter reports (custom)
 web/pages/ticket_detail.py — Ticket detail: metadata header, thread timeline, score cards, wait profile chart, issue summary (custom)
 web/pages/health.py    — Health dashboards: Customer and Product health AG Grid tables (kept for reference; now YAML-driven)
-web/pages/root_cause.py — Root Cause analysis: AG Grid of pass-processed tickets, detail view with Pass 1 (phenomenon), Pass 2 (grammar decomposition), Pass 3 placeholder, cleaned thread text (custom)
+web/pages/root_cause.py — Root Cause analysis: AG Grid of pass-processed tickets, detail view with Pass 1 (phenomenon), Pass 2 (grammar decomposition), Pass 3 (mechanism inference), cleaned thread text (custom)
 web/pages/config_view.py — Pipeline config viewer (read-only display of all settings + sync status, custom)
 web_requirements.txt   — Python dependencies for the web dashboard (dash, dash-mantine-components, dash-ag-grid, PyYAML, etc.)
 ```
