@@ -16,7 +16,7 @@ ts_client.py           — TeamSupport REST API client (fetch tickets, activitie
 activity_cleaner.py    — Text-cleaning pipeline (HTML→text, boilerplate/signature removal)
 matcha_client.py       — Matcha LLM API client (send prompts, extract responses)
 db.py                  — Postgres data-access layer (connection pool, migration runner, upsert helpers, enrichment persistence, get_sync_state watermark reader)
-run_ingest.py          — DB-backed incremental ingestion CLI (watermark-based sync with automatic created-since merge for opened+closed tickets, single-ticket resync, replay mode, status)
+run_ingest.py          — DB-backed incremental ingestion CLI (watermark-based sync with automatic created-since merge for opened+closed tickets, single-ticket resync, replay mode, --sentiment flag for post-sync enrichment, status)
 action_classifier.py   — Deterministic rule-based action classification (no LLM; action_type='Description' → customer_problem_statement)
 run_rollups.py         — Rebuild action classification, thread rollups, metrics, and daily open counts from DB state; run_full_rollups() auto-triggers after any new migration
 run_all.py             — Orchestrator: runs all stages in sequence, merges fields, single API call per ticket (--force, --no-writeback)

@@ -9,6 +9,7 @@ Usage:
     python run_ingest.py sync --since 2026-03-01    # replay tickets modified since date
     python run_ingest.py sync --days 7              # replay last N days
     python run_ingest.py sync --all                 # full fetch (ignore MAX_TICKETS)
+    python run_ingest.py sync --all --sentiment      # full sync + sentiment for touched tickets
     python run_ingest.py sync --dry-run             # fetch & log but don't write to DB
     python run_ingest.py status                     # show sync state + recent runs
 
@@ -650,6 +651,10 @@ def main():
         "--new-only", action="store_true",
         help="Only sync tickets created (not just modified) since the watermark or --since date.",
     )
+    p_sync.add_argument(
+        "--sentiment", action="store_true",
+        help="Run sentiment enrichment for all tickets touched during this sync.",
+    )
 
     # status
     sub.add_parser("status", help="Show sync state and recent ingest runs.")
@@ -754,6 +759,26 @@ def main():
             rebuild_rollups(all_touched)
             rebuild_metrics(all_touched)
             run_analytics_for_tickets(all_touched)
+
+    # ── Post-sync: sentiment enrichment for touched tickets ──
+    if args.sentiment and not args.dry_run and result["status"] == "completed":
+        all_touched = result.get("upserted_ids", []) + reconciled_ids
+        if all_touched:
+            from run_sentiment import main as sentiment_main
+            num_map = db.ticket_numbers_for_ids(all_touched)
+            touched_numbers = [num_map[tid] for tid in all_touched if tid in num_map]
+            if touched_numbers:
+                print(
+                    f"\n[ingest] Post-sync: running sentiment for "
+                    f"{len(touched_numbers)} ticket(s)\u2026",
+                    flush=True,
+                )
+                try:
+                    sentiment_main(force=False, ticket_numbers=touched_numbers)
+                except SystemExit:
+                    print("[ingest] Sentiment stage exited.", flush=True)
+                except Exception as exc:
+                    print(f"[ingest] Sentiment error: {exc}", flush=True)
 
     if result["status"] != "completed":
         log_fh.close()
