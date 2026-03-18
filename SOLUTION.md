@@ -1382,3 +1382,52 @@ SELECT ticket_id, ticket_number, phenomenon, pass1_status,
 FROM vw_ticket_pass_pipeline
 WHERE pass1_status = 'success';
 ```
+
+## analytics_queries.py — Operational Analytics Module
+
+`analytics_queries.py` exposes 10 read-only SQL queries as Python string
+constants plus thin wrapper functions that execute them against an existing
+`psycopg2` connection.
+
+### SQL Constants
+
+| Constant | Purpose |
+|---|---|
+| `SQL_ROOT_CAUSE_DISTRIBUTION` | Count tickets by `root_cause_class` with percentage of total |
+| `SQL_ROOT_CAUSE_SEVERITY` | Count tickets grouped by `root_cause_class` × `severity` |
+| `SQL_FUNCTIONAL_AREA_DISTRIBUTION` | Count tickets grouped by `functional_area` |
+| `SQL_PREVENTABLE_VS_ENGINEERING` | Bucket into *engineering_required* vs *preventable_operational* |
+| `SQL_TICKET_AGING_BY_CAUSE` | Average `days_opened` by `root_cause_class` (join to `tickets`) |
+| `SQL_FRUSTRATION_BY_CAUSE` | Frustrated-ticket rate by root cause (join to `ticket_sentiment`) |
+| `SQL_PRODUCT_RELIABILITY` | Ticket count by `product_name` (join to `tickets`) |
+| `SQL_INTEGRATION_FAILURE_RATE` | Integration-related ticket count and percentage |
+| `SQL_HIGH_PRIORITY_BY_CAUSE` | High-priority (≤ 3) tickets by root cause (join to `ticket_priority_scores`) |
+| `SQL_TOP_FAILURE_MECHANISMS` | Top 20 mechanisms from Pass 3 results |
+
+### Helper Functions
+
+| Function | Description |
+|---|---|
+| `run_query(conn, sql, params, as_df)` | Execute SQL; return `list[dict]` or `pandas.DataFrame` |
+| `root_cause_distribution(conn, as_df)` | Wrapper for `SQL_ROOT_CAUSE_DISTRIBUTION` |
+| `root_cause_severity(conn, as_df)` | Wrapper for `SQL_ROOT_CAUSE_SEVERITY` |
+| `functional_area_distribution(conn, as_df)` | Wrapper for `SQL_FUNCTIONAL_AREA_DISTRIBUTION` |
+| `preventable_vs_engineering(conn, as_df)` | Wrapper for `SQL_PREVENTABLE_VS_ENGINEERING` |
+| `ticket_aging_by_cause(conn, as_df)` | Wrapper for `SQL_TICKET_AGING_BY_CAUSE` |
+| `frustration_by_cause(conn, as_df)` | Wrapper for `SQL_FRUSTRATION_BY_CAUSE` |
+| `product_reliability(conn, as_df)` | Wrapper for `SQL_PRODUCT_RELIABILITY` |
+| `integration_failure_rate(conn, as_df)` | Wrapper for `SQL_INTEGRATION_FAILURE_RATE` |
+| `high_priority_by_cause(conn, as_df)` | Wrapper for `SQL_HIGH_PRIORITY_BY_CAUSE` |
+| `top_failure_mechanisms(conn, as_df)` | Wrapper for `SQL_TOP_FAILURE_MECHANISMS` |
+
+### Usage
+
+```python
+import psycopg2
+import analytics_queries
+
+conn = psycopg2.connect("postgresql://user:pass@localhost:5432/Work")
+rows = analytics_queries.root_cause_distribution(conn)
+df   = analytics_queries.top_failure_mechanisms(conn, as_df=True)
+conn.close()
+```
