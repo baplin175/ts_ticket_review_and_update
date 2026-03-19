@@ -37,6 +37,7 @@ Select exactly one:
 - field_mapping_error
 - cache_inconsistency
 - permission_error
+- other                       (use ONLY when none of the above fit; requires proposed_class)
 
 
 INTERVENTION TYPES
@@ -50,6 +51,7 @@ Select exactly one:
 - data_repair             (fix corrupted data)
 - documentation           (missing documentation)
 - customer_training       (user workflow correction)
+- other                   (use ONLY when none of the above fit; requires proposed_type)
 
 
 INTERVENTION GUIDELINES
@@ -109,6 +111,12 @@ Return JSON only.
   "intervention_type": "",
   "intervention_action": ""
 }
+
+If mechanism_class is "other", also include:
+  "proposed_class": "<snake_case name for the new class>"
+
+If intervention_type is "other", also include:
+  "proposed_type": "<snake_case name for the new type>"
 
 
 TASK

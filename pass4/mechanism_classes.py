@@ -2,7 +2,8 @@
 Pass 4 — Normalized mechanism class taxonomy.
 
 A fixed set of mechanism classes used to categorize failure mechanisms.
-No free-form classes are allowed; every mechanism must map to one of these.
+Every mechanism must map to one of these.  When none of the named classes
+fit, use "other" and supply a proposed_class for taxonomy review.
 """
 
 MECHANISM_CLASSES = frozenset({
@@ -19,4 +20,5 @@ MECHANISM_CLASSES = frozenset({
     "field_mapping_error",
     "cache_inconsistency",
     "permission_error",
+    "other",
 })

@@ -24,7 +24,7 @@ PROMPT_PATH = os.path.join(
 )
 
 PASS_NAME = "pass4_intervention"
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"
 MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
 
 

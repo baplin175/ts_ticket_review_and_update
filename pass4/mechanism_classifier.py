@@ -76,6 +76,15 @@ def parse_pass4_response(raw_text: str) -> Tuple[dict, str, str, str]:
         )
     parsed["mechanism_class"] = mechanism_class
 
+    # When mechanism_class is 'other', require proposed_class
+    if mechanism_class == "other":
+        proposed = parsed.get("proposed_class")
+        if not proposed or not isinstance(proposed, str) or not proposed.strip():
+            raise Pass4ParseError(
+                "'proposed_class' is required when mechanism_class is 'other'"
+            )
+        parsed["proposed_class"] = proposed.strip().lower()
+
     # Extract and validate intervention_type
     intervention_type = parsed["intervention_type"]
     if intervention_type is None:
@@ -93,6 +102,15 @@ def parse_pass4_response(raw_text: str) -> Tuple[dict, str, str, str]:
             f"Must be one of: {sorted(INTERVENTION_TYPES)}"
         )
     parsed["intervention_type"] = intervention_type
+
+    # When intervention_type is 'other', require proposed_type
+    if intervention_type == "other":
+        proposed = parsed.get("proposed_type")
+        if not proposed or not isinstance(proposed, str) or not proposed.strip():
+            raise Pass4ParseError(
+                "'proposed_type' is required when intervention_type is 'other'"
+            )
+        parsed["proposed_type"] = proposed.strip().lower()
 
     # Extract and validate intervention_action
     intervention_action = parsed["intervention_action"]
