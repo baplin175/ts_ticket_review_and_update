@@ -217,11 +217,14 @@ class TestTaxonomyValidation:
         from pass4.mechanism_classifier import parse_pass4_response
         from pass4.mechanism_classes import MECHANISM_CLASSES
         for mc in sorted(MECHANISM_CLASSES):
-            raw = json.dumps({
+            payload = {
                 "mechanism_class": mc,
                 "intervention_type": "software_fix",
-                "intervention_action": "fix it"
-            })
+                "intervention_action": "fix it",
+            }
+            if mc == "other":
+                payload["proposed_class"] = "new_class_name"
+            raw = json.dumps(payload)
             _, got_mc, _, _ = parse_pass4_response(raw)
             assert got_mc == mc
 
@@ -229,21 +232,79 @@ class TestTaxonomyValidation:
         from pass4.mechanism_classifier import parse_pass4_response
         from pass4.intervention_types import INTERVENTION_TYPES
         for it in sorted(INTERVENTION_TYPES):
-            raw = json.dumps({
+            payload = {
                 "mechanism_class": "schema_mismatch",
                 "intervention_type": it,
-                "intervention_action": "fix it"
-            })
+                "intervention_action": "fix it",
+            }
+            if it == "other":
+                payload["proposed_type"] = "new_type_name"
+            raw = json.dumps(payload)
             _, _, got_it, _ = parse_pass4_response(raw)
             assert got_it == it
 
     def test_mechanism_classes_count(self):
         from pass4.mechanism_classes import MECHANISM_CLASSES
-        assert len(MECHANISM_CLASSES) == 13
+        assert len(MECHANISM_CLASSES) == 14
 
     def test_intervention_types_count(self):
         from pass4.intervention_types import INTERVENTION_TYPES
-        assert len(INTERVENTION_TYPES) == 7
+        assert len(INTERVENTION_TYPES) == 8
+
+    def test_other_mechanism_class_requires_proposed(self):
+        from pass4.mechanism_classifier import parse_pass4_response, Pass4ParseError
+        raw = json.dumps({
+            "mechanism_class": "other",
+            "intervention_type": "software_fix",
+            "intervention_action": "fix it"
+        })
+        with pytest.raises(Pass4ParseError, match="proposed_class.*required"):
+            parse_pass4_response(raw)
+
+    def test_other_mechanism_class_with_proposed(self):
+        from pass4.mechanism_classifier import parse_pass4_response
+        raw = json.dumps({
+            "mechanism_class": "other",
+            "intervention_type": "software_fix",
+            "intervention_action": "fix it",
+            "proposed_class": "rate_calculation_drift"
+        })
+        parsed, mc, it, ia = parse_pass4_response(raw)
+        assert mc == "other"
+        assert parsed["proposed_class"] == "rate_calculation_drift"
+
+    def test_other_intervention_type_requires_proposed(self):
+        from pass4.mechanism_classifier import parse_pass4_response, Pass4ParseError
+        raw = json.dumps({
+            "mechanism_class": "schema_mismatch",
+            "intervention_type": "other",
+            "intervention_action": "fix it"
+        })
+        with pytest.raises(Pass4ParseError, match="proposed_type.*required"):
+            parse_pass4_response(raw)
+
+    def test_other_intervention_type_with_proposed(self):
+        from pass4.mechanism_classifier import parse_pass4_response
+        raw = json.dumps({
+            "mechanism_class": "schema_mismatch",
+            "intervention_type": "other",
+            "intervention_action": "fix it",
+            "proposed_type": "process_redesign"
+        })
+        parsed, mc, it, ia = parse_pass4_response(raw)
+        assert it == "other"
+        assert parsed["proposed_type"] == "process_redesign"
+
+    def test_other_proposed_class_normalized(self):
+        from pass4.mechanism_classifier import parse_pass4_response
+        raw = json.dumps({
+            "mechanism_class": "other",
+            "intervention_type": "software_fix",
+            "intervention_action": "fix it",
+            "proposed_class": "  Rate_Drift  "
+        })
+        parsed, _, _, _ = parse_pass4_response(raw)
+        assert parsed["proposed_class"] == "rate_drift"
 
 
 # ── Intervention action validation tests ─────────────────────────────

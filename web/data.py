@@ -294,7 +294,7 @@ def get_recent_ingest_runs(limit=10):
 # ── Root Cause (LLM pass results) ───────────────────────────────────
 
 def get_root_cause_tickets():
-    """Return tickets that have at least one pass1, pass2, or pass3 result."""
+    """Return tickets that have at least one pass1, pass3, or pass4 result."""
     return query("""
         SELECT
             t.ticket_id,
@@ -304,15 +304,14 @@ def get_root_cause_tickets():
             t.customer,
             t.status,
             p1.phenomenon,
+            p1.component,
+            p1.operation,
+            p1.canonical_failure,
+            p1.confidence,
             p1.status        AS pass1_status,
             p1.completed_at  AS pass1_completed_at,
-            p2.component,
-            p2.operation,
-            p2.unexpected_state,
-            p2.canonical_failure,
-            p2.status        AS pass2_status,
-            p2.completed_at  AS pass2_completed_at,
             p3.mechanism,
+            p3.evidence,
             p3.status        AS pass3_status,
             p3.completed_at  AS pass3_completed_at,
             p4.mechanism_class,
@@ -322,7 +321,9 @@ def get_root_cause_tickets():
             p4.completed_at  AS pass4_completed_at
         FROM tickets t
         LEFT JOIN LATERAL (
-            SELECT phenomenon, status, completed_at
+            SELECT phenomenon, component, operation, canonical_failure,
+                   (parsed_json->>'confidence') AS confidence,
+                   status, completed_at
             FROM ticket_llm_pass_results lp
             WHERE lp.ticket_id = t.ticket_id
               AND lp.pass_name = 'pass1_phenomenon'
@@ -331,17 +332,9 @@ def get_root_cause_tickets():
             LIMIT 1
         ) p1 ON TRUE
         LEFT JOIN LATERAL (
-            SELECT component, operation, unexpected_state, canonical_failure,
+            SELECT mechanism,
+                   (parsed_json->>'evidence') AS evidence,
                    status, completed_at
-            FROM ticket_llm_pass_results lp
-            WHERE lp.ticket_id = t.ticket_id
-              AND lp.pass_name = 'pass2_grammar'
-            ORDER BY CASE WHEN lp.status = 'success' THEN 0 ELSE 1 END,
-                     lp.updated_at DESC
-            LIMIT 1
-        ) p2 ON TRUE
-        LEFT JOIN LATERAL (
-            SELECT mechanism, status, completed_at
             FROM ticket_llm_pass_results lp
             WHERE lp.ticket_id = t.ticket_id
               AND lp.pass_name = 'pass3_mechanism'
@@ -359,8 +352,8 @@ def get_root_cause_tickets():
                      lp.updated_at DESC
             LIMIT 1
         ) p4 ON TRUE
-        WHERE p1.status IS NOT NULL OR p2.status IS NOT NULL OR p3.status IS NOT NULL OR p4.status IS NOT NULL
-        ORDER BY COALESCE(p4.completed_at, p3.completed_at, p2.completed_at, p1.completed_at) DESC NULLS LAST
+        WHERE p1.status IS NOT NULL OR p3.status IS NOT NULL OR p4.status IS NOT NULL
+        ORDER BY COALESCE(p4.completed_at, p3.completed_at, p1.completed_at) DESC NULLS LAST
     """)
 
 

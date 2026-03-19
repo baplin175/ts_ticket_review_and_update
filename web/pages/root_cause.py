@@ -1,4 +1,4 @@
-"""Root Cause page — LLM pass results (pass1 phenomenon, pass2 grammar, pass3 mechanism, pass4 intervention)."""
+"""Root Cause page — LLM pass results (pass1 phenomenon+grammar, pass3 mechanism, pass4 intervention)."""
 
 import json
 
@@ -94,13 +94,13 @@ _GRID_COLS = [
     {"field": "product_name", "headerName": "Product", "width": 130},
     {"field": "customer", "headerName": "Customer", "width": 150},
     {"field": "pass1_status", "headerName": "Pass 1", "width": 90},
+    {"field": "confidence", "headerName": "Confidence", "width": 110},
     {"field": "phenomenon", "headerName": "Phenomenon", "minWidth": 200, "flex": 1},
-    {"field": "pass2_status", "headerName": "Pass 2", "width": 90},
     {"field": "component", "headerName": "Component", "width": 160},
     {"field": "operation", "headerName": "Operation", "width": 120},
-    {"field": "unexpected_state", "headerName": "Unexpected State", "minWidth": 180, "flex": 1},
     {"field": "pass3_status", "headerName": "Pass 3", "width": 90},
     {"field": "mechanism", "headerName": "Mechanism", "minWidth": 200, "flex": 1},
+    {"field": "evidence", "headerName": "Evidence", "width": 120},
     {"field": "pass4_status", "headerName": "Pass 4", "width": 90},
     {"field": "mechanism_class", "headerName": "Mechanism Class", "width": 180},
     {"field": "intervention_type", "headerName": "Intervention Type", "width": 160},
@@ -167,14 +167,21 @@ def register_callbacks(app):
             if name not in by_name:
                 by_name[name] = p
 
-        # Pass 1 — Phenomenon
+        # Pass 1 — Phenomenon + Grammar
         p1 = by_name.get("pass1_phenomenon")
         if p1:
+            pj1 = p1.get("parsed_json") or {}
+            confidence = pj1.get("confidence", "")
             pass1_card = _pass_card(
-                "Pass 1 — Phenomenon", "tabler:search",
+                "Pass 1 — Phenomenon + Grammar", "tabler:search",
                 p1.get("status"),
                 [
                     ("Phenomenon", p1.get("phenomenon")),
+                    ("Confidence", confidence),
+                    ("Component", p1.get("component") or pj1.get("component")),
+                    ("Operation", p1.get("operation") or pj1.get("operation")),
+                    ("Unexpected State", p1.get("unexpected_state") or pj1.get("unexpected_state")),
+                    ("Canonical Failure", p1.get("canonical_failure") or pj1.get("canonical_failure")),
                     ("Model", p1.get("model_name")),
                     ("Prompt Version", p1.get("prompt_version")),
                     ("Completed", str(p1.get("completed_at", ""))[:19]),
@@ -183,38 +190,19 @@ def register_callbacks(app):
                 error=p1.get("error_message"),
             )
         else:
-            pass1_card = _placeholder_card("Pass 1 — Phenomenon", "tabler:search")
-
-        # Pass 2 — Grammar Decomposition
-        p2 = by_name.get("pass2_grammar")
-        if p2:
-            pj = p2.get("parsed_json") or {}
-            pass2_card = _pass_card(
-                "Pass 2 — Grammar Decomposition", "tabler:puzzle",
-                p2.get("status"),
-                [
-                    ("Component", p2.get("component") or pj.get("component")),
-                    ("Operation", p2.get("operation") or pj.get("operation")),
-                    ("Unexpected State", p2.get("unexpected_state") or pj.get("unexpected_state")),
-                    ("Canonical Failure", p2.get("canonical_failure") or pj.get("canonical_failure")),
-                    ("Model", p2.get("model_name")),
-                    ("Prompt Version", p2.get("prompt_version")),
-                    ("Completed", str(p2.get("completed_at", ""))[:19]),
-                ],
-                raw_json=p2.get("parsed_json"),
-                error=p2.get("error_message"),
-            )
-        else:
-            pass2_card = _placeholder_card("Pass 2 — Grammar Decomposition", "tabler:puzzle")
+            pass1_card = _placeholder_card("Pass 1 — Phenomenon + Grammar", "tabler:search")
 
         # Pass 3 — Mechanism Inference
         p3 = by_name.get("pass3_mechanism")
         if p3:
+            pj3 = p3.get("parsed_json") or {}
             pass3_card = _pass_card(
                 "Pass 3 — Mechanism Inference", "tabler:bulb",
                 p3.get("status"),
                 [
                     ("Mechanism", p3.get("mechanism")),
+                    ("Evidence", pj3.get("evidence", "")),
+                    ("Category", pj3.get("category", "")),
                     ("Model", p3.get("model_name")),
                     ("Prompt Version", p3.get("prompt_version")),
                     ("Completed", str(p3.get("completed_at", ""))[:19]),
@@ -228,17 +216,25 @@ def register_callbacks(app):
         # Pass 4 — Intervention Mapping
         p4 = by_name.get("pass4_intervention")
         if p4:
+            pj4 = p4.get("parsed_json") or {}
+            p4_fields = [
+                ("Mechanism Class", p4.get("mechanism_class")),
+                ("Intervention Type", p4.get("intervention_type")),
+                ("Intervention Action", p4.get("intervention_action")),
+            ]
+            if pj4.get("proposed_class"):
+                p4_fields.append(("Proposed Class", pj4["proposed_class"]))
+            if pj4.get("proposed_type"):
+                p4_fields.append(("Proposed Type", pj4["proposed_type"]))
+            p4_fields.extend([
+                ("Model", p4.get("model_name")),
+                ("Prompt Version", p4.get("prompt_version")),
+                ("Completed", str(p4.get("completed_at", ""))[:19]),
+            ])
             pass4_card = _pass_card(
                 "Pass 4 — Intervention Mapping", "tabler:tools",
                 p4.get("status"),
-                [
-                    ("Mechanism Class", p4.get("mechanism_class")),
-                    ("Intervention Type", p4.get("intervention_type")),
-                    ("Intervention Action", p4.get("intervention_action")),
-                    ("Model", p4.get("model_name")),
-                    ("Prompt Version", p4.get("prompt_version")),
-                    ("Completed", str(p4.get("completed_at", ""))[:19]),
-                ],
+                p4_fields,
                 raw_json=p4.get("parsed_json"),
                 error=p4.get("error_message"),
             )
@@ -272,7 +268,7 @@ def register_callbacks(app):
             ),
             dmc.SimpleGrid(
                 cols={"base": 1, "lg": 2},
-                children=[pass1_card, pass2_card, pass3_card, pass4_card],
+                children=[pass1_card, pass3_card, pass4_card],
             ),
             thread_section,
         ], gap="md")

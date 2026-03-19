@@ -34,9 +34,9 @@ pass2_parser.py        — Pass 2 response parser (strict JSON validation, opera
 run_ticket_pass3.py    — Pass 3 v3: failure mechanism inference from Pass 1 v2 canonical_failure + full_thread_text via Matcha (DB-only, idempotent, prompt-versioned; insufficient_evidence rule prevents fabrication)
 pass3_parser.py        — Pass 3 response parser (strict JSON validation, mechanism extraction, phrase-level admin-text rejection allowing technical "customer" references)
 run_pass4.py           — Pass 4: intervention mapping from Pass 3 mechanism via Matcha (DB-only, idempotent, prompt-versioned, ROI aggregation, --aggregate-only mode; invalidates stale P4 results for tickets missing required P3 mechanism version)
-pass4/mechanism_classes.py  — Normalized mechanism class taxonomy (13 fixed classes)
-pass4/intervention_types.py — Normalized intervention type taxonomy (7 fixed types)
-pass4/mechanism_classifier.py — Pass 4 response parser (strict JSON validation, taxonomy enforcement, action validation)
+pass4/mechanism_classes.py  — Normalized mechanism class taxonomy (14 classes including 'other' catch-all with proposed_class for taxonomy expansion)
+pass4/intervention_types.py — Normalized intervention type taxonomy (8 types including 'other' catch-all with proposed_type for taxonomy expansion)
+pass4/mechanism_classifier.py — Pass 4 response parser (strict JSON validation, taxonomy enforcement with soft 'other' + proposed_class/proposed_type, action validation)
 pass4/intervention_mapper.py  — Pass 4 per-ticket LLM orchestrator (prompt build, Matcha call, parse, DB persist)
 pass4/intervention_aggregator.py — ROI aggregation engine (mechanism class counts, intervention type counts, top engineering fixes, JSON artifact export)
 migrations/            — Numbered SQL migration files applied by db.py
@@ -48,7 +48,7 @@ web/pages/overview.py  — Overview page: KPI stat cards, backlog trend chart, a
 web/pages/tickets.py   — Ticket explorer: AG Grid with filters, sorting, row-click navigation to detail, saved filter reports (custom)
 web/pages/ticket_detail.py — Ticket detail: metadata header, thread timeline, score cards, wait profile chart, issue summary (custom)
 web/pages/health.py    — Health dashboards: Customer and Product health AG Grid tables (kept for reference; now YAML-driven)
-web/pages/root_cause.py — Root Cause analysis: AG Grid of pass-processed tickets with CSV export, detail view with Pass 1 (phenomenon), Pass 2 (grammar decomposition), Pass 3 (mechanism inference), Pass 4 (intervention mapping), cleaned thread text (custom)
+web/pages/root_cause.py — Root Cause analysis: AG Grid of pass-processed tickets with CSV export, detail view with Pass 1 (phenomenon + grammar + confidence), Pass 3 (mechanism + evidence), Pass 4 (intervention mapping + proposed_class/proposed_type), cleaned thread text (custom)
 web/pages/config_view.py — Pipeline config viewer (read-only display of all settings + sync status, custom)
 web_requirements.txt   — Python dependencies for the web dashboard (dash, dash-mantine-components, dash-ag-grid, PyYAML, etc.)
 ```
