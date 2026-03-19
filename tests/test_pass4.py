@@ -561,4 +561,66 @@ class TestAggregation:
             assert os.path.exists(path)
 
 
+# ── Stale P4 invalidation tests ──────────────────────────────────────
+
+class TestStaleInvalidation:
+    def test_invalidate_stale_pass4_sql(self, patch_pool):
+        conn, cur = patch_pool
+        cur.rowcount = 2
+        import db
+        updated = db.invalidate_stale_pass4(
+            [100, 200, 300],
+            pass3_pass_name="pass3_mechanism",
+            pass3_prompt_version="3",
+        )
+        sql = cur.execute.call_args[0][0]
+        assert "UPDATE ticket_llm_pass_results" in sql
+        assert "status = 'skipped'" in sql
+        assert "pass4_intervention" in sql
+        assert "NOT EXISTS" in sql
+        params = cur.execute.call_args[0][1]
+        assert 100 in params
+        assert 200 in params
+        assert 300 in params
+        assert "pass3_mechanism" in params
+        assert "3" in params
+        assert updated == 2
+
+    def test_invalidate_stale_pass4_empty_list(self, patch_pool):
+        conn, cur = patch_pool
+        import db
+        updated = db.invalidate_stale_pass4([])
+        assert updated == 0
+        cur.execute.assert_not_called()
+
+    def test_main_invalidates_stale_when_tickets_missing_p3(self, patch_pool):
+        """Tickets requested but filtered out (no P3) trigger stale invalidation."""
+        conn, cur = patch_pool
+        cur.fetchall.return_value = [(101, "valid mechanism")]
+        cur.rowcount = 1
+        import db
+        with patch("db.invalidate_stale_pass4", return_value=1) as mock_inv:
+            with patch("run_pass4._load_prompt_template", return_value="template {{mechanism}}"):
+                with patch("run_pass4.process_ticket", return_value={
+                    "status": "success", "ticket_id": 101,
+                    "mechanism_class": "schema_mismatch",
+                    "intervention_type": "software_fix",
+                    "intervention_action": "fix it",
+                    "elapsed_s": 0.1,
+                }) as mock_proc:
+                    with patch("run_pass4.aggregate_from_db", return_value={
+                        "mechanism_class_counts": {}, "intervention_type_counts": {},
+                        "top_engineering_fixes": [],
+                    }):
+                        with patch("run_pass4.write_artifacts", return_value=[]):
+                            with patch("db.migrate", return_value=[]):
+                                import run_pass4
+                                run_pass4.main(ticket_ids=[101, 200, 300], force=True)
+            mock_inv.assert_called_once_with(
+                [200, 300],
+                pass3_pass_name="pass3_mechanism",
+                pass3_prompt_version="3",
+            )
+
+
 import os

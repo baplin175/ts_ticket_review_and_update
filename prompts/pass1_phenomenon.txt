@@ -1,14 +1,38 @@
 You are analyzing software support ticket conversations.
 
-Each ticket contains a conversation transcript in the field:
+Each ticket contains:
 
-full_thread_text
+1. A ticket name (title field) — provided separately as context
+2. A conversation transcript (full_thread_text)
 
-Your task is to extract the observable system behavior described in the ticket.
-
-The goal is to identify what the system actually did or failed to do.
+Your task is to extract the observable system behavior described in the ticket
+and decompose it into a standardized failure grammar.
 
 You are NOT diagnosing the problem and you are NOT explaining the cause.
+
+--------------------------------
+TICKET NAME GUIDANCE
+--------------------------------
+
+The ticket name is provided as contextual metadata only.
+
+DO NOT extract a phenomenon from the ticket name alone.
+The ticket name may be vague, misleading, or unrelated to the actual issue.
+
+Use the ticket name only to help disambiguate when the thread text is ambiguous.
+The phenomenon MUST be grounded in the thread text conversation.
+
+--------------------------------
+VIOLATION WARNING GUIDANCE
+--------------------------------
+
+Ignore any lines that are automated violation or SLA warnings such as:
+- "Ticket NNNNN is in violation"
+- "Warning: Ticket NNNNN has exceeded..."
+- "SLA violation notice"
+
+These are system-generated administrative messages, not customer-reported behavior.
+Do NOT extract a phenomenon from these lines.
 
 --------------------------------
 WHAT TO EXTRACT
@@ -18,8 +42,8 @@ Extract a single normalized sentence describing the observable system behavior.
 
 A valid phenomenon describes:
 
-• a system component  
-• performing an operation  
+• a system component
+• performing an operation
 • resulting in an unexpected or incorrect state
 
 Focus only on behavior visible to the user or system.
@@ -49,53 +73,51 @@ Ignore any content that does NOT describe system behavior.
 This includes:
 
 Support workflow events
-Ticket closed due to inactivity  
-Ticket closed due to no response  
-Customer added a review  
-Ticket assigned to another agent  
+Ticket closed due to inactivity
+Ticket closed due to no response
+Customer added a review
+Ticket assigned to another agent
 
 Project or sales updates
-Customer is testing the system  
-Project is on hold  
-Quote was accepted or rejected  
+Customer is testing the system
+Project is on hold
+Quote was accepted or rejected
 
 General statements
-Everything appears to be working  
-No issues reported  
-Work completed successfully  
+Everything appears to be working
+No issues reported
+Work completed successfully
 
 Administrative or coordination notes
-A separate ticket was created  
-Waiting for customer response  
-Work delivered to production  
+A separate ticket was created
+Waiting for customer response
+Work delivered to production
 
 --------------------------------
-WHEN NO PHENOMENON EXISTS
+CONFIDENCE ASSESSMENT
 --------------------------------
 
-If the thread does NOT contain observable system behavior,
-return:
+Assess your confidence in the extracted phenomenon:
 
-{
-  "phenomenon": null
-}
+HIGH — The thread clearly describes a specific system malfunction with
+observable behavior. The phenomenon is directly stated or strongly implied.
 
-Return null in ALL of these situations:
+MEDIUM — The thread contains some indication of a system issue but details
+are sparse or ambiguous. A reasonable phenomenon can be extracted but
+with some uncertainty.
 
+LOW — The thread does NOT contain observable system behavior. This includes:
 - The thread text is empty or contains only automated violation warnings
 - The thread is purely project coordination, scheduling, or sales activity
 - The resolution was user training or education ("showed them how to...", "walked through the steps")
-- The thread contains only administrative notes (ticket reassignment, closure notices, separate ticket created)
+- The thread contains only administrative notes (ticket reassignment, closure notices)
 - The thread is a project delivery handoff with no technical issue reported
 - The only content is an out-of-office reply or signature block
 
+When confidence is LOW, set phenomenon and all grammar fields to null.
+
 Do NOT infer a phenomenon from the ticket name or title alone.
-If the thread text does not describe a specific system malfunction, return null.
-
-Do NOT explain why.
-Do NOT describe the ticket.
-Do NOT produce commentary.
-
+If the thread text does not describe a specific system malfunction, confidence is LOW.
 
 --------------------------------
 MULTI-ISSUE TICKETS
@@ -133,21 +155,81 @@ Write:
 Meter import fails when uploading Neptune file
 
 --------------------------------
+GRAMMAR DECOMPOSITION
+--------------------------------
+
+When confidence is HIGH or MEDIUM, also decompose the phenomenon into
+a standardized operational failure grammar:
+
+<Component> + <Operation> + <Unexpected State>
+
+This grammar is used for clustering operational failures across many tickets,
+so outputs must be consistent, normalized, and structurally comparable.
+
+
+Component
+The system module, subsystem, workflow, report, integration, screen, process,
+interface, or job involved in the behavior.
+
+Prefer subsystem or workflow names rather than tiny field labels.
+
+Good component examples:
+- Invoice Cloud integration
+- Billing module
+- Work Order screen
+- Meter import process
+- Payment display fields
+- Bank reconciliation report
+
+If the phenomenon mentions only a field or value, infer the owning module
+or workflow when possible.
+
+
+Operation
+The action the system was performing.
+
+Normalize operations to the following vocabulary:
+
+display, save, upload, import, export, print, load, transfer, calculate,
+generate, create, remove, post, validate, sync, update
+
+Use "display" when a value, element, or screen content is not appearing
+or appears incorrectly. Use "load" ONLY when an application, module, or
+screen genuinely fails to start or initialize.
+
+Prefer specific operations over generic verbs. Avoid "process" or "handle".
+
+
+Unexpected State
+A short description of the incorrect observable system behavior.
+Keep this concise, factual, and behavior-focused.
+The unexpected_state should be SHORTER than the phenomenon.
+
+
+--------------------------------
 OUTPUT FORMAT
 --------------------------------
 
 Return ONLY JSON.
 
-Valid outputs:
+When confidence is HIGH or MEDIUM:
 
 {
-  "phenomenon": "Meter import overwrites current readings with previous period data"
+  "phenomenon": "Meter import overwrites current readings with previous period data",
+  "confidence": "HIGH",
+  "component": "Meter import process",
+  "operation": "import",
+  "unexpected_state": "overwrites current readings with previous period data"
 }
 
-or
+When confidence is LOW:
 
 {
-  "phenomenon": null
+  "phenomenon": null,
+  "confidence": "LOW",
+  "component": null,
+  "operation": null,
+  "unexpected_state": null
 }
 
 Do not return any additional text.
@@ -156,7 +238,11 @@ Do not return any additional text.
 TASK
 --------------------------------
 
-Analyze the following ticket and extract the phenomenon.
+Analyze the following ticket and extract the phenomenon with grammar decomposition.
+
+ticket_name:
+
+{{ticket_name}}
 
 full_thread_text:
 

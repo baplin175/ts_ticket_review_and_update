@@ -75,6 +75,8 @@ OPERATION_SYNONYMS = {
     "write": "update",
     "delete": "update",
     "remove": "update",
+    "resequence": "update",
+    "reroute": "update",
     # print family
     "printing": "print",
     # post family

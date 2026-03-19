@@ -31,12 +31,12 @@ PROMPT_PATH = os.path.join(
 )
 
 PASS_NAME = "pass3_mechanism"
-PROMPT_VERSION = "2"
+PROMPT_VERSION = "3"
 MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
 
-# Pass 2 dependency — which Pass 2 result to source canonical_failure from
-PASS2_PASS_NAME = "pass2_grammar"
-PASS2_PROMPT_VERSION = "1"
+# Upstream dependency — source canonical_failure from Pass 1 v2
+PASS2_PASS_NAME = "pass1_phenomenon"
+PASS2_PROMPT_VERSION = "2"
 
 
 def _log(msg: str) -> None:

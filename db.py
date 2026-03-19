@@ -1273,7 +1273,7 @@ def fetch_pending_pass1_tickets(
     force: bool = False,
     since: Optional[str] = None,
 ) -> List[Tuple]:
-    """Return (ticket_id, full_thread_text) rows eligible for Pass 1.
+    """Return (ticket_id, ticket_name, full_thread_text) rows eligible for Pass 1.
 
     Selection logic:
       - ticket has non-null full_thread_text in rollups
@@ -1283,7 +1283,7 @@ def fetch_pending_pass1_tickets(
       - optionally limited to failed-only reruns
       - optionally limited to tickets created after *since* date
 
-    Returns list of (ticket_id, full_thread_text) tuples.
+    Returns list of (ticket_id, ticket_name, full_thread_text) tuples.
     """
     conditions = ["r.full_thread_text IS NOT NULL"]
     params: list = []
@@ -1325,7 +1325,7 @@ def fetch_pending_pass1_tickets(
 
     where_clause = " AND ".join(conditions)
     sql = (
-        f"SELECT t.ticket_id, r.full_thread_text "
+        f"SELECT t.ticket_id, COALESCE(t.ticket_name, ''), r.full_thread_text "
         f"FROM tickets t "
         f"JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id "
         f"WHERE {where_clause} "
@@ -1415,14 +1415,14 @@ def fetch_pending_pass2_tickets(
 def fetch_pending_pass3_tickets(
     pass3_prompt_version: str,
     *,
-    pass2_pass_name: str = "pass2_grammar",
-    pass2_prompt_version: str = "1",
+    pass2_pass_name: str = "pass1_phenomenon",
+    pass2_prompt_version: str = "2",
     limit: int = 0,
     ticket_ids: Optional[List[int]] = None,
     failed_only: bool = False,
     force: bool = False,
 ) -> List[Tuple]:
-    """Return (ticket_id, canonical_failure, technical_core_text) rows eligible for Pass 3.
+    """Return (ticket_id, canonical_failure, full_thread_text) rows eligible for Pass 3.
 
     Selection logic:
       - ticket has a successful Pass 2 result with non-null canonical_failure
@@ -1431,7 +1431,7 @@ def fetch_pending_pass3_tickets(
       - optionally filtered to specific ticket_ids
       - optionally limited to failed-only reruns
 
-    Returns list of (ticket_id, canonical_failure, technical_core_text) tuples.
+    Returns list of (ticket_id, canonical_failure, full_thread_text) tuples.
     """
     conditions = [
         "p2.pass_name = %s",
@@ -1474,7 +1474,7 @@ def fetch_pending_pass3_tickets(
     where_clause = " AND ".join(conditions)
     sql = (
         f"SELECT t.ticket_id, p2.canonical_failure, "
-        f"COALESCE(r.technical_core_text, '') "
+        f"COALESCE(r.full_thread_text, '') "
         f"FROM tickets t "
         f"JOIN ticket_llm_pass_results p2 ON p2.ticket_id = t.ticket_id "
         f"LEFT JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id "
@@ -1560,6 +1560,54 @@ def fetch_pending_pass4_tickets(
     sql += ";"
 
     return fetch_all(sql, tuple(params))
+
+
+def invalidate_stale_pass4(
+    ticket_ids: List[int],
+    pass3_pass_name: str = "pass3_mechanism",
+    pass3_prompt_version: str = "1",
+) -> int:
+    """Mark existing P4 results as 'skipped' for tickets that lack a valid P3 result.
+
+    When upstream P3 results change (e.g. a ticket is now correctly skipped at P3),
+    stale P4 results from prior runs remain in the DB.  This function finds tickets
+    in *ticket_ids* that have NO successful P3 row for the given version and sets
+    any existing pass4_intervention rows to status='skipped'.
+
+    Returns the number of rows updated.
+    """
+    if not ticket_ids:
+        return 0
+    placeholders = ",".join(["%s"] * len(ticket_ids))
+    sql = f"""
+        UPDATE ticket_llm_pass_results
+           SET status = 'skipped',
+               error_message = 'upstream P3 mechanism missing for required version'
+         WHERE pass_name = 'pass4_intervention'
+           AND ticket_id IN ({placeholders})
+           AND NOT EXISTS (
+               SELECT 1 FROM ticket_llm_pass_results p3
+                WHERE p3.ticket_id = ticket_llm_pass_results.ticket_id
+                  AND p3.pass_name = %s
+                  AND p3.prompt_version = %s
+                  AND p3.status = 'success'
+                  AND p3.mechanism IS NOT NULL
+                  AND p3.mechanism != ''
+           );
+    """
+    params = list(ticket_ids) + [pass3_pass_name, pass3_prompt_version]
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, tuple(params))
+            updated = cur.rowcount
+        conn.commit()
+        return updated
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
 
 
 # ── CLI entry point ──────────────────────────────────────────────────

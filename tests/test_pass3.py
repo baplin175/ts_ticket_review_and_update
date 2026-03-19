@@ -247,7 +247,7 @@ class TestSelectionLogic:
         import db
         rows = db.fetch_pending_pass3_tickets("1")
         sql = cur.execute.call_args[0][0]
-        assert "technical_core_text" in sql
+        assert "full_thread_text" in sql
         assert "ticket_thread_rollups" in sql
 
     def test_force_skips_success_check(self, patch_pool):
@@ -294,7 +294,7 @@ class TestSelectionLogic:
         sql = cur.execute.call_args[0][0]
         assert "p2.status = 'success'" in sql
         params = cur.execute.call_args[0][1]
-        assert "pass2_grammar" in params
+        assert "pass1_phenomenon" in params
 
 
 # ── Idempotency tests ────────────────────────────────────────────────

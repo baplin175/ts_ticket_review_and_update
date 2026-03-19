@@ -42,7 +42,7 @@ from pass4.intervention_aggregator import (
 
 # Pass 3 dependency
 PASS3_PASS_NAME = "pass3_mechanism"
-PASS3_PROMPT_VERSION = "2"
+PASS3_PROMPT_VERSION = "3"
 
 
 def _log(msg: str) -> None:
@@ -101,6 +101,21 @@ def main(
         failed_only=failed_only,
         force=force,
     )
+
+    # Invalidate stale P4 results for tickets missing a valid P3 mechanism
+    if ticket_ids:
+        eligible_ids = {row[0] for row in rows}
+        missing_p3 = [tid for tid in ticket_ids if tid not in eligible_ids]
+        if missing_p3:
+            invalidated = db.invalidate_stale_pass4(
+                missing_p3,
+                pass3_pass_name=PASS3_PASS_NAME,
+                pass3_prompt_version=PASS3_PROMPT_VERSION,
+            )
+            if invalidated:
+                _log(f"[pass4] Invalidated {invalidated} stale P4 result(s) for {len(missing_p3)} ticket(s) missing P3 v{PASS3_PROMPT_VERSION}.")
+            else:
+                _log(f"[pass4] {len(missing_p3)} ticket(s) skipped (no P3 v{PASS3_PROMPT_VERSION} mechanism).")
 
     total = len(rows)
     if total == 0:

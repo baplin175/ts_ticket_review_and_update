@@ -1,9 +1,12 @@
 """
-Pass 1 — Phenomenon extraction from support ticket threads.
+Pass 1 — Phenomenon extraction + grammar decomposition from support ticket threads.
 
-Reads full_thread_text from ticket_thread_rollups, sends it to Matcha
-with the Pass 1 prompt, parses the JSON response, and stores both the
-raw response and parsed output in ticket_llm_pass_results.
+Reads full_thread_text and ticket_name from tickets/rollups, sends to Matcha
+with the Pass 1 v2 prompt, parses the JSON response (phenomenon + component +
+operation + unexpected_state + confidence), and stores both the raw response
+and parsed output in ticket_llm_pass_results.
+
+This pass now absorbs the work previously done by Pass 2 (grammar extraction).
 
 Requires DATABASE_URL to be set (Postgres mode).
 
@@ -18,6 +21,7 @@ Usage:
 
 import argparse
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -31,8 +35,16 @@ PROMPT_PATH = os.path.join(
 )
 
 PASS_NAME = "pass1_phenomenon"
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"
 MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
+
+# Pattern to strip automated violation/SLA warning lines
+_VIOLATION_RE = re.compile(
+    r"^.*(?:Ticket\s+\d+\s+is\s+in\s+violation|"
+    r"Warning:\s*Ticket\s+\d+|"
+    r"SLA\s+violation\s+notice).*$",
+    re.MULTILINE | re.IGNORECASE,
+)
 
 
 def _log(msg: str) -> None:
@@ -44,9 +56,16 @@ def _load_prompt_template() -> str:
         return f.read()
 
 
-def _build_prompt(template: str, full_thread_text: str) -> str:
-    """Replace {{input_text}} placeholder in the prompt template."""
-    return template.replace("{{input_text}}", full_thread_text)
+def _strip_violation_warnings(text: str) -> str:
+    """Remove automated violation/SLA warning lines from thread text."""
+    return _VIOLATION_RE.sub("", text).strip()
+
+
+def _build_prompt(template: str, full_thread_text: str, ticket_name: str = "") -> str:
+    """Replace {{input_text}} and {{ticket_name}} placeholders in the prompt template."""
+    prompt = template.replace("{{ticket_name}}", ticket_name or "(no title)")
+    prompt = prompt.replace("{{input_text}}", full_thread_text)
+    return prompt
 
 
 def process_ticket(
@@ -54,11 +73,12 @@ def process_ticket(
     full_thread_text: str,
     prompt_template: str,
     *,
+    ticket_name: str = "",
     force: bool = False,
 ) -> dict:
     """Process a single ticket through Pass 1.
 
-    Returns a result dict with status, phenomenon, timing, etc.
+    Returns a result dict with status, phenomenon, grammar fields, timing, etc.
     """
     import db
 
@@ -66,6 +86,11 @@ def process_ticket(
         "ticket_id": ticket_id,
         "status": "pending",
         "phenomenon": None,
+        "component": None,
+        "operation": None,
+        "unexpected_state": None,
+        "canonical_failure": None,
+        "confidence": None,
         "error": None,
         "elapsed_s": 0.0,
     }
@@ -97,8 +122,11 @@ def process_ticket(
         # Clean up prior failed/pending rows for a fresh attempt
         db.delete_prior_failed_pass(ticket_id, PASS_NAME, PROMPT_VERSION)
 
-    # Build prompt
-    full_prompt = _build_prompt(prompt_template, full_thread_text)
+    # Strip violation warnings before building prompt
+    cleaned_thread = _strip_violation_warnings(full_thread_text)
+
+    # Build prompt with ticket_name and cleaned thread text
+    full_prompt = _build_prompt(prompt_template, cleaned_thread, ticket_name)
 
     # Insert pending row
     row_id = db.insert_pass_result(
@@ -116,27 +144,42 @@ def process_ticket(
         # Call Matcha
         raw_response = call_matcha(full_prompt)
 
-        # Parse + validate
+        # Parse + validate (v2 format includes grammar fields)
         parsed_json, phenomenon = parse_pass1_response(raw_response)
 
         completed_at = datetime.now(timezone.utc)
         elapsed = time.monotonic() - start_time
 
-        # Update row to success
+        # Extract grammar fields from parsed response
+        component = parsed_json.get("component")
+        operation = parsed_json.get("operation")
+        unexpected_state = parsed_json.get("unexpected_state")
+        canonical_failure = parsed_json.get("canonical_failure")
+
+        # Update row to success with both phenomenon and grammar fields
         db.update_pass_result(
             row_id,
             status="success",
             raw_response_text=raw_response,
             parsed_json=parsed_json,
             phenomenon=phenomenon,
+            component=component,
+            operation=operation,
+            unexpected_state=unexpected_state,
+            canonical_failure=canonical_failure,
             completed_at=completed_at,
         )
 
         result["status"] = "success"
         result["phenomenon"] = phenomenon
+        result["component"] = component
+        result["operation"] = operation
+        result["unexpected_state"] = unexpected_state
+        result["canonical_failure"] = canonical_failure
+        result["confidence"] = parsed_json.get("confidence")
         result["elapsed_s"] = round(elapsed, 2)
         if phenomenon is None:
-            _log(f"[pass1]   (no observable phenomenon)")
+            _log(f"[pass1]   (no observable phenomenon — confidence: {parsed_json.get('confidence', 'N/A')})")
 
     except Pass1ParseError as exc:
         completed_at = datetime.now(timezone.utc)
@@ -226,13 +269,14 @@ def main(
     skipped = 0
     total_start = time.monotonic()
 
-    for idx, (ticket_id, full_thread_text) in enumerate(rows, 1):
+    for idx, (ticket_id, ticket_name, full_thread_text) in enumerate(rows, 1):
         _log(f"\n[pass1] [{idx}/{total}] Ticket {ticket_id}")
 
         r = process_ticket(
             ticket_id,
             full_thread_text,
             prompt_template,
+            ticket_name=ticket_name,
             force=force,
         )
         results.append(r)
@@ -241,6 +285,8 @@ def main(
             succeeded += 1
             if r["phenomenon"]:
                 _log(f"[pass1]   ✓ phenomenon: {r['phenomenon'][:80]}{'…' if len(r['phenomenon']) > 80 else ''}")
+                if r.get("canonical_failure"):
+                    _log(f"[pass1]   ✓ grammar: {r['canonical_failure'][:80]}")
             else:
                 _log(f"[pass1]   ✓ no observable phenomenon")
         elif r["status"] == "failed":

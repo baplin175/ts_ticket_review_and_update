@@ -61,8 +61,14 @@ When the thread describes the resolution or root cause:
 When the thread is sparse or does not explain the cause:
 - You may infer a plausible technical mechanism from the canonical failure
 - But mark your evidence field as "inferred"
+- Use ONLY category-level descriptions when inferring — do NOT fabricate specific technical details
 
 NEVER fabricate specific technical details (API credential failures, COM registration errors, schema mismatches) when the thread does not support them.
+
+When the thread provides NO resolution details and the canonical failure alone is insufficient to identify a specific mechanism:
+- Set mechanism to a category-level description such as "unknown software defect in [component]" or "unresolved [component] failure"
+- Do NOT invent plausible-sounding but unsupported technical explanations
+- A vague but honest mechanism is better than a specific but fabricated one
 
 
 Category

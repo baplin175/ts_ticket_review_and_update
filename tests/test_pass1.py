@@ -121,10 +121,12 @@ class TestPass1Parser:
 
     def test_extra_fields_preserved(self):
         from pass1_parser import parse_pass1_response
-        raw = '{"phenomenon": "Test value", "confidence": 0.95}'
+        raw = '{"phenomenon": "Test value", "confidence": "HIGH", "component": "Test module", "operation": "load", "unexpected_state": "fails"}'
         parsed, phenomenon = parse_pass1_response(raw)
         assert phenomenon == "Test value"
-        assert parsed["confidence"] == 0.95
+        assert parsed["confidence"] == "HIGH"
+        assert parsed["component"] == "Test module"
+        assert parsed["canonical_failure"] == "Test module + load + fails"
 
 
 # ════════════════════════════════════════════════════════════════════

@@ -27,13 +27,13 @@ run_pull_activities.py — Part 1: fetch, clean, classify activities → activit
 run_sentiment.py       — Part 2: sentiment analysis via Matcha (DB persistence + hash-based skipping when DB available)
 run_priority.py        — Part 3: AI priority scoring via Matcha (DB persistence + hash-based skipping when DB available)
 run_complexity.py      — Part 4: complexity analysis via Matcha (DB persistence + hash-based skipping when DB available)
-run_ticket_pass1.py    — Pass 1: phenomenon extraction from full_thread_text via Matcha (DB-only, idempotent, prompt-versioned)
-pass1_parser.py        — Pass 1 response parser (strict JSON validation, phenomenon extraction; null phenomenon accepted as valid "no observable behavior")
-run_ticket_pass2.py    — Pass 2: canonical failure grammar from Pass 1 phenomenon via Matcha (DB-only, idempotent, prompt-versioned)
-pass2_parser.py        — Pass 2 response parser (strict JSON validation, operation normalization, canonical_failure reconstruction)
-run_ticket_pass3.py    — Pass 3: failure mechanism inference from Pass 2 canonical_failure + ticket thread context via Matcha (DB-only, idempotent, prompt-versioned; outputs mechanism, category, evidence)
-pass3_parser.py        — Pass 3 response parser (strict JSON validation, mechanism extraction, category/evidence field validation, phrase-level admin-text rejection allowing technical "customer" references)
-run_pass4.py           — Pass 4: intervention mapping from Pass 3 mechanism via Matcha (DB-only, idempotent, prompt-versioned, ROI aggregation, --aggregate-only mode)
+run_ticket_pass1.py    — Pass 1 v2: phenomenon extraction + grammar decomposition from full_thread_text via Matcha (DB-only, idempotent, prompt-versioned; absorbs former Pass 2 grammar extraction; includes ticket_name context, violation warning stripping, confidence gate)
+pass1_parser.py        — Pass 1 response parser (strict JSON validation, phenomenon + confidence + grammar field extraction with operation normalization; null phenomenon accepted as valid "no observable behavior"; LOW confidence auto-nulls)
+run_ticket_pass2.py    — Pass 2: canonical failure grammar from Pass 1 phenomenon via Matcha (DEPRECATED — grammar now extracted in Pass 1 v2; kept for backward compatibility)
+pass2_parser.py        — Pass 2 response parser (strict JSON validation, operation normalization, canonical_failure reconstruction; normalize_operation reused by Pass 1 v2 parser)
+run_ticket_pass3.py    — Pass 3 v3: failure mechanism inference from Pass 1 v2 canonical_failure + full_thread_text via Matcha (DB-only, idempotent, prompt-versioned; insufficient_evidence rule prevents fabrication)
+pass3_parser.py        — Pass 3 response parser (strict JSON validation, mechanism extraction, phrase-level admin-text rejection allowing technical "customer" references)
+run_pass4.py           — Pass 4: intervention mapping from Pass 3 mechanism via Matcha (DB-only, idempotent, prompt-versioned, ROI aggregation, --aggregate-only mode; invalidates stale P4 results for tickets missing required P3 mechanism version)
 pass4/mechanism_classes.py  — Normalized mechanism class taxonomy (13 fixed classes)
 pass4/intervention_types.py — Normalized intervention type taxonomy (7 fixed types)
 pass4/mechanism_classifier.py — Pass 4 response parser (strict JSON validation, taxonomy enforcement, action validation)
@@ -45,7 +45,7 @@ web/dashboard.yaml     — YAML-driven dashboard configuration (pages, nav, quer
 web/renderer.py        — YAML config renderer: parses dashboard.yaml, builds Dash layouts for YAML-driven pages, imports custom page modules
 web/data.py            — Data access layer for the web dashboard (SELECT-only for analytics, plus dashboard-local CRUD for saved reports; no TS writes)
 web/pages/overview.py  — Overview page: KPI stat cards, backlog trend chart, aging distribution, open-by-product, chart drill-down (custom)
-web/pages/tickets.py   — Ticket explorer: AG Grid with community text filters, sorting, row-click navigation to detail, saved filter reports, TeamSupport sync refresh button with live progress log (custom)
+web/pages/tickets.py   — Ticket explorer: AG Grid with filters, sorting, row-click navigation to detail, saved filter reports (custom)
 web/pages/ticket_detail.py — Ticket detail: metadata header, thread timeline, score cards, wait profile chart, issue summary (custom)
 web/pages/health.py    — Health dashboards: Customer and Product health AG Grid tables (kept for reference; now YAML-driven)
 web/pages/root_cause.py — Root Cause analysis: AG Grid of pass-processed tickets with CSV export, detail view with Pass 1 (phenomenon), Pass 2 (grammar decomposition), Pass 3 (mechanism inference), Pass 4 (intervention mapping), cleaned thread text (custom)
@@ -900,7 +900,6 @@ Test coverage includes:
 - **Post-sync rollups** (4 tests): CSV import returns upserted IDs, rollup rebuild triggered after import, skipped on dry-run
 - **Pass 1 — phenomenon** (35 tests): parser, selection logic, idempotency, DB persistence, malformed handling, success flow, prompt template
 - **Pass 2 — grammar** (51 tests): parser, operation normalization, canonical failure reconstruction, selection logic, idempotency, DB persistence, malformed handling, success flow, prompt template
-- **Pass 3 — mechanism** (50 tests): parser, category/evidence validation, selection logic (3-tuple with thread context), thread context in SQL, idempotency, DB persistence, malformed handling, success flow, prompt template
 
 ## Audit Summary (2026-03-13)
 
@@ -1221,32 +1220,41 @@ All functions that INSERT or UPDATE rows into the above tables now include `tick
 
 ---
 
-## Pass 1 — Phenomenon Extraction (LLM Multi-Pass Pipeline)
+## Pass 1 v2 — Phenomenon Extraction + Grammar Decomposition (LLM Multi-Pass Pipeline)
 
 ### Overview
 
-Pass 1 extracts the observable system behavior (phenomenon) from each ticket's `full_thread_text` using the Matcha LLM endpoint. This is the first stage of a planned multi-pass LLM pipeline.
+Pass 1 v2 extracts the observable system behavior (phenomenon) from each ticket's `full_thread_text` using the Matcha LLM endpoint, and simultaneously decomposes it into the standardized operational grammar `<Component> + <Operation> + <Unexpected State>`. This merges what was formerly two separate passes (Pass 1 + Pass 2) into a single LLM call.
+
+Key improvements in v2:
+- **Merged grammar extraction** — component, operation, unexpected_state, and canonical_failure are extracted alongside the phenomenon in a single pass, eliminating the need for a separate Pass 2 call
+- **Ticket name context** — the ticket title is provided as a separate field with explicit guidance to NOT extract phenomena from titles alone
+- **Violation warning stripping** — automated SLA violation lines are stripped from thread text before sending to the LLM
+- **Confidence gate** — the model assesses confidence (HIGH/MEDIUM/LOW); LOW confidence auto-nulls the phenomenon and grammar fields, replacing the prior 6 categorical null rules
 
 ### Architecture
 
 | Component | File | Purpose |
 |-----------|------|---------|
 | Migration | `migrations/005_llm_pass_results.sql` | Creates `ticket_llm_pass_results` table + `vw_ticket_pass1_results` view |
-| Prompt | `prompts/pass1_phenomenon.txt` | Pass 1 prompt template with `{{input_text}}` placeholder |
-| Parser | `pass1_parser.py` | Strict JSON validation for `{"phenomenon": "..."}` responses |
-| Orchestrator | `run_ticket_pass1.py` | CLI entrypoint + batch processing logic |
-| DB helpers | `db.py` | `insert_pass_result`, `update_pass_result`, `delete_prior_failed_pass`, `get_latest_pass_result`, `fetch_pending_pass1_tickets` |
-| Tests | `tests/test_pass1.py` | 35 focused tests (parser, selection, idempotency, persistence, malformed handling) |
+| Prompt | `prompts/pass1_phenomenon.txt` | Pass 1 v2 prompt template with `{{input_text}}` and `{{ticket_name}}` placeholders |
+| Parser | `pass1_parser.py` | Strict JSON validation for phenomenon + confidence + grammar fields; imports `normalize_operation` from `pass2_parser` |
+| Orchestrator | `run_ticket_pass1.py` | CLI entrypoint + batch processing logic; strips violation warnings, passes ticket_name |
+| DB helpers | `db.py` | `insert_pass_result`, `update_pass_result`, `delete_prior_failed_pass`, `get_latest_pass_result`, `fetch_pending_pass1_tickets` (now returns 3-tuple with ticket_name) |
+| Tests | `tests/test_pass1.py` | Focused tests (parser, selection, idempotency, persistence, malformed handling) |
 
 ### Data Flow
 
 ```
-ticket_thread_rollups.full_thread_text
+tickets.ticket_name + ticket_thread_rollups.full_thread_text
+    → strip violation/SLA warning lines
     → load prompt template (prompts/pass1_phenomenon.txt)
-    → substitute {{input_text}} with full_thread_text
+    → substitute {{ticket_name}} and {{input_text}}
     → call Matcha endpoint
-    → parse JSON response → extract "phenomenon"
-    → store in ticket_llm_pass_results (raw + parsed + status)
+    → parse JSON response → extract phenomenon, confidence, component, operation, unexpected_state
+    → normalize operation verb (via pass2_parser.normalize_operation)
+    → reconstruct canonical_failure from parsed fields
+    → store in ticket_llm_pass_results (raw + parsed + status + all projected columns)
 ```
 
 ### Table: ticket_llm_pass_results
@@ -1262,10 +1270,10 @@ ticket_thread_rollups.full_thread_text
 | raw_response_text | TEXT | Raw text response from Matcha |
 | parsed_json | JSONB | Parsed JSON payload |
 | phenomenon | TEXT | Pass 1 output; NULL for other passes |
-| component | TEXT | Pass 2 output: subsystem/module involved |
-| operation | TEXT | Pass 2 output: normalized operation verb |
-| unexpected_state | TEXT | Pass 2 output: unexpected system outcome |
-| canonical_failure | TEXT | Pass 2 output: `<Component> + <Operation> + <Unexpected State>` |
+| component | TEXT | Pass 1 v2 output (formerly Pass 2): subsystem/module involved |
+| operation | TEXT | Pass 1 v2 output (formerly Pass 2): normalized operation verb |
+| unexpected_state | TEXT | Pass 1 v2 output (formerly Pass 2): unexpected system outcome |
+| canonical_failure | TEXT | Pass 1 v2 output (formerly Pass 2): `<Component> + <Operation> + <Unexpected State>` |
 | status | TEXT | `pending` / `success` / `failed` |
 | error_message | TEXT | Error details on failure |
 | started_at | TIMESTAMPTZ | When processing began |
@@ -1311,11 +1319,13 @@ The `ticket_llm_pass_results` table is designed for multi-pass use:
 
 ---
 
-## Pass 2 — Canonical Failure Grammar (LLM Multi-Pass Pipeline)
+## Pass 2 — Canonical Failure Grammar (DEPRECATED)
 
 ### Overview
 
-Pass 2 converts each Pass 1 phenomenon into the standardized operational grammar:
+**Pass 2 is deprecated.** Grammar extraction (component, operation, unexpected_state, canonical_failure) is now performed in Pass 1 v2 in a single LLM call. Pass 2 code remains functional for backward compatibility with v1 results.
+
+Previously, Pass 2 converted each Pass 1 phenomenon into the standardized operational grammar:
 
 `<Component> + <Operation> + <Unexpected State>`
 
@@ -1358,7 +1368,7 @@ ticket_llm_pass_results.phenomenon (from successful Pass 1)
 
 Operations are normalized to a fixed vocabulary: `post`, `import`, `export`, `print`, `load`, `transfer`, `calculate`, `attach`, `generate`, `recover`, `create`, `update`.
 
-Near-synonyms are mapped automatically (e.g. `upload` → `import`, `build` → `generate`, `modify` → `update`). Unknown operations cause a validation failure.
+Near-synonyms are mapped automatically (e.g. `upload` → `import`, `build` → `generate`, `modify` → `update`, `resequence` → `update`). Unknown operations cause a validation failure.
 
 ### Selection Logic
 
