@@ -3,7 +3,9 @@ Pass 3 response parser — strict validation of Matcha JSON output.
 
 Expected shape:
     {
-        "mechanism": "<non-empty string>"
+        "mechanism": "<non-empty string>",
+        "category": "software_defect" | "configuration" | "user_training" | "data_issue",
+        "evidence": "from_thread" | "inferred"
     }
 
 Rejects empty, missing, or malformed values.  Provides lightweight
@@ -19,17 +21,25 @@ class Pass3ParseError(Exception):
     """Raised when the Matcha response cannot be parsed into a valid Pass 3 result."""
 
 
-# ── Words that indicate administrative / support-workflow text ────────
+# ── Phrases that indicate administrative / support-workflow text ──────
 
-_ADMIN_WORDS = frozenset({
+_ADMIN_PHRASES = frozenset({
     "ticket",
-    "customer",
-    "agent",
-    "troubleshoot",
-    "troubleshooting",
+    "support agent",
     "support team",
     "support staff",
+    "troubleshoot",
+    "troubleshooting",
     "escalat",          # catches escalate, escalated, escalation
+    "customer reported",
+    "customer contacted",
+    "customer called",
+    "customer requested",
+    "customer asked",
+    "customer says",
+    "customer said",
+    "customer needs",
+    "customer complaint",
 })
 
 
@@ -50,10 +60,10 @@ def validate_mechanism(mechanism: str, canonical_failure: str) -> str:
         )
 
     # Reject administrative / support-workflow language
-    for word in _ADMIN_WORDS:
-        if word in mech_lower:
+    for phrase in _ADMIN_PHRASES:
+        if phrase in mech_lower:
             raise Pass3ParseError(
-                f"Mechanism contains administrative language: '{word}'"
+                f"Mechanism contains administrative language: '{phrase}'"
             )
 
     return mechanism
@@ -88,7 +98,7 @@ def parse_pass3_response(raw_text: str) -> Tuple[dict, str]:
     if not isinstance(parsed, dict):
         raise Pass3ParseError(f"Expected JSON object, got {type(parsed).__name__}")
 
-    # Validate required key
+    # Validate required key: mechanism
     if "mechanism" not in parsed:
         raise Pass3ParseError("Missing 'mechanism' key in response")
 
@@ -107,5 +117,23 @@ def parse_pass3_response(raw_text: str) -> Tuple[dict, str]:
         raise Pass3ParseError("'mechanism' is empty after trimming")
 
     parsed["mechanism"] = mechanism
+
+    # Validate optional-but-expected fields: category, evidence
+    _VALID_CATEGORIES = {"software_defect", "configuration", "user_training", "data_issue"}
+    _VALID_EVIDENCE = {"from_thread", "inferred"}
+
+    category = parsed.get("category", "software_defect")
+    if isinstance(category, str):
+        category = category.strip().lower()
+    if category not in _VALID_CATEGORIES:
+        category = "software_defect"
+    parsed["category"] = category
+
+    evidence = parsed.get("evidence", "inferred")
+    if isinstance(evidence, str):
+        evidence = evidence.strip().lower()
+    if evidence not in _VALID_EVIDENCE:
+        evidence = "inferred"
+    parsed["evidence"] = evidence
 
     return parsed, mechanism

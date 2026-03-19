@@ -31,18 +31,24 @@ run_ticket_pass1.py    — Pass 1: phenomenon extraction from full_thread_text v
 pass1_parser.py        — Pass 1 response parser (strict JSON validation, phenomenon extraction; null phenomenon accepted as valid "no observable behavior")
 run_ticket_pass2.py    — Pass 2: canonical failure grammar from Pass 1 phenomenon via Matcha (DB-only, idempotent, prompt-versioned)
 pass2_parser.py        — Pass 2 response parser (strict JSON validation, operation normalization, canonical_failure reconstruction)
-run_ticket_pass3.py    — Pass 3: failure mechanism inference from Pass 2 canonical_failure via Matcha (DB-only, idempotent, prompt-versioned)
-pass3_parser.py        — Pass 3 response parser (strict JSON validation, mechanism extraction, lightweight restatement/admin-text rejection)
+run_ticket_pass3.py    — Pass 3: failure mechanism inference from Pass 2 canonical_failure + ticket thread context via Matcha (DB-only, idempotent, prompt-versioned; outputs mechanism, category, evidence)
+pass3_parser.py        — Pass 3 response parser (strict JSON validation, mechanism extraction, category/evidence field validation, phrase-level admin-text rejection allowing technical "customer" references)
+run_pass4.py           — Pass 4: intervention mapping from Pass 3 mechanism via Matcha (DB-only, idempotent, prompt-versioned, ROI aggregation, --aggregate-only mode)
+pass4/mechanism_classes.py  — Normalized mechanism class taxonomy (13 fixed classes)
+pass4/intervention_types.py — Normalized intervention type taxonomy (7 fixed types)
+pass4/mechanism_classifier.py — Pass 4 response parser (strict JSON validation, taxonomy enforcement, action validation)
+pass4/intervention_mapper.py  — Pass 4 per-ticket LLM orchestrator (prompt build, Matcha call, parse, DB persist)
+pass4/intervention_aggregator.py — ROI aggregation engine (mechanism class counts, intervention type counts, top engineering fixes, JSON artifact export)
 migrations/            — Numbered SQL migration files applied by db.py
 web/app.py             — Dash + Mantine web dashboard entry point (read-only, live Postgres queries)
 web/dashboard.yaml     — YAML-driven dashboard configuration (pages, nav, queries, grids, charts, stat cards)
 web/renderer.py        — YAML config renderer: parses dashboard.yaml, builds Dash layouts for YAML-driven pages, imports custom page modules
 web/data.py            — Data access layer for the web dashboard (SELECT-only for analytics, plus dashboard-local CRUD for saved reports; no TS writes)
 web/pages/overview.py  — Overview page: KPI stat cards, backlog trend chart, aging distribution, open-by-product, chart drill-down (custom)
-web/pages/tickets.py   — Ticket explorer: AG Grid with filters, sorting, row-click navigation to detail, saved filter reports (custom)
+web/pages/tickets.py   — Ticket explorer: AG Grid with community text filters, sorting, row-click navigation to detail, saved filter reports, TeamSupport sync refresh button with live progress log (custom)
 web/pages/ticket_detail.py — Ticket detail: metadata header, thread timeline, score cards, wait profile chart, issue summary (custom)
 web/pages/health.py    — Health dashboards: Customer and Product health AG Grid tables (kept for reference; now YAML-driven)
-web/pages/root_cause.py — Root Cause analysis: AG Grid of pass-processed tickets, detail view with Pass 1 (phenomenon), Pass 2 (grammar decomposition), Pass 3 (mechanism inference), cleaned thread text (custom)
+web/pages/root_cause.py — Root Cause analysis: AG Grid of pass-processed tickets with CSV export, detail view with Pass 1 (phenomenon), Pass 2 (grammar decomposition), Pass 3 (mechanism inference), Pass 4 (intervention mapping), cleaned thread text (custom)
 web/pages/config_view.py — Pipeline config viewer (read-only display of all settings + sync status, custom)
 web_requirements.txt   — Python dependencies for the web dashboard (dash, dash-mantine-components, dash-ag-grid, PyYAML, etc.)
 ```
@@ -106,7 +112,9 @@ All database objects live in the `tickets_ai` schema. Every table that reference
 | `vw_ticket_pass1_results` | Latest Pass 1 phenomenon result per ticket |
 | `vw_ticket_pass2_results` | Latest Pass 2 grammar result per ticket (joined with Pass 1 phenomenon) |
 | `vw_ticket_pass3_results` | Latest Pass 3 mechanism result per ticket (joined with Pass 1 + Pass 2) |
-| `vw_ticket_pass_pipeline` | Full pipeline status: Pass 1 + Pass 2 + Pass 3 side-by-side per ticket |
+| `vw_ticket_pass4_results` | Latest Pass 4 intervention mapping per ticket (mechanism_class, intervention_type, intervention_action) |
+| `vw_intervention_roi` | Engineering ROI: ticket counts by mechanism_class × intervention_type |
+| `vw_ticket_pass_pipeline` | Full pipeline status: Pass 1 + Pass 2 + Pass 3 + Pass 4 side-by-side per ticket |
 
 ## Data Flow
 
@@ -892,6 +900,7 @@ Test coverage includes:
 - **Post-sync rollups** (4 tests): CSV import returns upserted IDs, rollup rebuild triggered after import, skipped on dry-run
 - **Pass 1 — phenomenon** (35 tests): parser, selection logic, idempotency, DB persistence, malformed handling, success flow, prompt template
 - **Pass 2 — grammar** (51 tests): parser, operation normalization, canonical failure reconstruction, selection logic, idempotency, DB persistence, malformed handling, success flow, prompt template
+- **Pass 3 — mechanism** (50 tests): parser, category/evidence validation, selection logic (3-tuple with thread context), thread context in SQL, idempotency, DB persistence, malformed handling, success flow, prompt template
 
 ## Audit Summary (2026-03-13)
 
@@ -1431,3 +1440,137 @@ rows = analytics_queries.root_cause_distribution(conn)
 df   = analytics_queries.top_failure_mechanisms(conn, as_df=True)
 conn.close()
 ```
+
+---
+
+## Pass 3 — Failure Mechanism Inference (LLM Multi-Pass Pipeline)
+
+### Overview
+
+Pass 3 infers the underlying system mechanism that explains each canonical failure from Pass 2. Unlike earlier passes, Pass 3 receives both the canonical failure string AND the original ticket thread text, enabling evidence-grounded mechanism inference rather than pure speculation.
+
+Pass 3 also classifies each failure into a category (software_defect, configuration, user_training, data_issue) and reports whether the mechanism is grounded in thread evidence or inferred.
+
+### Architecture
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| Migration | `migrations/017_pass3_mechanism.sql` | Adds `mechanism` column + `vw_ticket_pass3_results` view |
+| Prompt | `prompts/pass3_mechanism.txt` | Pass 3 prompt template with `{{input_text}}` and `{{thread_context}}` placeholders |
+| Parser | `pass3_parser.py` | Strict JSON validation for `{"mechanism": "...", "category": "...", "evidence": "..."}` responses |
+| Orchestrator | `run_ticket_pass3.py` | CLI entrypoint + batch processing logic |
+| DB helpers | `db.py` | `fetch_pending_pass3_tickets` (returns 3-tuple with thread context), `update_pass_result` |
+| Tests | `tests/test_pass3.py` | 50 focused tests (parser, category/evidence validation, selection, thread context, idempotency, persistence, malformed handling) |
+
+### Data Flow
+
+```
+ticket_llm_pass_results.canonical_failure (from successful Pass 2)
+  + ticket_thread_rollups.technical_core_text (original ticket thread)
+    → load prompt template (prompts/pass3_mechanism.txt)
+    → substitute {{input_text}} with canonical_failure
+    → substitute {{thread_context}} with technical_core_text (capped at 3000 chars)
+    → call Matcha endpoint
+    → parse JSON response → extract mechanism, category, evidence
+    → store in ticket_llm_pass_results (raw + parsed + status + mechanism column)
+```
+
+### Pass 3 Output Fields
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| mechanism | Internal system behavior explaining the failure | `Billing calculation logic applies service charge rule twice during bill generation` |
+| category | Failure classification | `software_defect` |
+| evidence | Grounding indicator | `from_thread` |
+
+### Category Values
+
+| Category | Meaning |
+|----------|---------|
+| `software_defect` | Bug or logic error in the software |
+| `configuration` | System or environment configuration needed adjustment |
+| `user_training` | Resolved by educating the user on existing functionality |
+| `data_issue` | Resolved by correcting data, not code |
+
+### Evidence Values
+
+| Evidence | Meaning |
+|----------|---------|
+| `from_thread` | Mechanism is grounded in observable thread content |
+| `inferred` | Mechanism is inferred from canonical failure alone (thread was sparse) |
+
+### Thread Context Integration
+
+Pass 3 receives `technical_core_text` from `ticket_thread_rollups` as additional context alongside the canonical failure. This allows the LLM to:
+
+- Ground mechanisms in actual resolution evidence from the thread
+- Identify non-software-defect resolutions (training, configuration)
+- Avoid fabricating specific technical details when the thread doesn't support them
+
+The thread context is capped at 3000 characters and provided via a `{{thread_context}}` placeholder. When no thread text is available, the placeholder is filled with `"(no thread context available)"`.
+
+### Selection Logic
+
+- Requires a successful Pass 2 result with non-null, non-empty canonical_failure
+- LEFT JOINs `ticket_thread_rollups` to include `technical_core_text` (defaults to empty string if missing)
+- Excludes tickets with an existing successful Pass 3 result for the current prompt version (unless `--force`)
+- `--failed-only` restricts to tickets with a prior failed Pass 3 attempt
+
+### Prompt Version
+
+Current prompt version: **2** (upgraded from v1 to include thread context, category, and evidence fields).
+
+### CLI Usage
+
+```bash
+python run_ticket_pass3.py --limit 100
+python run_ticket_pass3.py --ticket-id 99784
+python run_ticket_pass3.py --ticket-id 99784,98154,100289
+python run_ticket_pass3.py --failed-only
+python run_ticket_pass3.py --force
+```
+
+### Quality Improvements (v2 Prompt)
+
+The v2 prompt addresses issues identified in a 30-ticket quality evaluation:
+
+1. **Thread-grounded inference** — Mechanisms are now based on actual ticket resolutions instead of speculative technical explanations
+2. **Non-software-defect categorization** — Tickets resolved via user training or configuration are categorized correctly instead of being forced into a software-defect mechanism
+3. **Evidence transparency** — Downstream consumers can distinguish grounded vs speculative mechanisms
+4. **Reduced hallucination** — The prompt explicitly instructs: "NEVER fabricate specific technical details when the thread does not support them"
+
+### Companion Prompt Improvements (v2)
+
+Pass 1 and Pass 2 prompts were also improved in the same release:
+
+- **Pass 1**: Strengthened null-return guidance with 6 explicit scenarios where phenomenon should be null (empty threads, administrative-only content, user-training resolutions). Added multi-issue ticket guidance to prefer the original reported problem.
+- **Pass 2**: Added `load` vs `display` operation disambiguation with positive/negative examples. Tightened `unexpected_state` to be shorter than the phenomenon and avoid echoing redundant context.
+
+### Pass 4 Dependency Update
+
+`run_pass4.py` `PASS3_PROMPT_VERSION` updated from `"1"` to `"2"` so that Pass 4 reads mechanisms from Pass 3 v2 results.
+
+### 30-Ticket Evaluation Results (Post v2 Prompt Changes)
+
+All 4 passes were rerun with `--force` against 30 tickets from `root_c_extraction.csv`:
+
+| Pass | Metric | Result |
+|------|--------|--------|
+| Pass 1 | Phenomena extracted | 22/30 (8 null returns) |
+| Pass 2 | Grammars produced | 22/22 (scoped to Pass 1 successes) |
+| Pass 2 | `load` operations | 9 of 22 (vs 9/30 in CSV baseline) |
+| Pass 2 | Operation match vs CSV | 18/22 |
+| Pass 3 v2 | Mechanisms produced | 30/30 |
+| Pass 3 v2 | Evidence: from_thread | 22 |
+| Pass 3 v2 | Evidence: inferred | 8 |
+| Pass 3 v2 | Categories | 24 software_defect, 4 configuration, 1 data_issue, 1 user_training |
+| Pass 4 | Interventions produced | 29/30 (1 expected failure: user_training ticket) |
+| Pass 4 | Mechanism class match vs CSV | 15/29 |
+| Pass 4 | Intervention type match vs CSV | 19/29 |
+
+**Key observations:**
+
+- **Pass 1 null-guidance** is working but may be over-suppressing: 8 tickets with real phenomena returned null. All 8 have thread text (391–32,369 chars), so the model is choosing null based on content ambiguity rather than text absence.
+- **Pass 3 evidence grounding** works well: 22/30 mechanisms are `from_thread`, with thread-specific details (e.g., "missing GEO code API key", "Impresa and GP databases must reside on same SQL server/instance").
+- **Pass 3 non-defect categorization** is functioning: 1 ticket correctly classified as `user_training` (mechanism: `user_knowledge_gap`), 4 as `configuration`.
+- **Pass 4 divergence from CSV** is expected: the new v2 mechanisms differ from v1, producing different (often more specific) mechanism_class and intervention_type assignments. The CSV baseline was generated from v1 mechanisms.

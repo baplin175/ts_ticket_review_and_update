@@ -31,7 +31,7 @@ PROMPT_PATH = os.path.join(
 )
 
 PASS_NAME = "pass3_mechanism"
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"
 MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
 
 # Pass 2 dependency — which Pass 2 result to source canonical_failure from
@@ -48,9 +48,13 @@ def _load_prompt_template() -> str:
         return f.read()
 
 
-def _build_prompt(template: str, canonical_failure: str) -> str:
-    """Replace {{input_text}} placeholder in the prompt template."""
-    return template.replace("{{input_text}}", canonical_failure)
+def _build_prompt(template: str, canonical_failure: str, thread_context: str = "") -> str:
+    """Replace {{input_text}} and {{thread_context}} placeholders in the prompt template."""
+    prompt = template.replace("{{input_text}}", canonical_failure)
+    # Cap thread context at 3000 chars to stay within token limits
+    trimmed_context = thread_context[:3000] if thread_context else "(no thread context available)"
+    prompt = prompt.replace("{{thread_context}}", trimmed_context)
+    return prompt
 
 
 def process_ticket(
@@ -58,6 +62,7 @@ def process_ticket(
     canonical_failure: str,
     prompt_template: str,
     *,
+    thread_context: str = "",
     force: bool = False,
 ) -> dict:
     """Process a single ticket through Pass 3.
@@ -101,7 +106,7 @@ def process_ticket(
         db.delete_prior_failed_pass(ticket_id, PASS_NAME, PROMPT_VERSION)
 
     # Build prompt
-    full_prompt = _build_prompt(prompt_template, canonical_failure)
+    full_prompt = _build_prompt(prompt_template, canonical_failure, thread_context)
 
     # Insert pending row
     row_id = db.insert_pass_result(
@@ -231,7 +236,7 @@ def main(
     skipped = 0
     total_start = time.monotonic()
 
-    for idx, (ticket_id, canonical_failure) in enumerate(rows, 1):
+    for idx, (ticket_id, canonical_failure, thread_context) in enumerate(rows, 1):
         _log(f"\n[pass3] [{idx}/{total}] Ticket {ticket_id}")
         _log(f"[pass3]   canonical_failure: {canonical_failure[:80]}{'…' if len(canonical_failure) > 80 else ''}")
 
@@ -239,6 +244,7 @@ def main(
             ticket_id,
             canonical_failure,
             prompt_template,
+            thread_context=thread_context,
             force=force,
         )
         results.append(r)

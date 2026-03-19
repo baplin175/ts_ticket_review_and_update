@@ -1,43 +1,78 @@
 PASS 3 PROMPT — Failure Mechanism Inference
 
-You are given a standardized operational failure produced from a software support ticket.
+You are given a standardized operational failure produced from a software support ticket, along with the original ticket thread context.
 
-Your task is to infer the most plausible system mechanism that would produce this failure.
+Your task is to infer the most plausible system mechanism that would produce this failure, grounded in the evidence from the ticket thread when available.
 
-This mechanism should describe the internal system behavior or technical condition that causes the observed failure.
+The mechanism must describe the internal system behavior or technical condition that causes the observed failure.
 
 The mechanism must remain implementation-neutral and generalizable so that similar tickets produce similar mechanism descriptions.
 
+
 INPUT
 
-You will receive the following structured failure:
+You will receive:
+1. A structured canonical failure: <Component> + <Operation> + <Unexpected State>
+2. The original ticket thread context (conversation history from the support ticket)
 
-<Component> + <Operation> + <Unexpected State>
 
 DEFINITION
 
 Mechanism
 
-A short description of the underlying system behavior that explains the failure.
+A short description of the underlying internal system behavior that explains the failure.
 
-Mechanisms usually involve:
+The mechanism should identify a single internal technical behavior that causes the observed failure.
+
+Mechanisms typically fall into categories such as:
+
 - data validation failure
 - configuration mismatch
+- integration authentication failure
 - integration mapping error
 - schema mismatch
 - missing dependency
 - incorrect business rule logic
-- background job failure
-- file format incompatibility
-- permission or access restriction
+- background job execution failure
 - synchronization failure
 - cache or state inconsistency
+- file format incompatibility
+- permission or access restriction
 - calculation logic error
 - field mapping error
 - interface communication failure
 - scheduling or job execution failure
 
-The mechanism should describe how the system behaves internally, not the user-visible symptom.
+Additionally, some tickets are NOT software defects. When the thread evidence shows the issue was resolved through training, education, or process correction, the mechanism should reflect that:
+
+- user_knowledge_gap — customer did not know how to use a feature
+- process_gap — organizational process was missing or incorrect
+- environment_configuration — external environment (antivirus, network, server) needed adjustment
+
+
+USING THREAD CONTEXT
+
+The thread context gives you evidence of what actually happened.
+
+When the thread describes the resolution or root cause:
+- Base your mechanism on that evidence
+- Example: if the thread says "showed them how to import the file", the mechanism should reflect a user knowledge gap, NOT a fabricated API or authentication failure
+
+When the thread is sparse or does not explain the cause:
+- You may infer a plausible technical mechanism from the canonical failure
+- But mark your evidence field as "inferred"
+
+NEVER fabricate specific technical details (API credential failures, COM registration errors, schema mismatches) when the thread does not support them.
+
+
+Category
+
+Classify the failure into one of:
+- software_defect — a bug or logic error in the software
+- configuration — system or environment configuration needed adjustment
+- user_training — resolved by educating the user on existing functionality
+- data_issue — resolved by correcting data, not code
+
 
 GOOD MECHANISM EXAMPLES
 
@@ -45,47 +80,122 @@ Canonical failure:
 Invoice Cloud integration + upload + files fail to upload
 
 Mechanism:
-Invoice Cloud integration rejects file upload due to failed authentication or API validation
+Integration authentication service rejects file upload due to failed API credential validation
+
 
 Canonical failure:
 Work Order screen + display + map does not appear
 
 Mechanism:
-Work Order UI fails to load map component due to missing or invalid map service response
+Map UI component fails to render due to missing response from the map service API
+
 
 Canonical failure:
 Billing module + print + service charge prints twice
 
 Mechanism:
-Billing calculation logic applies service charge rule twice during bill generation
+Billing calculation logic applies the service charge rule twice during bill generation
+
 
 Canonical failure:
 Meter import process + import + import fails due to file format mismatch
 
 Mechanism:
-Meter import parser rejects input file due to schema mismatch with expected import format
+Import parser rejects input file due to schema mismatch with expected import format
+
+
+BAD MECHANISM EXAMPLES
+
+Canonical failure:
+Billing module + print + bill prints incorrectly
+
+Bad mechanism:
+System error during printing
+
+Reason:
+Too vague and does not describe a specific internal system behavior.
+
+
+Canonical failure:
+Report + generate + report fails
+
+Bad mechanism:
+Calculation logic error or data inconsistency
+
+Reason:
+Contains multiple possible causes and does not identify a single mechanism.
+
 
 IMPORTANT RULES
 
-- Focus on the system mechanism, not the symptom
-- Do NOT repeat the canonical failure
-- Do NOT speculate about human actions or support workflow
-- Do NOT mention tickets, customers, agents, or troubleshooting steps
-- Prefer technical system behaviors such as validation failures, logic errors, integration errors, or data inconsistencies
-- Keep the mechanism concise (1 sentence)
-- Normalize wording so similar failures produce similar mechanisms
+- Identify ONE dominant mechanism only.
+- The mechanism must describe a single system behavior.
+- The mechanism must NOT contain the word "or".
+- Do NOT list multiple possible causes.
+- Focus on the internal system behavior that produces the failure.
+- Do NOT repeat the canonical failure wording.
+- Do NOT speculate about human actions or support workflow.
+- Do NOT mention tickets, customers, agents, or troubleshooting steps.
+
+Mechanism structure guidance:
+
+Mechanisms should begin with the system component or subsystem responsible for the behavior.
+
+Examples of acceptable subjects:
+- calculation logic
+- import parser
+- authentication service
+- validation logic
+- synchronization process
+- configuration loader
+- integration interface
+- report generation logic
+- UI component
+
+Avoid starting mechanisms with generic phrases such as:
+- "the system"
+- "the process"
+- "the workflow"
+- "the service"
+
+Avoid vague phrases such as:
+- "system error"
+- "processing error"
+- "data issue"
+- "unexpected condition"
+- "underlying problem"
+
+Prefer concrete technical behaviors such as validation failures, configuration mismatches, logic errors, integration failures, or data inconsistencies.
+
+Mechanisms should be generalizable so similar failures produce similar mechanism descriptions.
+
+Avoid implementation-specific details such as database table names or code modules.
+
+The mechanism must be exactly one concise sentence.
+
 
 OUTPUT FORMAT
 
 Return JSON only.
 
 {
-  "mechanism": ""
+  "mechanism": "",
+  "category": "",
+  "evidence": ""
 }
+
+Where:
+- mechanism: one concise sentence describing the system behavior or resolution context
+- category: one of "software_defect", "configuration", "user_training", "data_issue"
+- evidence: one of "from_thread" (mechanism is grounded in thread content) or "inferred" (mechanism is inferred from canonical failure alone)
+
 
 TASK
 
-Infer the most plausible system mechanism for the following canonical failure.
+Infer the most plausible system mechanism for the following canonical failure, using the thread context as evidence when available.
 
 canonical_failure:
 {{input_text}}
+
+thread_context:
+{{thread_context}}

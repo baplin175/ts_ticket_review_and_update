@@ -1,0 +1,119 @@
+PASS 4 PROMPT — Intervention Mapping
+
+You are given a software failure mechanism extracted from a support ticket.
+
+Your task is to determine the corrective action that would eliminate or prevent this failure.
+
+
+INPUT
+
+mechanism:
+{{mechanism}}
+
+
+DEFINITIONS
+
+Mechanism
+The internal system behavior that causes the failure.
+
+Intervention
+A specific system change that removes or prevents the failure mechanism.
+
+
+MECHANISM CLASS TAXONOMY
+
+Select exactly one:
+
+- calculation_logic_error
+- schema_mismatch
+- data_validation_failure
+- configuration_mismatch
+- authentication_failure
+- integration_mapping_error
+- integration_communication_failure
+- state_inconsistency
+- synchronization_failure
+- dependency_missing
+- field_mapping_error
+- cache_inconsistency
+- permission_error
+
+
+INTERVENTION TYPES
+
+Select exactly one:
+
+- software_fix            (code change)
+- configuration_change    (system configuration correction)
+- validation_guardrail    (prevent invalid input)
+- integration_fix         (external system/interface fix)
+- data_repair             (fix corrupted data)
+- documentation           (missing documentation)
+- customer_training       (user workflow correction)
+
+
+INTERVENTION GUIDELINES
+
+- The intervention must directly address the mechanism.
+- The intervention must describe ONE specific system change.
+- Prefer structural fixes over temporary workarounds.
+- Do NOT describe troubleshooting steps.
+- Do NOT mention tickets, users, or support processes.
+
+ACTION VERB REQUIREMENTS
+
+Use precise, deterministic verbs such as:
+
+- add
+- update
+- enforce
+- validate
+- reject
+- map
+- persist
+- retry
+- correct
+- align
+- normalize
+
+Avoid vague verbs such as:
+
+- resolve
+- ensure
+- handle
+- fix
+- address
+- improve
+
+
+STRUCTURE
+
+Write the intervention as:
+
+<component or subsystem> + <specific change>
+
+Examples:
+
+- add schema validation to import parser to reject invalid file formats
+- update billing calculation logic to prevent duplicate service charge application
+- enforce API credential validation in integration authentication service
+- correct field mapping logic between payment method and account description
+
+
+OUTPUT FORMAT
+
+Return JSON only.
+
+{
+  "mechanism_class": "",
+  "intervention_type": "",
+  "intervention_action": ""
+}
+
+
+TASK
+
+Determine the correct mechanism_class, intervention_type, and intervention_action for the given mechanism.
+
+mechanism:
+{{mechanism}}

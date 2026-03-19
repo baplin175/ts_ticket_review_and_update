@@ -15,3 +15,4 @@ output/
 venv/
 .pytest_cache/
 Activities.csv
+qma_more/

@@ -1,4 +1,4 @@
-"""Root Cause page — LLM pass results (pass1 phenomenon, pass2 grammar, pass3 mechanism)."""
+"""Root Cause page — LLM pass results (pass1 phenomenon, pass2 grammar, pass3 mechanism, pass4 intervention)."""
 
 import json
 
@@ -8,6 +8,7 @@ from dash import dcc, html, callback, Input, Output, no_update
 from dash_iconify import DashIconify
 
 import data
+from renderer import grid_with_export
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -100,6 +101,10 @@ _GRID_COLS = [
     {"field": "unexpected_state", "headerName": "Unexpected State", "minWidth": 180, "flex": 1},
     {"field": "pass3_status", "headerName": "Pass 3", "width": 90},
     {"field": "mechanism", "headerName": "Mechanism", "minWidth": 200, "flex": 1},
+    {"field": "pass4_status", "headerName": "Pass 4", "width": 90},
+    {"field": "mechanism_class", "headerName": "Mechanism Class", "width": 180},
+    {"field": "intervention_type", "headerName": "Intervention Type", "width": 160},
+    {"field": "intervention_action", "headerName": "Intervention Action", "minWidth": 200, "flex": 1},
 ]
 
 
@@ -130,7 +135,7 @@ def root_cause_layout():
             "Click a row to view full details.",
             size="sm", c="dimmed",
         ),
-        grid,
+        grid_with_export(grid, "root-cause-grid"),
         html.Div(id="root-cause-detail"),
     ], gap="md")
 
@@ -220,6 +225,26 @@ def register_callbacks(app):
         else:
             pass3_card = _placeholder_card("Pass 3 — Mechanism Inference", "tabler:bulb")
 
+        # Pass 4 — Intervention Mapping
+        p4 = by_name.get("pass4_intervention")
+        if p4:
+            pass4_card = _pass_card(
+                "Pass 4 — Intervention Mapping", "tabler:tools",
+                p4.get("status"),
+                [
+                    ("Mechanism Class", p4.get("mechanism_class")),
+                    ("Intervention Type", p4.get("intervention_type")),
+                    ("Intervention Action", p4.get("intervention_action")),
+                    ("Model", p4.get("model_name")),
+                    ("Prompt Version", p4.get("prompt_version")),
+                    ("Completed", str(p4.get("completed_at", ""))[:19]),
+                ],
+                raw_json=p4.get("parsed_json"),
+                error=p4.get("error_message"),
+            )
+        else:
+            pass4_card = _placeholder_card("Pass 4 — Intervention Mapping", "tabler:tools")
+
         # Cleaned thread text
         thread_text = thread.get("technical_core_text") or thread.get("full_thread_text") or ""
         thread_section = dmc.Paper([
@@ -246,8 +271,8 @@ def register_callbacks(app):
                 labelPosition="center", mt="lg",
             ),
             dmc.SimpleGrid(
-                cols={"base": 1, "lg": 3},
-                children=[pass1_card, pass2_card, pass3_card],
+                cols={"base": 1, "lg": 2},
+                children=[pass1_card, pass2_card, pass3_card, pass4_card],
             ),
             thread_section,
         ], gap="md")

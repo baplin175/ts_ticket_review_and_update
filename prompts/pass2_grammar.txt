@@ -79,6 +79,29 @@ Prefer these mappings when applicable:
 - data not transferred / transfer did not run → transfer
 - records not updated / value not updated → update
 
+IMPORTANT — "display" vs "load" disambiguation:
+
+Do NOT default to "load" when a more specific operation applies.
+
+Use "display" when:
+- a value, element, or screen content is not appearing or appears incorrectly
+- a report is not showing expected data
+- a UI element is missing or visually wrong
+
+Use "load" ONLY when:
+- an application, module, or screen genuinely fails to start or initialize
+- data fails to load from a data source into an in-memory structure
+
+Examples of INCORRECT "load" usage:
+Bad:  Ebill + load + does not work post migration       → use "display" or "sync" depending on root behavior
+Bad:  Bank reconciliation report + load + city share not showing → use "display"
+Bad:  Invoice Cloud integration + load + template not used       → use "display" or "generate"
+Bad:  Statement generation + load + message continues to appear  → use "generate"
+
+Examples of CORRECT "load" usage:
+OK:  GP application + load + fails to launch
+OK:  Parallels Web client + load + does not see shared network drives
+
 Avoid generic verbs like:
 - update
 - process
@@ -91,6 +114,7 @@ Unexpected State
 A short description of the incorrect observable system behavior.
 
 Keep this concise, factual, and behavior-focused.
+The unexpected_state should be SHORTER than the phenomenon — strip redundant context that is already captured in the component or operation fields.
 
 Examples:
 - files fail to upload
@@ -100,6 +124,14 @@ Examples:
 - payment method displays incorrectly
 - meter removal fails with upload error
 - warranty date is set to install date instead of 10 years out
+
+Bad unexpected_state (too long / echoes phenomenon):
+"Invoice Cloud no longer uses a template for LCWC bills" → too specific, echoes context
+Better: "template not applied to bills"
+
+Bad unexpected_state (repeats component):
+"meter import fails when uploading reads to other municipalities" → repeats component context
+Better: "fails when uploading reads to other municipalities"
 
 Do not describe root cause.
 Do not describe troubleshooting steps.

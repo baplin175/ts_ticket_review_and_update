@@ -1,12 +1,67 @@
 """Ticket list page — AG Grid explorer with filters, row-click navigation, and saved reports."""
 
+import subprocess
+import sys
+import os
+import threading
+import time
+
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
-from dash import dcc, html
+from dash import callback, ctx, dcc, html, Input, Output, State, no_update
 from dash_iconify import DashIconify
 
 import data
 from renderer import grid_with_export
+
+# Path to run_ingest.py in the project root (web/pages/ → web/ → project root)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_INGEST_SCRIPT = os.path.join(_PROJECT_ROOT, "run_ingest.py")
+
+# ── Shared sync state (module-level, single-process safe) ────────────
+
+_sync_state = {
+    "running": False,
+    "lines": [],
+    "finished": False,
+    "return_code": None,
+}
+_sync_lock = threading.Lock()
+
+
+def _run_sync_in_background():
+    """Launch run_ingest.py sync as a subprocess, capture output line by line."""
+    with _sync_lock:
+        _sync_state["running"] = True
+        _sync_state["lines"] = []
+        _sync_state["finished"] = False
+        _sync_state["return_code"] = None
+
+    try:
+        env = os.environ.copy()
+        env["MAX_TICKETS"] = "5"  # TODO: remove limit after testing
+        proc = subprocess.Popen(
+            [sys.executable, _INGEST_SCRIPT, "sync", "--verbose"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            cwd=_PROJECT_ROOT,
+            env=env,
+        )
+        for line in proc.stdout:
+            with _sync_lock:
+                _sync_state["lines"].append(line.rstrip())
+        proc.wait()
+        with _sync_lock:
+            _sync_state["return_code"] = proc.returncode
+    except Exception as exc:
+        with _sync_lock:
+            _sync_state["lines"].append(f"[error] {exc}")
+            _sync_state["return_code"] = -1
+    finally:
+        with _sync_lock:
+            _sync_state["running"] = False
+            _sync_state["finished"] = True
 
 
 # ── Column definitions ───────────────────────────────────────────────
@@ -25,11 +80,11 @@ COLUMN_DEFS = [
         "flex": 1,
         "tooltipField": "ticket_name",
     },
-    {"field": "status", "headerName": "Status", "width": 120, "filter": "agSetColumnFilter"},
-    {"field": "severity", "headerName": "Severity", "width": 140, "filter": "agSetColumnFilter"},
-    {"field": "product_name", "headerName": "Product", "width": 140, "filter": "agSetColumnFilter"},
-    {"field": "assignee", "headerName": "Assignee", "width": 130, "filter": "agSetColumnFilter"},
-    {"field": "customer", "headerName": "Customer", "width": 140, "filter": "agSetColumnFilter"},
+    {"field": "status", "headerName": "Status", "width": 120},
+    {"field": "severity", "headerName": "Severity", "width": 140},
+    {"field": "product_name", "headerName": "Product", "width": 140},
+    {"field": "assignee", "headerName": "Assignee", "width": 130},
+    {"field": "customer", "headerName": "Customer", "width": 140},
     {
         "field": "days_opened",
         "headerName": "Age (d)",
@@ -67,7 +122,6 @@ COLUMN_DEFS = [
         "field": "frustrated",
         "headerName": "Frustrated",
         "width": 105,
-        "filter": "agSetColumnFilter",
         "cellStyle": {
             "function": """
                 params.value === 'Yes'
@@ -145,7 +199,19 @@ def tickets_layout():
             dmc.Group(
                 [
                     dmc.Title("Tickets", order=2),
-                    dmc.Badge(f"{len(rows)} tickets", size="lg", variant="light"),
+                    dmc.Group(
+                        [
+                            dmc.Badge(f"{len(rows)} tickets", id="ticket-count-badge", size="lg", variant="light"),
+                            dmc.Button(
+                                "Refresh from TeamSupport",
+                                id="refresh-tickets-btn",
+                                leftSection=DashIconify(icon="tabler:refresh", width=16),
+                                variant="light",
+                                size="compact-sm",
+                            ),
+                        ],
+                        gap="xs",
+                    ),
                 ],
                 justify="space-between",
             ),
@@ -212,6 +278,10 @@ def tickets_layout():
             # Hidden stores
             dcc.Store(id="report-filter-store", data={}),
             dcc.Store(id="saved-reports-store", data={str(r["id"]): r["filter_model"] for r in reports}),
+            # Sync progress panel (above the grid so it's visible)
+            html.Div(id="sync-progress-panel"),
+            dcc.Interval(id="sync-poll-interval", interval=800, disabled=True),
+            dcc.Interval(id="sync-dismiss-interval", interval=5000, max_intervals=1, disabled=True),
             grid_with_export(
                 dag.AgGrid(
                     id="ticket-grid",
@@ -220,7 +290,7 @@ def tickets_layout():
                     defaultColDef=DEFAULT_COL_DEF,
                     getRowId="String(params.data.ticket_id)",
                     dashGridOptions={
-                        "rowSelection": "single",
+                        "rowSelection": {"mode": "singleRow", "enableClickSelection": True},
                         "pagination": True,
                         "paginationPageSize": 50,
                         "animateRows": True,
@@ -234,3 +304,134 @@ def tickets_layout():
         ],
         gap="sm",
     )
+
+
+# ── Refresh callbacks — subprocess with live progress ────────────────
+
+@callback(
+    Output("sync-progress-panel", "children"),
+    Output("sync-poll-interval", "disabled"),
+    Output("sync-dismiss-interval", "disabled"),
+    Output("sync-dismiss-interval", "n_intervals", allow_duplicate=True),
+    Output("refresh-tickets-btn", "disabled"),
+    Output("ticket-grid", "rowData"),
+    Output("ticket-count-badge", "children"),
+    Input("refresh-tickets-btn", "n_clicks"),
+    Input("sync-poll-interval", "n_intervals"),
+    prevent_initial_call=True,
+)
+def handle_sync(_n_clicks, _n_intervals):
+    """Start sync on button click, poll progress on interval tick."""
+    trigger = ctx.triggered_id
+
+    # ── Button click: kick off background sync ───────────────────────
+    if trigger == "refresh-tickets-btn":
+        with _sync_lock:
+            if _sync_state["running"]:
+                return no_update, no_update, no_update, no_update, no_update, no_update, no_update
+
+        thread = threading.Thread(target=_run_sync_in_background, daemon=True)
+        thread.start()
+
+        initial_panel = dmc.Paper(
+            dmc.Stack([
+                dmc.Group([
+                    dmc.Loader(size="xs", type="dots"),
+                    dmc.Text("Syncing from TeamSupport…", size="sm", fw=500),
+                ], gap="xs"),
+                dmc.Code(
+                    "[ingest] Starting…",
+                    block=True,
+                    style={
+                        "maxHeight": "200px",
+                        "overflowY": "auto",
+                        "fontSize": "12px",
+                        "whiteSpace": "pre-wrap",
+                    },
+                ),
+            ], gap="xs"),
+            shadow="xs",
+            p="sm",
+            withBorder=True,
+        )
+        return initial_panel, False, True, 0, True, no_update, no_update
+
+    # ── Interval tick: poll for progress ─────────────────────────────
+    with _sync_lock:
+        lines = list(_sync_state["lines"])
+        finished = _sync_state["finished"]
+        return_code = _sync_state["return_code"]
+
+    log_text = "\n".join(lines[-50:]) if lines else "[ingest] Starting…"
+
+    if not finished:
+        panel = dmc.Paper(
+            dmc.Stack([
+                dmc.Group([
+                    dmc.Loader(size="xs", type="dots"),
+                    dmc.Text("Syncing from TeamSupport…", size="sm", fw=500),
+                ], gap="xs"),
+                dmc.Code(
+                    log_text,
+                    block=True,
+                    style={
+                        "maxHeight": "200px",
+                        "overflowY": "auto",
+                        "fontSize": "12px",
+                        "whiteSpace": "pre-wrap",
+                    },
+                ),
+            ], gap="xs"),
+            shadow="xs",
+            p="sm",
+            withBorder=True,
+        )
+        return panel, False, True, no_update, True, no_update, no_update
+    # Treat as success if exit code is 0 OR the log shows completion markers
+    # (Python 3.13 can produce a non-zero exit on stdout pipe flush)
+    log_has_done = any("] Done" in ln for ln in lines)
+    ok = return_code == 0 or log_has_done
+    color = "green" if ok else "red"
+    icon = "tabler:check" if ok else "tabler:x"
+    title = "Sync complete" if ok else "Sync failed"
+
+    panel = dmc.Paper(
+        dmc.Stack([
+            dmc.Group([
+                DashIconify(icon=icon, width=18, color=color),
+                dmc.Text(title, size="sm", fw=500, c=color),
+            ], gap="xs"),
+            dmc.Code(
+                log_text,
+                block=True,
+                style={
+                    "maxHeight": "200px",
+                    "overflowY": "auto",
+                    "fontSize": "12px",
+                    "whiteSpace": "pre-wrap",
+                },
+            ),
+        ], gap="xs"),
+        shadow="xs",
+        p="sm",
+        withBorder=True,
+    )
+
+    rows = data.get_ticket_list()
+    # Stop polling, enable dismiss timer, re-enable button, refresh grid
+    return panel, True, False, no_update, False, rows, f"{len(rows)} tickets"
+
+
+@callback(
+    Output("sync-progress-panel", "children", allow_duplicate=True),
+    Output("ticket-grid", "rowData", allow_duplicate=True),
+    Output("ticket-count-badge", "children", allow_duplicate=True),
+    Output("sync-dismiss-interval", "disabled", allow_duplicate=True),
+    Input("sync-dismiss-interval", "n_intervals"),
+    prevent_initial_call=True,
+)
+def auto_dismiss_sync_panel(_n):
+    """Auto-clear the sync panel after 5 seconds and refresh grid."""
+    rows = data.get_ticket_list()
+    return None, rows, f"{len(rows)} tickets", True
+    return None

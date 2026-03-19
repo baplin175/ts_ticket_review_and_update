@@ -80,9 +80,30 @@ return:
   "phenomenon": null
 }
 
+Return null in ALL of these situations:
+
+- The thread text is empty or contains only automated violation warnings
+- The thread is purely project coordination, scheduling, or sales activity
+- The resolution was user training or education ("showed them how to...", "walked through the steps")
+- The thread contains only administrative notes (ticket reassignment, closure notices, separate ticket created)
+- The thread is a project delivery handoff with no technical issue reported
+- The only content is an out-of-office reply or signature block
+
+Do NOT infer a phenomenon from the ticket name or title alone.
+If the thread text does not describe a specific system malfunction, return null.
+
 Do NOT explain why.
 Do NOT describe the ticket.
 Do NOT produce commentary.
+
+
+--------------------------------
+MULTI-ISSUE TICKETS
+--------------------------------
+
+When a ticket contains multiple issues, extract the ORIGINAL reported problem — not a secondary issue that arose during troubleshooting or resolution.
+
+If the ticket's primary purpose is a project or service engagement and a sub-problem was reported along the way, prefer the sub-problem only if it became the dominant technical discussion in the thread.
 
 --------------------------------
 NORMALIZATION RULES

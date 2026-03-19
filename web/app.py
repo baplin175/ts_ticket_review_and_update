@@ -399,7 +399,7 @@ def _collect_grid_ids():
             if comp.get("type") == "grid":
                 ids.add(comp.get("id", f"yaml-grid-{comp['query']}"))
     # Code-driven grids
-    ids.update(["ticket-grid", "drilldown-grid"])
+    ids.update(["ticket-grid", "drilldown-grid", "root-cause-grid"])
     return ids
 
 

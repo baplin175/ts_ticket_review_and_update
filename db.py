@@ -1149,12 +1149,17 @@ def update_pass_result(
     unexpected_state: Optional[str] = None,
     canonical_failure: Optional[str] = None,
     mechanism: Optional[str] = None,
+    mechanism_class: Optional[str] = None,
+    intervention_type: Optional[str] = None,
+    intervention_action: Optional[str] = None,
 ) -> None:
     """Update an existing pass result row (e.g. pending → success/failed).
 
     Pass 1 callers use *phenomenon*; Pass 2 callers use *component*,
     *operation*, *unexpected_state*, *canonical_failure*; Pass 3 callers
-    use *mechanism*.  Unused kwargs default to None and are written as NULL.
+    use *mechanism*; Pass 4 callers use *mechanism_class*,
+    *intervention_type*, *intervention_action*.
+    Unused kwargs default to None and are written as NULL.
     """
     conn = get_conn()
     try:
@@ -1172,6 +1177,9 @@ def update_pass_result(
                        unexpected_state   = %s,
                        canonical_failure  = %s,
                        mechanism          = %s,
+                       mechanism_class    = %s,
+                       intervention_type  = %s,
+                       intervention_action = %s,
                        updated_at         = now()
                  WHERE id = %s;
             """, (
@@ -1180,6 +1188,7 @@ def update_pass_result(
                 phenomenon, error_message, completed_at,
                 component, operation, unexpected_state, canonical_failure,
                 mechanism,
+                mechanism_class, intervention_type, intervention_action,
                 row_id,
             ))
         conn.commit()
@@ -1413,7 +1422,7 @@ def fetch_pending_pass3_tickets(
     failed_only: bool = False,
     force: bool = False,
 ) -> List[Tuple]:
-    """Return (ticket_id, canonical_failure) rows eligible for Pass 3.
+    """Return (ticket_id, canonical_failure, technical_core_text) rows eligible for Pass 3.
 
     Selection logic:
       - ticket has a successful Pass 2 result with non-null canonical_failure
@@ -1422,7 +1431,7 @@ def fetch_pending_pass3_tickets(
       - optionally filtered to specific ticket_ids
       - optionally limited to failed-only reruns
 
-    Returns list of (ticket_id, canonical_failure) tuples.
+    Returns list of (ticket_id, canonical_failure, technical_core_text) tuples.
     """
     conditions = [
         "p2.pass_name = %s",
@@ -1464,9 +1473,85 @@ def fetch_pending_pass3_tickets(
 
     where_clause = " AND ".join(conditions)
     sql = (
-        f"SELECT t.ticket_id, p2.canonical_failure "
+        f"SELECT t.ticket_id, p2.canonical_failure, "
+        f"COALESCE(r.technical_core_text, '') "
         f"FROM tickets t "
         f"JOIN ticket_llm_pass_results p2 ON p2.ticket_id = t.ticket_id "
+        f"LEFT JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id "
+        f"WHERE {where_clause} "
+        f"ORDER BY t.ticket_id"
+    )
+    if limit > 0:
+        sql += f" LIMIT {limit}"
+    sql += ";"
+
+    return fetch_all(sql, tuple(params))
+
+
+def fetch_pending_pass4_tickets(
+    pass4_prompt_version: str,
+    *,
+    pass3_pass_name: str = "pass3_mechanism",
+    pass3_prompt_version: str = "1",
+    limit: int = 0,
+    ticket_ids: Optional[List[int]] = None,
+    failed_only: bool = False,
+    force: bool = False,
+) -> List[Tuple]:
+    """Return (ticket_id, mechanism) rows eligible for Pass 4.
+
+    Selection logic:
+      - ticket has a successful Pass 3 result with non-null mechanism
+      - no successful pass4_intervention result for current prompt_version
+        (unless *force* is True)
+      - optionally filtered to specific ticket_ids
+      - optionally limited to failed-only reruns
+
+    Returns list of (ticket_id, mechanism) tuples.
+    """
+    conditions = [
+        "p3.pass_name = %s",
+        "p3.prompt_version = %s",
+        "p3.status = 'success'",
+        "p3.mechanism IS NOT NULL",
+        "p3.mechanism != ''",
+    ]
+    params: list = [pass3_pass_name, pass3_prompt_version]
+
+    if ticket_ids:
+        placeholders = ",".join(["%s"] * len(ticket_ids))
+        conditions.append(f"t.ticket_id IN ({placeholders})")
+        params.extend(ticket_ids)
+
+    if not force:
+        conditions.append("""
+            NOT EXISTS (
+                SELECT 1 FROM ticket_llm_pass_results lp
+                 WHERE lp.ticket_id = t.ticket_id
+                   AND lp.pass_name = 'pass4_intervention'
+                   AND lp.prompt_version = %s
+                   AND lp.status = 'success'
+            )
+        """)
+        params.append(pass4_prompt_version)
+
+    if failed_only:
+        conditions.append("""
+            EXISTS (
+                SELECT 1 FROM ticket_llm_pass_results lp
+                 WHERE lp.ticket_id = t.ticket_id
+                   AND lp.pass_name = 'pass4_intervention'
+                   AND lp.prompt_version = %s
+                   AND lp.status = 'failed'
+            )
+        """)
+        params.append(pass4_prompt_version)
+
+    where_clause = " AND ".join(conditions)
+    sql = (
+        f"SELECT t.ticket_id, p3.mechanism "
+        f"FROM tickets t "
+        f"JOIN ticket_llm_pass_results p3 ON p3.ticket_id = t.ticket_id "
         f"WHERE {where_clause} "
         f"ORDER BY t.ticket_id"
     )

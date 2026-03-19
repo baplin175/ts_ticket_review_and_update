@@ -118,6 +118,35 @@ class TestPass3Parser:
         assert mechanism == "Validation failure on input schema"
         assert parsed["confidence"] == 0.95
 
+    def test_category_and_evidence_parsed(self):
+        from pass3_parser import parse_pass3_response
+        raw = '{"mechanism": "User was unfamiliar with import workflow", "category": "user_training", "evidence": "from_thread"}'
+        parsed, mechanism = parse_pass3_response(raw)
+        assert mechanism == "User was unfamiliar with import workflow"
+        assert parsed["category"] == "user_training"
+        assert parsed["evidence"] == "from_thread"
+
+    def test_category_defaults_to_software_defect(self):
+        from pass3_parser import parse_pass3_response
+        raw = '{"mechanism": "Validation failure on schema"}'
+        parsed, mechanism = parse_pass3_response(raw)
+        assert parsed["category"] == "software_defect"
+        assert parsed["evidence"] == "inferred"
+
+    def test_invalid_category_defaults(self):
+        from pass3_parser import parse_pass3_response
+        raw = '{"mechanism": "Logic error", "category": "banana", "evidence": "from_thread"}'
+        parsed, mechanism = parse_pass3_response(raw)
+        assert parsed["category"] == "software_defect"
+        assert parsed["evidence"] == "from_thread"
+
+    def test_invalid_evidence_defaults(self):
+        from pass3_parser import parse_pass3_response
+        raw = '{"mechanism": "Logic error", "category": "configuration", "evidence": "guessed"}'
+        parsed, mechanism = parse_pass3_response(raw)
+        assert parsed["category"] == "configuration"
+        assert parsed["evidence"] == "inferred"
+
 
 # ── Mechanism validation tests ───────────────────────────────────────
 
@@ -142,7 +171,7 @@ class TestMechanismValidation:
                 "Billing module + print + fails"
             )
 
-    def test_rejects_customer_word(self):
+    def test_rejects_customer_reported_phrase(self):
         from pass3_parser import validate_mechanism, Pass3ParseError
         with pytest.raises(Pass3ParseError, match="administrative language"):
             validate_mechanism(
@@ -150,11 +179,19 @@ class TestMechanismValidation:
                 "Billing module + print + fails"
             )
 
-    def test_rejects_agent_word(self):
+    def test_accepts_technical_customer_usage(self):
+        from pass3_parser import validate_mechanism
+        result = validate_mechanism(
+                "Billing logic applies service charge to customer bills twice during level billing calculation",
+                "Service charge printing + print + service charge prints twice"
+        )
+        assert "customer bills" in result
+
+    def test_rejects_support_agent_phrase(self):
         from pass3_parser import validate_mechanism, Pass3ParseError
         with pytest.raises(Pass3ParseError, match="administrative language"):
             validate_mechanism(
-                "Agent needs to escalate the request",
+                "Support agent needs to escalate the request",
                 "Billing module + print + fails"
             )
 
@@ -196,13 +233,22 @@ class TestMechanismValidation:
 class TestSelectionLogic:
     def test_basic_selection_excludes_success(self, patch_pool):
         conn, cur = patch_pool
-        cur.fetchall.return_value = [(1, "comp + op + state")]
+        cur.fetchall.return_value = [(1, "comp + op + state", "thread text")]
         import db
         db.fetch_pending_pass3_tickets("1")
         sql = cur.execute.call_args[0][0]
         assert "canonical_failure IS NOT NULL" in sql
         assert "NOT EXISTS" in sql
         assert "pass3_mechanism" in sql
+
+    def test_selection_includes_thread_text(self, patch_pool):
+        conn, cur = patch_pool
+        cur.fetchall.return_value = [(1, "comp + op + state", "some thread text")]
+        import db
+        rows = db.fetch_pending_pass3_tickets("1")
+        sql = cur.execute.call_args[0][0]
+        assert "technical_core_text" in sql
+        assert "ticket_thread_rollups" in sql
 
     def test_force_skips_success_check(self, patch_pool):
         conn, cur = patch_pool
@@ -266,7 +312,7 @@ class TestIdempotency:
 
     def test_force_rerun_includes_successful(self, patch_pool):
         conn, cur = patch_pool
-        cur.fetchall.return_value = [(1, "comp + op + state")]
+        cur.fetchall.return_value = [(1, "comp + op + state", "thread")]
         import db
         rows = db.fetch_pending_pass3_tickets("1", force=True)
         sql = cur.execute.call_args[0][0]
@@ -351,7 +397,7 @@ class TestMalformedHandling:
                 result = process_ticket(
                     ticket_id=100,
                     canonical_failure="Billing module + print + service charge prints twice",
-                    prompt_template="Test {{input_text}}", force=False,
+                    prompt_template="Test {{input_text}} {{thread_context}}", force=False,
                 )
         assert result["status"] == "failed"
         assert result["error"] is not None
@@ -367,7 +413,7 @@ class TestMalformedHandling:
                 result = process_ticket(
                     ticket_id=100,
                     canonical_failure="Billing module + print + service charge prints twice",
-                    prompt_template="Test {{input_text}}", force=False,
+                    prompt_template="Test {{input_text}} {{thread_context}}", force=False,
                 )
         assert result["status"] == "failed"
         assert "empty" in result["error"].lower()
@@ -381,14 +427,16 @@ class TestSuccessFlow:
         cur.fetchone.return_value = (99,)
         cur.rowcount = 0
         import db
-        matcha_response = '{"mechanism": "Billing calculation logic applies service charge rule twice during bill generation"}'
+        matcha_response = '{"mechanism": "Billing calculation logic applies service charge rule twice during bill generation", "category": "software_defect", "evidence": "from_thread"}'
         with patch("run_ticket_pass3.call_matcha", return_value=matcha_response):
             with patch("db.migrate", return_value=[]):
                 from run_ticket_pass3 import process_ticket
                 result = process_ticket(
                     ticket_id=100,
                     canonical_failure="Billing module + print + service charge prints twice",
-                    prompt_template="Test {{input_text}}", force=False,
+                    prompt_template="Test {{input_text}} {{thread_context}}",
+                    thread_context="Service charge was applied twice in billing logic.",
+                    force=False,
                 )
         assert result["status"] == "success"
         assert result["mechanism"] == "Billing calculation logic applies service charge rule twice during bill generation"
@@ -405,7 +453,7 @@ class TestSuccessFlow:
                 result = process_ticket(
                     ticket_id=100,
                     canonical_failure="Billing module + print + service charge prints twice",
-                    prompt_template="Test {{input_text}}", force=False,
+                    prompt_template="Test {{input_text}} {{thread_context}}", force=False,
                 )
         assert result["status"] == "failed"
         assert "Timeout" in result["error"]
@@ -424,7 +472,7 @@ class TestSuccessFlow:
                 result = process_ticket(
                     ticket_id=100,
                     canonical_failure=canonical,
-                    prompt_template="Test {{input_text}}", force=False,
+                    prompt_template="Test {{input_text}} {{thread_context}}", force=False,
                 )
         assert result["status"] == "failed"
         assert "restatement" in result["error"].lower()

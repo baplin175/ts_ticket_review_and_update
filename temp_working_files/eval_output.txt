@@ -1,0 +1,1228 @@
+Resolved 30 ticket_ids from 30 ticket_numbers
+================================================================================
+TICKET 18835794 (#84372): City of Fulton - Neptune 360 for the new Impresa Project
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-01-11 08:44 | Andria Simoneau] Good Afternoon. We are looking to move forward with this
+conversion to Impresa. What do we need to do to get this started? -Andria  [2024-01-22 06:00 |
+Andria Simoneau] Good Afternoon. I was just looking for an update on this so I can update everyone
+on my end. -Andria  [2025-09-24 06:17 | Andria Simoneau] Good Afternoon, I’m looking for some
+assistance importing the readings from Neptune 360 into Impressa. I have the file saved in my
+downloads folder. I just am unsure how to upload them. Could we possibly schedule a call for this
+please? Andria Simoneau Utility Billing Supervisor City of Fulton 141 South First Street Fulton, NY
+13069  [2025-10-20 09:11 | cust] - Ticket 84372 is in violation and is greater than 90 days. Please
+address this ticket and cl
+
+--- LATEST CUSTOMER TEXT ---
+Good Morning, I have reached out regarding this ticket multiple times and have received no
+assistance. We have multiple files that are waiting to be uploaded. I was informed this should be
+part of the software training we paid for. Is this correct? Is there someone that could assist
+please? inHanceSupport@harriscomputer.com [mailto:inHanceSupport@harriscomputer.com] Ticket 105494 -
+IMPORTING READINGS From Neptune 360 The following ticket was updated. The current status of the
+ticket is: New Comm
+
+--- LATEST INHANCE TEXT ---
+Spoke to Andria and showed her how to import the file. It imported successfully and she can proceed.
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Files fail to upload from Neptune 360 to Impressa
+
+--- PASS 2 (Grammar) ---
+  component:        Neptune 360 → Impressa interface
+  operation:        import
+  unexpected_state: files fail to upload
+  canonical_failure:Neptune 360 → Impressa interface + import + files fail to upload
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Impressa interface rejects file upload due to failed API credential validation
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    authentication_failure
+  intervention_type:  configuration_change
+  intervention_action:update Impressa API integration configuration with valid credentials
+
+
+================================================================================
+TICKET 18897699 (#84732): New Build Request for Version 4.21.3.0
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+  [EMPTY]
+
+--- LATEST CUSTOMER TEXT ---
+  [EMPTY]
+
+--- LATEST INHANCE TEXT ---
+Good! I’m here if you need me. CAUTION: This email originated from outside of the organization. Do
+not click links or open attachments unless you recognize the sender and know the content is safe. We
+are all set. We figured it out!! Kind Debbie Richards | Systems Support Implementer Ti-SALES E:
+drichards@tisales.com | M: 978.376.0194 Debbie, I apologize I have been in back to back meetings all
+morning. Are you guys available now? Nathan Loan Application Consultant, Professional Services P: +1
+43
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Impresa fails to create an import file
+
+--- PASS 2 (Grammar) ---
+  component:        Impresa
+  operation:        create
+  unexpected_state: fails to create an import file
+  canonical_failure:Impresa + create + fails to create an import file
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Impresa file generation logic fails to produce an output file due to an internal data processing error.
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    calculation_logic_error
+  intervention_type:  software_fix
+  intervention_action:update Impresa file generation logic to correct internal data processing error
+
+
+================================================================================
+TICKET 17706465 (#32904): New Service Agreement Is Not Correct - TFS 10347 - DO#3627
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-02-06 09:49 | Judy Leach] I am not getting the same results on the Bedford Oasis_Test_PS
+database as I do on the database we have here so I am transferring a more current backup (2024Jan31)
+to our FTP server so I can download and restore it here.  [2025-02-28 06:31 | Marcie McIvor] Good
+Afternoon, I have been asked to follow up on this request. When can we get this form to populate in
+Impresa? The current process of how new connection deposits come through is not user friendly. Can I
+have an update of when this can be completed? I understand it’s been awhile since we have discussed
+it. Marcie Marcie McIvor Customer Service Manager  [2025-03-06 03:56 | Marcie McIvor] Hi Shaena!
+Marcie Marcie McIvor Customer Service Manager  [2025-04-14 05:35 | Marcie McIvor] Good Afternoon!
+Please see
+
+--- LATEST CUSTOMER TEXT ---
+Ok, not a problem. Marcie McIvor Customer Service Manager
+
+--- LATEST INHANCE TEXT ---
+Nathan put the correct crystal report on your server and we both looked it over. It looks to be what
+you asked for. I will close ticket now but if it is not correct please open this back up. Shaena
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: New Service Agreement form has not been fixed
+
+--- PASS 2 (Grammar) ---
+  component:        Service Agreement form
+  operation:        update
+  unexpected_state: form has not been fixed
+  canonical_failure:Service Agreement form + update + form has not been fixed
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Form update logic fails to persist changes due to a state inconsistency in the UI component.
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    state_inconsistency
+  intervention_type:  software_fix
+  intervention_action:update UI component state management to correctly persist form changes
+
+
+================================================================================
+TICKET 18119965 (#34617): MID Device Creation Project DO#4995
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-01-17 05:15 | Nathan Loan] SPoke to Heather on 1/16/24 - Updated the PS test database and ran
+the scripts again. We cna see the MIDs attached now. Also, we are waiting on their board to sign off
+with Beacon to move forward with this and the MID project.  [2024-01-17 07:21 | Heather Roybal]
+Anthony and I started testing in the database today, and we noticed the serial number did not get
+moved over into the meter number area, however, the endpoints are showing up as devices now. A few
+other questions came up while we were testing: How will meters and endpoints be tracked in inventory
+after this change?How do we receive endpoints into inventory in the devices section?This is a
+follow-up question from your conversation with Anthony; is there going to be an additional fee for
+incorporatin
+
+--- LATEST CUSTOMER TEXT ---
+Hi Shaena, I just received notification from Nate at Beacon that the file looks good. I want to keep
+the ticket open a few more days if you don’t mind just to me sure EyeOnWater is working after we
+upload the file. Heather Roybal (Pronouns: she/her) Jacobs
+
+--- LATEST INHANCE TEXT ---
+Heather I believe we have everything fixed. Can we close out this ticket?
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Serial number did not move to the meter number area, however, the endpoints are showing up as devices.
+
+--- PASS 2 (Grammar) ---
+  component:        Meter serial number transfer
+  operation:        transfer
+  unexpected_state: serial number did not move to the meter number area, however, the endpoints are showing up as devices
+  canonical_failure:Meter serial number transfer + transfer + serial number did not move to the meter number area, however, the endpoints are showing up as devices
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Data synchronization process fails to update meter serial number association after endpoint registration
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    synchronization_failure
+  intervention_type:  software_fix
+  intervention_action:update data synchronization process to correctly persist meter serial number association after endpoint registration
+
+
+================================================================================
+TICKET 17937213 (#33861): Sensus VFlex Project
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-05-07 02:44 | Shaena Robertson] Analisa, Nathan is out for a few days and he sent over a few
+emails regarding your issues with the reading import file and billing. Judy Leach will be
+investigating this in coordination with Alex Mullins from Customer Support over the next few days
+and we hope to have this resolved by Friday when you need to bill again. Wanted to reach out and let
+you know the status, I apologize for the inconvenience and hope to get this resolved as soon as
+possible. Shaena Robertson  [2024-05-07 03:18 | Analisa Cartwright] I will send you all an invite to
+our meetings on Thursdays. Maverick with Ferguson thinks that the meter read issue can be/should be
+taken care of in AutoRead before it gets imported into billing. Analisa Cartwright Utility Billing
+Lead City of Mer
+
+--- LATEST CUSTOMER TEXT ---
+Is this update just an update or is this a response to the newest email that I just sent about book
+4 and not being able to bill it?
+
+--- LATEST INHANCE TEXT ---
+Should you have any questions please don't hesitate to contact me. Shaena Both Alfredo and Reed have
+confirmed everything is working well. Script is running every night. Olivia and I are not having any
+problems with read files or billing. We will be working on the customer portal integration soon and
+that will need some Harris support. We do not have a meeting set up for today. We will reach out
+Analisa CartwrightUtility Billing LeadCity of Mercer Island – Finance Department206-275-7784 Desk
+Not
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Billing software expects Book 5 and 6 reads when only Book 4 reads are uploaded.
+
+--- PASS 2 (Grammar) ---
+  component:        Billing module
+  operation:        import
+  unexpected_state: expects Book 5 and 6 reads when only Book 4 reads are uploaded
+  canonical_failure:Billing module + import + expects Book 5 and 6 reads when only Book 4 reads are uploaded
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Billing import parser rejects input file due to missing expected book read data
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    data_validation_failure
+  intervention_type:  validation_guardrail
+  intervention_action:add validation to billing import parser to enforce presence of expected book read data
+
+
+================================================================================
+TICKET 18552060 (#36558): migration to new server project & iONE Resetup Washington County
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-01-24 03:29 | James Hauschka] Hey Debra, I did in fact receive those. The maintenance package
+included the upgrade and migration correct? I think we are finally getting the wheels turning on
+that, so might want to migrate by end of Q1/beginning of Q2. James Hauschka Cybersecurity Engineer,
+Tri-Cities IT, Inc. james.hauschka@tricitiesit.com  [2024-02-23 03:32 | Debra Laskowski] James, I am
+just checking back in on this project. When do you think an order will be sent? Also have you been
+working with Cogsdale for the GP portlon of the project? They will need to quote their GP migration
+cost and if you want to update GP too. Just wanted to make sure that part did not get missed. Debra
+[2024-10-07 02:39 | Debra Laskowski] James, I just left you a voice mail and wanted to follow up
+with
+
+--- LATEST CUSTOMER TEXT ---
+I am hearing that this didn’t work and that there may be additional testing ongoing now?
+
+--- LATEST INHANCE TEXT ---
+Dwain, Ticket 94849 is open and regarding the ebill issue. I have subscribed you to that ticket so
+you can see all the information going back and forth between inHANCE CS and your IT department that
+has been been working on this issue with your team. I will be closing this server migration ticket
+out and we will continue to monitor the work being done on the ebill issue in ticket #94849. Should
+you have any questions please do not hesitate to contact us. Shaena
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Ebill does not work post migration
+
+--- PASS 2 (Grammar) ---
+  component:        Ebill
+  operation:        load
+  unexpected_state: does not work post migration
+  canonical_failure:Ebill + load + does not work post migration
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Ebill data loading fails due to schema mismatch with migrated data format
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    schema_mismatch
+  intervention_type:  data_repair
+  intervention_action:correct ebill data format to align with migrated schema
+
+
+================================================================================
+TICKET 17288538 (#31082): [EXTERNAL] Mapping Inoperative
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-09-19 15:09 | Therese Terlaje] Any update on this?  [2024-09-19 15:10 | cust] Chris Holloway -
+Warning: Ticket 31082 is 75 days old and will be in violation if it reaches 90 days. Please address
+this ticket and close as soon as possible. Ticket Info: [EXTERNAL] Mapping Inoperative Commonwealth
+Utilities Corporation CS-Feature Request In Progress 0  [2024-09-19 15:12 | cust] Chris Holloway -
+Ticket 31082 is in violation and is greater than 90 days. Please address this ticket and close
+immediately. Ticket Info: [EXTERNAL] Mapping Inoperative Commonwealth Utilities Corporation CS-
+Feature Request In Progress 0  [2024-09-20 05:01 | Alex Mullins] Therese, That screen shows only the
+tablet movement that day for that specific user. The Work Order tab shows the various work orders
+that are ou
+
+--- LATEST CUSTOMER TEXT ---
+Can you verify why Meter Readers are not able to access Fieldhawk. Error message. Will do.
+
+--- LATEST INHANCE TEXT ---
+Since this is fixed in impresa version 4.23.3.0, I will close the ticket out. updating to this new
+version will correct the problem.
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: The map on the desktop no longer appears on the work order screen.
+
+--- PASS 2 (Grammar) ---
+  component:        Work Order screen
+  operation:        load
+  unexpected_state: map does not appear
+  canonical_failure:Work Order screen + load + map does not appear
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Map UI component fails to render due to missing response from the map service API
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    integration_communication_failure
+  intervention_type:  integration_fix
+  intervention_action:add retry logic to map UI component for map service API requests
+
+
+================================================================================
+TICKET 15285693 (#24395): [EXTERNAL] Question about Transfer to GL
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-09-17 04:10 | cust] Chris Holloway - Ticket 24395 is in violation and is greater than 90 days.
+Please address this ticket and close immediately. Ticket Info: [EXTERNAL] Question about Transfer to
+GL Hurst, City of Support Customer Responded 0  [2024-09-17 04:10 | Garrett Treece] Hello,The same
+issue occurred today. The account description shows internet payment while the pay method says cash.
+Just want to make sure this error/glitch is logged for future reference.  [2024-09-17 04:12 | cust]
+Chris Holloway - Warning: Ticket 24395 is 75 days old and will be in violation if it reaches 90
+days. Please address this ticket and close as soon as possible. Ticket Info: [EXTERNAL] Question
+about Transfer to GL Hurst, City of Support Customer Responded 0
+
+--- LATEST CUSTOMER TEXT ---
+Chris Holloway - Warning: Ticket 24395 is 75 days old and will be in violation if it reaches 90
+days. Please address this ticket and close as soon as possible. Ticket Info: [EXTERNAL] Question
+about Transfer to GL Hurst, City of Support Customer Responded 0
+
+--- LATEST INHANCE TEXT ---
+Hi Garrett, I am moving this to another ticket so that we can keep this older ticket closed. The new
+ticket number is 94561.
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Account description shows internet payment while pay method says cash
+
+--- PASS 2 (Grammar) ---
+  component:        Payment display fields
+  operation:        load
+  unexpected_state: account description shows internet payment while pay method says cash
+  canonical_failure:Payment display fields + load + account description shows internet payment while pay method says cash
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Field mapping logic incorrectly associates payment display fields with account description data
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    field_mapping_error
+  intervention_type:  software_fix
+  intervention_action:correct field mapping logic to accurately associate payment display fields with account description data
+
+
+================================================================================
+TICKET 18385639 (#35782): Impresa Cloud Order - ORD-001180
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-01-09 04:11 | Shelby Campbell] Hi Sheana, I did timeout twice today, but as far as latency I
+don’t see mine being a huge issue. My only concern is that I know Andrea is still have some issues
+and she is working with Tony, they spoke yesterday afternoon.  [2024-02-13 05:29 | Judy Leach] When
+using Parallels Web and needing to print, 1) Click the Printer icon, it will bring up a print screen
+with "2X Universal Printer for .....". 2) Click Print on the print screen pop-up. 3) On the next
+pop-up, click the drop down for a list of printers. 4) Select the printer where you want to print
+and click Print.  [2024-02-15 02:28 | Judy Leach] Spoke with Andrea, let her know using Parallels
+Web the shared network drives are not accessible. The only way to import the files from the network
+drives i
+
+--- LATEST CUSTOMER TEXT ---
+Hi Sheana, I did timeout twice today, but as far as latency I don’t see mine being a huge issue. My
+only concern is that I know Andrea is still have some issues and she is working with Tony, they
+spoke yesterday afternoon.
+
+--- LATEST INHANCE TEXT ---
+Have a great rest of your day! Shaena Good afternoon! Andrea and I agree that all is well and you
+should be good to close that ticket. Shelby Good afternoon, ladies. I am going though our tickets
+and I appreciate your cooperation, and should you wish to jump on a call please let me know as I
+would be happy to so. Shaena Robertson​​​​
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Parallels Web client does not see shared network drives
+
+--- PASS 2 (Grammar) ---
+  component:        Parallels Web client
+  operation:        load
+  unexpected_state: does not see shared network drives
+  canonical_failure:Parallels Web client + load + does not see shared network drives
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Parallels Web client fails to load shared network drives due to an interface communication failure with the underlying virtualization service.
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    integration_communication_failure
+  intervention_type:  integration_fix
+  intervention_action:update Parallels Web client to re-establish communication with the virtualization service interface
+
+
+================================================================================
+TICKET 14324709 (#21457): Check fields in Company defined fields.
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-05-06 03:19 | Jhony Desinor] Annia discovered how field renaming works and renamed the fields.
+When renaming a field, the only way for it to save is by clicking anywhere outside of that field. If
+you use "return" or "tab," it will not save.However, this is a bug that still needs to be fixed in
+Impresa. Please add this to the Impresa bug list for future release.  [2024-05-06 03:21 | cust] Tony
+Williams - Ticket 21457 is in violation and is greater than 90 days. Please address this ticket and
+close immediately. Ticket Info: [EXTERNAL] Check fields in Company defined fields. Collier Co.
+Utility Billing and Customer Support Customer Responded 0  [2024-05-06 03:23 | cust] Tony Williams -
+Warning: Ticket 21457 is 75 days old and will be in violation if it reaches 90 days. Please address
+th
+
+--- LATEST CUSTOMER TEXT ---
+Jhony Desinor CPM, CSM, ITILv3, Project+, Lean6Sigma GB Project Manager III Utilities Finance
+Operations Office:239-252-8433 4420 Mercantile AVE Naples, Florida 34104
+Jhony.Desinor@colliercountyfl.gov
+
+--- LATEST INHANCE TEXT ---
+Jhony, I'll create a new ticket for this to submit this bug. - Tony
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Renaming a field in Impresa does not save when using 'return' or 'tab' keys.
+
+--- PASS 2 (Grammar) ---
+  component:        Impresa field renaming
+  operation:        update
+  unexpected_state: changes do not save when using 'return' or 'tab' keys
+  canonical_failure:Impresa field renaming + update + changes do not save when using 'return' or 'tab' keys
+
+--- PASS 3 (Mechanism) ---
+  mechanism: UI input handler fails to capture field value changes when using 'return' or 'tab' keys
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    state_inconsistency
+  intervention_type:  software_fix
+  intervention_action:update UI input handler to persist field value changes on 'return' or 'tab' key events
+
+
+================================================================================
+TICKET 18385384 (#35778): Server Migration Project
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-01-15 11:13 | Shaena Robertson] Our team is trying to get representatives from MicroFund to
+discuss the transfer to gl before we can do the server migration project.  [2024-01-17 05:18 | Lisa
+Carr] I am curious where we are in the upgrade process to Impresa. The process was started
+March/April of 2023 (we were billed for migration 3/31/23, paid 5/17/23), and we are looking at
+another change in personnel this coming fall. If it is possible to have the new system up and
+running before we need to hire a new billing clerk, that would be ideal. Let us know if there is
+anything we can do to help. Lisa Carr Office Manager Laclede County PWSD #3  [2024-01-17 05:38 |
+Shaena Robertson] Lisa, Good afternoon. Our team is ready to do the Server Migration part at
+anytime. But when last talked to y
+
+--- LATEST CUSTOMER TEXT ---
+Sorry I have been so slow in responding. I have been trying to catch up on my work and forgot about
+it. These times would probably work due dates and deadlines. But generally the customers prove us
+wrong in our predictions, just like children. Thursday, April 11th after 2:00 pm CST. Friday, April
+12th after 2:00 pm CST. Monday, April 15th after 2:00 pm CST. Wednesday, April 17th after 2:00 pm
+CST. Tuesday, April 30th after 2:00 pm CST. Wednesday, May 1st after 2:00 pm CST. Lisa Carr Office
+Manag
+
+--- LATEST INHANCE TEXT ---
+Server migration is complete. Closing this ticket.
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: The counter computer is unable to print cash register receipts and customer invoices.
+
+--- PASS 2 (Grammar) ---
+  component:        Cash register receipts and customer invoices
+  operation:        print
+  unexpected_state: unable to print
+  canonical_failure:Cash register receipts and customer invoices + print + unable to print
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Printing subsystem fails to communicate with the print spooler due to an interface communication error.
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    integration_communication_failure
+  intervention_type:  integration_fix
+  intervention_action:update printing subsystem to correctly format communication requests for the print spooler interface
+
+
+================================================================================
+TICKET 18201096 (#34990): Mass Meter Change Out Project
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-04-09 07:44 | Analisa Cartwright] I will out of the office Monday April 8th, returning
+Thursday April 11th. If you need immediate assistance please call 206-275-7602 or send and email to
+Mifinance@mercerisland.gov Analisa
+
+--- LATEST CUSTOMER TEXT ---
+I will out of the office Monday April 8th, returning Thursday April 11th. If you need immediate
+assistance please call 206-275-7602 or send and email to Mifinance@mercerisland.gov Analisa
+
+--- LATEST INHANCE TEXT ---
+I have attached one of my reports that I get when meters are exchanged within utility billing. After
+working with Alfredo and Nathan we were able to move forward in the live database with meter
+exchanges. I will be working on the files that had errors and will have to exchange them manually.
+Analisa Cartwright Utility Billing LeadCity of Mercer Island – Finance Department 206-275-7784 |
+mercerisland.gov
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Meter exchanges within utility billing generate reports with errors
+
+--- PASS 2 (Grammar) ---
+  component:        Meter exchanges within utility billing
+  operation:        generate
+  unexpected_state: reports with errors
+  canonical_failure:Meter exchanges within utility billing + generate + reports with errors
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Report generation logic encounters data inconsistencies during meter exchange processing
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    data_validation_failure
+  intervention_type:  validation_guardrail
+  intervention_action:add validation to meter exchange processing to reject records with inconsistent data
+
+
+================================================================================
+TICKET 18678076 (#37153): Paya Transfer Files ORD-001200
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-01-19 02:00 | Jimmy Biondo] update to 6.3.0.10 and will send sample files from the Play
+database to Paya.  [2024-03-20 09:12 | Jimmy Biondo] Updated the Billing S to have a- in the zip
+code to separate the zip and zip+4 Update the daily transfer to include the data pull info. Tested
+the transfer and did send both files and receive the empty test file back. Yesterday I cleaned up
+bad phone numbers, work phone number, service addresses, and email addresses  [2024-04-02 05:15 |
+Jimmy Biondo] The task scheduler job said it was working every day. The transfer log files stopped
+being updated before so not it was not running. I redid the task scheduler job and ran it. the
+transfer files updated it looks to have completed. I sent an email to Justin and Tracy to get
+confirmation they received
+
+--- LATEST CUSTOMER TEXT ---
+  [EMPTY]
+
+--- LATEST INHANCE TEXT ---
+Imported and posted payments again to day. Seems to all be working fine and no other meetings
+scheduled.
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Import file format changed, causing import process to fail
+
+--- PASS 2 (Grammar) ---
+  component:        Import process
+  operation:        import
+  unexpected_state: import process fails due to file format change
+  canonical_failure:Import process + import + import process fails due to file format change
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Import parser rejects input file due to schema mismatch with expected import format
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    schema_mismatch
+  intervention_type:  validation_guardrail
+  intervention_action:add schema validation to import parser to reject input files with schema mismatches
+
+
+================================================================================
+TICKET 18822492 (#84356): DO# - 5033: Billing issues
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-01-09 03:30 | Brendon Hartnett] Hi Tony - The database has been uploaded to our SFTP site. -
+Brendan Hartnett Cloud Engineer + Database Administrator Digital Business & Technology VEOLIA NORTH
+AMERICA, UNITED STATES cell +1 414 559 5554 125 S 84TH ST / Milwaukee, WI 53214
+Brendan.Hartnett@veolia.com  [2024-01-09 09:14 | Tony Williams] Damond, Can you give me an account
+number or account numbers on this newest DB that will have estimates so we can test this here? -
+Tony  [2024-01-12 09:09 | Tony Williams] Damond, Per the below request - Can you give me an account
+number or account numbers on this newest DB that will have estimates so we can test this here? -
+Tony  [2024-01-15 06:26 | Tony Williams] Damond, Per the below request - Can you give me an account
+number or account numbers on
+
+--- LATEST CUSTOMER TEXT ---
+Good Morning Tony, After many discussions, I would like to discontinue the process. I had my team
+perform some calculations according to your last correspondence, and nothing added up based on the
+theory provided (see attachment). I plan to review it again during our Efficiency Review. Having
+someone onsite should help us connect the dots. Please let me know how soon we can get everything
+switched back. Damond
+
+--- LATEST INHANCE TEXT ---
+Hi Damond, We will close this ticket for now, when you have someone on site with an efficiency
+review, we can refer to the ticket again and open it if necessary
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: System calculates estimated usage below the expected threshold when previous readings include negative values.
+
+--- PASS 2 (Grammar) ---
+  component:        Usage calculation
+  operation:        calculate
+  unexpected_state: estimated usage below expected threshold when previous readings include negative values
+  canonical_failure:Usage calculation + calculate + estimated usage below expected threshold when previous readings include negative values
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Usage calculation logic produces incorrect estimates due to negative values in historical readings.
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    calculation_logic_error
+  intervention_type:  software_fix
+  intervention_action:update usage calculation logic to normalize or reject negative historical readings
+
+
+================================================================================
+TICKET 18935221 (#84954): LANSING CITY SHARE NOT SHOWING IN BANK RECONCILIATION REPORT LIKE CHICAGO HEIHTS CITY SHARE
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+  [EMPTY]
+
+--- LATEST CUSTOMER TEXT ---
+Chris Holloway - Ticket 84954 is in violation and is greater than 90 days. Please address this
+ticket and close immediately. Ticket Info: LANSING CITY SHARE NOT SHOWING IN BANK RECONCILIATION
+REPORT LIKE CHICAGO HEIHTS CITY SHARE Hammond Water Works CS-Reporting Issue In Progress 0
+
+--- LATEST INHANCE TEXT ---
+  [EMPTY]
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: City share is not showing in the bank reconciliation report
+
+--- PASS 2 (Grammar) ---
+  component:        Bank reconciliation report
+  operation:        load
+  unexpected_state: city share is not showing
+  canonical_failure:Bank reconciliation report + load + city share is not showing
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Report data retrieval fails to include city share information due to an incomplete query.
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    calculation_logic_error
+  intervention_type:  software_fix
+  intervention_action:update report data retrieval query to include city share information
+
+
+================================================================================
+TICKET 15303912 (#24434): [EXTERNAL] FW: Tokay Backflow
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-03-04 01:10 | Kendra Day] Well... we finally go them to go through but we are still having
+problems with the files being uploaded to Invoice Cloud.. I have another ticket in for this and I
+have emailed Chris as well. We really need this corrected early this morning, our customers are
+unable to make payments.
+
+--- LATEST CUSTOMER TEXT ---
+Well... we finally go them to go through but we are still having problems with the files being
+uploaded to Invoice Cloud.. I have another ticket in for this and I have emailed Chris as well. We
+really need this corrected early this morning, our customers are unable to make payments.
+
+--- LATEST INHANCE TEXT ---
+Kendra, I contacted Chris and he will work with you on this under ticket #89162 I will close this
+ticket. Debra
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Files fail to upload to Invoice Cloud
+
+--- PASS 2 (Grammar) ---
+  component:        Invoice Cloud integration
+  operation:        import
+  unexpected_state: files fail to upload
+  canonical_failure:Invoice Cloud integration + import + files fail to upload
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Integration authentication service rejects file upload due to failed API credential validation
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    authentication_failure
+  intervention_type:  configuration_change
+  intervention_action:update API credential validation in integration authentication service
+
+
+================================================================================
+TICKET 18463472 (#36173): Company Defined Check01 to Check10 fields default to NULL
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-02-28 01:14 | Alex Mullins] Script needed. UPDATE dbo.Sa_company_defined_data_cust SET Check01
+= ISNULL(Check01, 0), Check02 = ISNULL(Check02, 0), Check03 = ISNULL(Check03, 0), Check04 =
+ISNULL(Check04, 0), Check05 = ISNULL(Check05, 0), Check06 = ISNULL(Check06, 0), Check07 =
+ISNULL(Check07, 0), Check08 = ISNULL(Check08, 0), Check09 = ISNULL(Check09, 0), Check10 =
+ISNULL(Check10, 0)
+
+--- LATEST CUSTOMER TEXT ---
+  [EMPTY]
+
+--- LATEST INHANCE TEXT ---
+Script needed. UPDATE dbo.Sa_company_defined_data_cust SET Check01 = ISNULL(Check01, 0), Check02 =
+ISNULL(Check02, 0), Check03 = ISNULL(Check03, 0), Check04 = ISNULL(Check04, 0), Check05 =
+ISNULL(Check05, 0), Check06 = ISNULL(Check06, 0), Check07 = ISNULL(Check07, 0), Check08 =
+ISNULL(Check08, 0), Check09 = ISNULL(Check09, 0), Check10 = ISNULL(Check10, 0)
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Database script updates company defined data fields to ensure null values are treated as zero
+
+--- PASS 2 (Grammar) ---
+  component:        Company defined data fields
+  operation:        update
+  unexpected_state: null values are treated as zero
+  canonical_failure:Company defined data fields + update + null values are treated as zero
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Data validation logic incorrectly converts null values to zero during field updates
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    data_validation_failure
+  intervention_type:  software_fix
+  intervention_action:update data validation logic to correctly handle null values instead of converting them to zero during field updates
+
+
+================================================================================
+TICKET 18775025 (#84073): Alter Online Bill Tax line Location
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-01-12 09:07 | Tony Williams] Latest Updates from today: Cc: Shaena Robertson ; Anthony
+Williams ; Danielle McCarthy ; Nick Oettinger Hello Kyle, Yes, please display the previous template
+temporarily. Hello Judy, I followed up with my team this morning they advised due to additional
+issues with the template display they were not able to push the changes last night. While our team
+is working on the code changes we can display the previous template temporarily. Once the changes
+are ready to be release we could then change it back to the new template with the additional
+changes. Would this be an option for Las Campanas? Kyle Narahara  [2024-01-26 08:04 | Tony Williams]
+Kyle, Can we get an update on this issue? - Tony  [2024-01-26 08:06 | Catherine Kimler] I am
+currently out of office unt
+
+--- LATEST CUSTOMER TEXT ---
+I sent this email almost a month ago and haven’t received a response. I’ve been curious how long it
+would take after being told this was fixed and LCWC would receive timely responses. I’m following up
+because Harris has twice now used a ticketing system that has delayed progress: With Bohannan on the
+Quickbooks integration that Harris already delayed last yearBilling issue with CRI that I haven’t
+seen a response to Also, I didn’t see a template, which I asked about last billing cycle and Shaena
+
+--- LATEST INHANCE TEXT ---
+Hello Michaelene, Did any customer contact you about the appearance of the January bills in Invoice
+Cloud? If not, then we should be able to close this particular ticket 84073 because it relates
+specifically to the appearance of the LCWC bills in the Invoice Cloud portal. Note: Invoice Cloud
+Templates are no longer being used for LCWC.
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Invoice Cloud no longer uses a template for LCWC bills.
+
+--- PASS 2 (Grammar) ---
+  component:        Invoice Cloud integration
+  operation:        load
+  unexpected_state: Invoice Cloud no longer uses a template for LCWC bills
+  canonical_failure:Invoice Cloud integration + load + Invoice Cloud no longer uses a template for LCWC bills
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Invoice Cloud integration fails to load due to a schema mismatch with the expected bill template format.
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    schema_mismatch
+  intervention_type:  integration_fix
+  intervention_action:align Invoice Cloud bill template schema with expected format
+
+
+================================================================================
+TICKET 17445735 (#31752): Removing Meter from service location
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-02-07 02:39 | Samantha Brooks] I'm having the same issue again with me trying to remove a
+meter from service location. It did let me do one, but I cannot do this one without error. Upload
+error!
+
+--- LATEST CUSTOMER TEXT ---
+Judy Leach - Warning: Ticket 31752 is 75 days old and will be in violation if it reaches 90 days.
+Please address this ticket and close as soon as possible. Ticket Info: Removing Meter from service
+location Bear Creek Special Utility District CS-Data Entry Error In Progress 0
+
+--- LATEST INHANCE TEXT ---
+Created tkt 88448 for this request. Closing tkt 31752.
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Removing a meter from a service location fails with an upload error.
+
+--- PASS 2 (Grammar) ---
+  component:        Meter removal workflow
+  operation:        update
+  unexpected_state: meter removal fails with upload error
+  canonical_failure:Meter removal workflow + update + meter removal fails with upload error
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Meter removal workflow fails to update due to an integration communication error during file upload.
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    integration_communication_failure
+  intervention_type:  integration_fix
+  intervention_action:update integration service to implement retry logic for file upload requests
+
+
+================================================================================
+TICKET 18974950 (#85200): Mass Meter Change Out Project
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-01-11 03:41 | Jimmy Biondo] They got their billing mailed out. called their IT group to get on
+the server today to make sure all the meter information is correct based on the master file I was
+sent from Ameresco. they said they would set it up for 1pm today.  [2024-01-30 05:50 | Jimmy Biondo]
+Went through a file I was sent last week. It is a file created after an audit was done by the group
+doing the swaps. I ti files not send it, 81 accounts. I went through the file and the change outs
+were all done before their last billing so I could not process them as a changeout. I updated the
+serial number, id number, mxu number, long, lat, rollover, meter size, and book# to what they are in
+the file
+
+--- LATEST CUSTOMER TEXT ---
+  [EMPTY]
+
+--- LATEST INHANCE TEXT ---
+Went through a file I was sent last week. It is a file created after an audit was done by the group
+doing the swaps. I ti files not send it, 81 accounts. I went through the file and the change outs
+were all done before their last billing so I could not process them as a changeout. I updated the
+serial number, id number, mxu number, long, lat, rollover, meter size, and book# to what they are in
+the file
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Meter readings are incorrect after meter changeouts.
+
+--- PASS 2 (Grammar) ---
+  component:        Meter reading calculation
+  operation:        calculate
+  unexpected_state: meter readings are incorrect after meter changeouts
+  canonical_failure:Meter reading calculation + calculate + meter readings are incorrect after meter changeouts
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Meter reading calculation logic fails to account for meter changeout events, leading to incorrect cumulative readings.
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    calculation_logic_error
+  intervention_type:  software_fix
+  intervention_action:update meter reading calculation logic to incorporate meter changeout events and reset cumulative readings
+
+
+================================================================================
+TICKET 17777854 (#33166): RE: Meter warranty dates
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-01-22 03:28 | Nathan Loan] Kendra, I’ve run the script to update the warranty dates for the
+meters. Can you take a look and let me know if you have any questions?  [2024-01-22 06:00 | Kendra
+Day] Hi Nathan, I have checked these and the warranty date is supposed to be 10 years out from the
+install date. It looks like you just put the install date in that section. Kendra Day
+Billing/Customer Service Manager 667 Dayton Xenia Rd. Xenia, OH 45385 PH: 937.562.7496 FX:
+937.562.7465 Protecting the quality of life in Greene County through effective, sustainable and
+affordable water and recycling services. Cc: Shaena Robertson ; InHance, Support  [2024-01-22 06:03
+| Kendra Day] I think this ticket might have another issue that was found previously.The warranty
+date is always the install date 1
+
+--- LATEST CUSTOMER TEXT ---
+I checked a hand full and they look good, do you suggest I check all the meter types?
+
+--- LATEST INHANCE TEXT ---
+Only if you think it’s necessary. Otherwise, I think we’re good.
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Warranty dates are updated with install dates instead of 10 years from install dates
+
+--- PASS 2 (Grammar) ---
+  component:        Warranty date calculation
+  operation:        calculate
+  unexpected_state: warranty date is set to install date instead of 10 years out
+  canonical_failure:Warranty date calculation + calculate + warranty date is set to install date instead of 10 years out
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Warranty date calculation logic incorrectly uses install date instead of applying a 10-year offset.
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    calculation_logic_error
+  intervention_type:  software_fix
+  intervention_action:update warranty calculation logic to apply a 10-year offset to the install date
+
+
+================================================================================
+TICKET 17903003 (#33667): Upgrading to Impresa Cloud ORD-001149
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-01-03 00:41 | Tara McCoy] Trying to update our reads we send to other municipalities and
+receiving this error: When I hit OK, this pops up: Tara GCSED Billing Department 667 Dayton-Xenia Rd
+Xenia, OH 45385 Protecting the quality of life in Greene County through effective, sustainable and
+affordable water and recycling services.  [2024-01-03 00:54 | Kendra Day] something is wrong with
+the read imp. they are all the same size?  [2024-01-03 01:03 | Nathan Loan] Kendra, Looks like they
+are trying to access the old on-prem server. They should be trying to get connected to the cloud
+server. Who is trying to access it?  [2024-01-03 01:38 | Kendra Day] I was trying, I did finally get
+them imported but it took a while. Kendra Day Billing/Customer Service Manager 667 Dayton Xenia Rd.
+Xenia, OH
+
+--- LATEST CUSTOMER TEXT ---
+I am here. Kendra Day Billing/Customer Service Manager 667 Dayton Xenia Rd. Xenia, OH 45385 PH:
+937.562.7496 FX: 937.562.7465 Protecting the quality of life in Greene County through effective,
+sustainable and affordable water and recycling services. Cc: Shaena Robertson ; Judy Leach ;
+Christopher Holloway
+
+--- LATEST INHANCE TEXT ---
+Impresa Cloud project is closed and handed over to Customer Support. Project Overview Project Name:
+Greene County - Upgrading to Impresa Cloud ORD-001149 Project Go Live Date: December 11, 2023
+inHance Project Team: Shaena Robertson, Nathan Loan, Judy Leach Client Contacts (Name, Role Email):
+Kendra Day Required Impresa Version: Impresa Version Delivered In: 4.21.3.0 inHance Software add-in
+or module (FH, iOne, etc.) : Custom Plugin: Yes or No Yes Custom Bill: Yes or No Yes (output) Stored
+Proce
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Meter import fails when uploading reads to other municipalities
+
+--- PASS 2 (Grammar) ---
+  component:        Meter import process
+  operation:        import
+  unexpected_state: meter import fails when uploading reads to other municipalities
+  canonical_failure:Meter import process + import + meter import fails when uploading reads to other municipalities
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Meter import process rejects reads due to missing or invalid municipality identifier in the input data
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    data_validation_failure
+  intervention_type:  validation_guardrail
+  intervention_action:add validation to meter import process to reject reads with missing or invalid municipality identifiers
+
+
+================================================================================
+TICKET 6245039 (#2587): Call on 08/15/17 - Bill wording print changes, LEAC to Fuel Adjustment Charge
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-04-17 09:13 | Chris Holloway] Issues The issues described in the ticket are: The LEAC charges
+on bills were not being printed as the Fuel Adjustment Charge (FAC) as requested. Instead, the
+system was printing the FAC charges individually as FAC1, FAC3, and FAC5. Troubleshooting The
+following troubleshooting steps were taken: Attempted to update the wording in the admin settings
+under rate codes per previous instructions, but this did not resolve the issue. The developer
+responsible for bill form changes tested resolutions. Identified the problem over the weekend and
+corrected it. Next Steps No next steps were provided in the ticket conversation.
+
+--- LATEST CUSTOMER TEXT ---
+  [EMPTY]
+
+--- LATEST INHANCE TEXT ---
+Issues The issues described in the ticket are: The LEAC charges on bills were not being printed as
+the Fuel Adjustment Charge (FAC) as requested. Instead, the system was printing the FAC charges
+individually as FAC1, FAC3, and FAC5. Troubleshooting The following troubleshooting steps were
+taken: Attempted to update the wording in the admin settings under rate codes per previous
+instructions, but this did not resolve the issue. The developer responsible for bill form changes
+tested resolutions. I
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: LEAC charges on bills are printed individually as FAC1, FAC3, and FAC5 instead of as Fuel Adjustment Charge (FAC).
+
+--- PASS 2 (Grammar) ---
+  component:        Billing module
+  operation:        print
+  unexpected_state: LEAC charges on bills are printed individually as FAC1, FAC3, and FAC5 instead of as Fuel Adjustment Charge (FAC)
+  canonical_failure:Billing module + print + LEAC charges on bills are printed individually as FAC1, FAC3, and FAC5 instead of as Fuel Adjustment Charge (FAC)
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Billing print logic incorrectly maps LEAC charge codes to individual FAC codes instead of a consolidated FAC code.
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    integration_mapping_error
+  intervention_type:  software_fix
+  intervention_action:update billing print logic to map LEAC charge codes to a consolidated FAC code instead of individual FAC codes
+
+
+================================================================================
+TICKET 18929571 (#84929): CSUP-32762: Unable to open GP
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-01-09 08:45 | Todd Fowler] This customer is still down. What is going on and do you need
+anyone from our engineering team here at General Informatics? This has to be resolved as soon as
+possible. Todd Fowler
+
+--- LATEST CUSTOMER TEXT ---
+This customer is still down. What is going on and do you need anyone from our engineering team here
+at General Informatics? This has to be resolved as soon as possible. Todd Fowler
+
+--- LATEST INHANCE TEXT ---
+Automation for Jira Yesterday 4:26 PM Hello inhancesupport, Issue # CSUP-32762: Unable to open
+GPDONE has been resolved
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: GP fails to launch due to antivirus software blocking the application.
+
+--- PASS 2 (Grammar) ---
+  component:        GP application
+  operation:        load
+  unexpected_state: fails to launch due to antivirus software blocking the application
+  canonical_failure:GP application + load + fails to launch due to antivirus software blocking the application
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Application launch is blocked by external security software preventing necessary file access
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    permission_error
+  intervention_type:  configuration_change
+  intervention_action:update security software configuration to allow necessary file access for application launch
+
+
+================================================================================
+TICKET 18676212 (#37131): REVISE INVOICE MESSAGE
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-01-02 00:52 | Jennifer Fitzgerald] I have been out for a few days and just trying to catch up.
+The Wintergreen Water Conservation message should not be a continuous message that shows on our
+statements every month. This message was typed on the invoices by me a couple months ago when we had
+a water restriction and since then has showed every month. We are no longer in a water restriction
+and the message needs to be discontinued. I also was asked by Lita to sign a statement to get the
+credit card message put on the invoices. I have attached that document.  [2024-01-12 09:05 | Tony
+Williams] Update to ID yesterday: 2 things 1) is pending signature for changes from customer and
+other is. 2) Customer confirmed that they aren't putting the conservation message in the bill
+themselves via t
+
+--- LATEST CUSTOMER TEXT ---
+Tony, I reviewed accounts that in prior cycles were receiving the ‘Wintergreen’ drought message. The
+drought message is no longer visible in the more recent invoice cycles. The Statement of Work for
+the service fee messaging has been sent to our development team and will keep Jennifer posted
+directly on the progress of the SOW. Since the SOW is handled by IC only, I believe you can close
+37131. Lita Kuipers Product Specialist II lkuipers@invoicecloud.com P 781.353.2436 This e-mail
+message and an
+
+--- LATEST INHANCE TEXT ---
+Update from our weekly meeting w/ Invoice Cloud: Nelson signed the 'Statement of Work' with Invoice
+cloud on or before 1/26/24. IC is checking to make sure the water restriction msg is indeed removed.
+- Tony
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Water restriction message continues to appear on statements after it is no longer needed.
+
+--- PASS 2 (Grammar) ---
+  component:        Statement generation
+  operation:        load
+  unexpected_state: water restriction message continues to appear on statements after it is no longer needed
+  canonical_failure:Statement generation + load + water restriction message continues to appear on statements after it is no longer needed
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Statement generation logic fails to clear a stale water restriction flag after the condition is no longer met
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    state_inconsistency
+  intervention_type:  software_fix
+  intervention_action:update statement generation logic to clear water restriction flag when condition is no longer met
+
+
+================================================================================
+TICKET 17843420 (#33384): New upgrade, unable to upload Key Bank Lockbox file
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2024-01-30 05:40 | Kendra Day] Can someone please tell us how lockbox file works
+
+--- LATEST CUSTOMER TEXT ---
+Judy Leach - Warning: Ticket 33384 is 75 days old and will be in violation if it reaches 90 days.
+Please address this ticket and close as soon as possible. Ticket Info: New upgrade, unable to upload
+Key Bank Lockbox file Greene County Board of Commissioners CS-Install/Re-Install Software In
+Progress 0
+
+--- LATEST INHANCE TEXT ---
+Created new ticket 88178 for Kendra question about lockbox.
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Lockbox file upload fails
+
+--- PASS 2 (Grammar) ---
+  component:        Lockbox file import
+  operation:        import
+  unexpected_state: file upload fails
+  canonical_failure:Lockbox file import + import + file upload fails
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Lockbox file import parser rejects file due to schema mismatch with expected import format
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    schema_mismatch
+  intervention_type:  validation_guardrail
+  intervention_action:add schema validation to lockbox file import parser to reject files with schema mismatches
+
+
+================================================================================
+TICKET 17319634 (#31230): Laclede - Transfer to GL - Deposit Work for Microfund integration
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2022-05-06 07:12 | Alex Mullins] I am creating this ticket to document the work needed to assist
+with integration with Microfund. Shaena and myself have done some work to gather data for Microfund
+to show how the deposits and refunds work in ICIS. So far I pulled a copy of their live database to
+our side and restored it to the oasisv6 as "oasis_laclede_jh" to overwrite the old copy there. Below
+are attached documents on some information we gathered. We did a test deposit on one account, we
+paid for the deposit, and then we refunded and charged a customer via the final bill wizard. They do
+not have a GENIE setup for the Transfer to GL. One would be needed likely, but we need to know what
+columns they need. This information is still being gathered and Microfund said they would provide it
+to
+
+--- LATEST CUSTOMER TEXT ---
+Since I start work at 8:00 am we might be safest to go with 10:00 am. Lisa Carr Office Manager
+Laclede County PWSD #3
+
+--- LATEST INHANCE TEXT ---
+Good afternoon, ladies. I wanted to see if we could get this back on track. Can we setup a time to
+talk this or next week? Here are a few options let me know if anything works: Option 1 - Wednesday
+1/21 @ 8:30am ET Option 2 - Thursday 1/22 @ 10:30am ET Option 3 - Friday 1/23 @ 4pm ET Shaena
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: The system does not automatically update the Redistribute of Credits GL account with a new number for previously created transactions.
+
+--- PASS 2 (Grammar) ---
+  component:        Credit redistribution GL account
+  operation:        update
+  unexpected_state: system does not automatically update with a new number for previously created transactions
+  canonical_failure:Credit redistribution GL account + update + system does not automatically update with a new number for previously created transactions
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Transaction update logic fails to apply the new GL account number to existing records
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    state_inconsistency
+  intervention_type:  software_fix
+  intervention_action:update transaction update logic to persist the new GL account number to existing records
+
+
+================================================================================
+TICKET 18652869 (#36999): DO# 6635 - Description of Service Charge printing twice - TFS: 8433
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2023-06-20 08:50 | Chris Holloway] "Hello... we had this happen again this month with Level
+Billing. Can you please help us fix this issue... the account 41769." created from ticket 17906
+[2025-09-02 05:01 | Kendra Day] Hello... this is happening again, can you please correct and put in
+place a procedure so this does not happen again?? Account....0000010145  [2025-09-02 06:01 | Kendra
+Day] Hello... this is happening again, can you please correct and put in place a procedure so this
+does not happen again??Account....0000010145Thank you.  [2025-09-03 02:00 | Kendra Day] Hi Chris,
+Neither is the issue, it is the service charge of $25.00 showing up twice. This was a issue several
+years ago and you guys ran a plug in to correct it. We only put one service charge of $25.00 on the
+account on 9/
+
+--- LATEST CUSTOMER TEXT ---
+Hello.... can you please let me know if there is a fix for this?
+
+--- LATEST INHANCE TEXT ---
+@Tony Williams we need to revisit this please
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Service charge prints twice on bills for level billing customers
+
+--- PASS 2 (Grammar) ---
+  component:        Service charge printing
+  operation:        print
+  unexpected_state: service charge prints twice on bills for level billing customers
+  canonical_failure:Service charge printing + print + service charge prints twice on bills for level billing customers
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Billing calculation logic applies the service charge rule twice during bill generation for level billing customers
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    calculation_logic_error
+  intervention_type:  software_fix
+  intervention_action:update billing calculation logic to apply service charge rule only once for level billing customers
+
+
+================================================================================
+TICKET 16942554 (#29696): ON HOLD - Meter Re Routing - DO # 9783
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2022-01-19 05:21 | Kathy Romero] EAWSD is in the process of updating Routing information
+(Book/Sequence). We have done this in the past using parcel number, what information do you need
+from us and in what format?  [2022-01-19 05:51 | Chris Holloway] HI Kathy, To recap what we looked
+at today, you will be rerouting and resequencing your reading books for a set of service locations.
+since your parcel numbers are unique in the system, if you can provide a .csv file with the parcel
+number, the book number and the sequence number that the meter is going to in separate fields, we
+should be able to create a script to re-sequence your meters. please let us know how many service
+locations will be included in the re-sequencing. a rough estimate should help with the quote
+process. I will send this
+
+--- LATEST CUSTOMER TEXT ---
+Anthony just finished reviewing, and about half-way down the report, the same thing is happening.
+Only half are sequenced, and the other have revert back to 101/222.
+
+--- LATEST INHANCE TEXT ---
+Heather, The script did the resequencing. The attached file does have data in it and these are the
+exceptions from running the resequencing. This is what is in that file: 1. In column A, it is
+showing you Unknown Account numbers - meaning the file that Anthony provided has these 3 account
+numbers in it but the database does not have those 3 account numbers. 2. In column B, it is giving
+you a list of accounts that do not have a service location attached for the resequencing to happen
+on. 3. In co
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Meter report shows original book/sequence data after script execution in test environment
+
+--- PASS 2 (Grammar) ---
+  component:        Meter report
+  operation:        load
+  unexpected_state: shows original book/sequence data after script execution
+  canonical_failure:Meter report + load + shows original book/sequence data after script execution
+
+--- PASS 3 (Mechanism) ---
+  mechanism: Meter report data cache remains inconsistent after script execution
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    cache_inconsistency
+  intervention_type:  software_fix
+  intervention_action:update script execution logic to invalidate or refresh meter report data cache upon completion
+
+
+================================================================================
+TICKET 18884039 (#84660): Quickbooks Interface ORD-001205 Project
+================================================================================
+
+--- ACTUAL TICKET CONTENT (technical_core_text) ---
+[2023-08-23 03:40 | Debra Laskowski] Sold Quickbooks interface Service Description: This quote
+defines the work to be performed by inHANCE, an incorporated division of N. Harris Computer
+Corporation, to setup a QuickBooks interface for Las Campanas Water Cooperative (LCWC). Scope Of
+Work: • inHANCE will provide a discovery session & project timeline o LCWC and CRI will need to sign
+off on the project timeline • inHANCE will map out COA and descriptions with assistance from LCWC &
+CRI • inHANCE will create any new COA numbers that need created for the integration & update
+descriptions to match QB with assistance from LCWC & CRI • inHANCE will provide plan for any changes
+that will need to be in place within rate codes, adjustment codes, penalty codes, deposits, system
+settings, etc. where C
+
+--- LATEST CUSTOMER TEXT ---
+Shaena and Michaelene, it may be a good idea to forward a copy of the email to
+eitshelpdesk@envisionITsolutions.com , just to be safe. That email address is monitored by our whole
+team and gives us access to more tools to see if an email is being misrouted/blocked/misdelivered.
+-Jordan Jordan a. hanson
+
+--- LATEST INHANCE TEXT ---
+Removed Jeff from the ticket.
+
+--- PASS 1 (Phenomenon) ---
+  phenomenon: Impresa interface fails to test with QuickBooks due to 'Class not registered' error.
+
+--- PASS 2 (Grammar) ---
+  component:        Impresa → QuickBooks interface
+  operation:        transfer
+  unexpected_state: interface fails to test with QuickBooks due to 'Class not registered' error
+  canonical_failure:Impresa → QuickBooks interface + transfer + interface fails to test with QuickBooks due to 'Class not registered' error
+
+--- PASS 3 (Mechanism) ---
+  mechanism: QuickBooks interface component fails to initialize due to a missing or corrupted COM registration for a required QuickBooks library.
+
+--- PASS 4 (Intervention) ---
+  mechanism_class:    dependency_missing
+  intervention_type:  configuration_change
+  intervention_action:register QuickBooks COM libraries with the operating system
+
+
+
+Total tickets reviewed: 30
+Found in rollups: 30
+With pass results: 30
