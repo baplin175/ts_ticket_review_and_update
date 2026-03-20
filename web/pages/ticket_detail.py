@@ -1,11 +1,18 @@
 """Ticket detail page — metadata, thread, scores, wait profile."""
 
+import os
+import subprocess
+import sys
+
 import dash_mantine_components as dmc
-from dash import dcc, html
+from dash import callback, dcc, html, Input, Output, State, no_update
 from dash_iconify import DashIconify
 import plotly.graph_objects as go
 
 import data
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_INGEST_SCRIPT = os.path.join(_PROJECT_ROOT, "run_ingest.py")
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -179,7 +186,8 @@ def _wait_chart(profile):
 
 # ── Layout ───────────────────────────────────────────────────────────
 
-def ticket_detail_layout(ticket_id):
+def _build_detail(ticket_id):
+    """Build the full ticket detail content (header + tabs) from DB data."""
     ticket = data.get_ticket_detail(ticket_id)
     if not ticket:
         return dmc.Stack([
@@ -200,7 +208,20 @@ def ticket_detail_layout(ticket_id):
                         dmc.Group([DashIconify(icon="tabler:arrow-left", width=16), "Tickets"], gap=4),
                         href="/tickets", size="sm",
                     ),
+                    dmc.Group(
+                        [
+                            dmc.Button(
+                                "Refresh",
+                                id="ticket-refresh-btn",
+                                leftSection=DashIconify(icon="tabler:refresh", width=16),
+                                variant="light",
+                                size="compact-sm",
+                            ),
+                        ],
+                        ml="auto",
+                    ),
                 ],
+                justify="space-between",
                 mb="sm",
             ),
             dmc.Group(
@@ -317,3 +338,42 @@ def ticket_detail_layout(ticket_id):
     )
 
     return dmc.Stack([header, tabs], gap="md")
+
+
+def ticket_detail_layout(ticket_id):
+    """Shell layout: stores ticket_id and wraps _build_detail in a refreshable container."""
+    return html.Div([
+        dcc.Store(id="ticket-detail-id", data=ticket_id),
+        dcc.Loading(
+            id="ticket-detail-loading",
+            type="dot",
+            children=html.Div(id="ticket-detail-content", children=_build_detail(ticket_id)),
+        ),
+    ])
+
+
+def register_callbacks(app):
+    @app.callback(
+        Output("ticket-detail-content", "children"),
+        Input("ticket-refresh-btn", "n_clicks"),
+        State("ticket-detail-id", "data"),
+        prevent_initial_call=True,
+    )
+    def refresh_ticket(n_clicks, ticket_id):
+        if not n_clicks or not ticket_id:
+            return no_update
+
+        # Re-sync this single ticket from TeamSupport
+        try:
+            subprocess.run(
+                [sys.executable, _INGEST_SCRIPT, "sync", "--ticket-id", str(ticket_id), "--verbose"],
+                cwd=_PROJECT_ROOT,
+                env=os.environ.copy(),
+                timeout=120,
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            pass  # still rebuild from whatever DB state we have
+
+        return _build_detail(ticket_id)

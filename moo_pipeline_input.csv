@@ -1,0 +1,327 @@
+"ticket_id","ticket_name","full_thread_text"
+"6245039","Call on 08/15/17 - Bill wording print changes, LEAC to Fuel Adjustment Charge","[2024-04-17 09:13 | Chris Holloway] Issues The issues described in the ticket are: The LEAC charges on bills were not being printed as the Fuel Adjustment Charge (FAC) as requested. Instead, the system was printing the FAC charges individually as FAC1, FAC3, and FAC5. Troubleshooting The following troubleshooting steps were taken: Attempted to update the wording in the admin settings under rate codes per previous instructions, but this did not resolve the issue. The developer responsible for bill form changes tested resolutions. Identified the problem over the weekend and corrected it. Next Steps No next steps were provided in the ticket conversation."
+"14324709","Check fields in Company defined fields.","[2024-05-06 03:19 | Jhony Desinor] Annia discovered how field renaming works and renamed the fields. When renaming a field, the only way for it to save is by clicking anywhere outside of that field. If you use ""return"" or ""tab,"" it will not save.However, this is a bug that still needs to be fixed in Impresa. Please add this to the Impresa bug list for future release.
+
+[2024-05-06 03:21 | cust] Tony Williams - Ticket 21457 is in violation and is greater than 90 days. Please address this ticket and close immediately. Ticket Info: [EXTERNAL] Check fields in Company defined fields. Collier Co. Utility Billing and Customer Support Customer Responded 0
+
+[2024-05-06 03:23 | cust] Tony Williams - Warning: Ticket 21457 is 75 days old and will be in violation if it reaches 90 days. Please address this ticket and close as soon as possible. Ticket Info: [EXTERNAL] Check fields in Company defined fields. Collier Co. Utility Billing and Customer Support Customer Responded 0
+
+[2024-05-06 03:25 | Tony Williams] Jhony, I'll create a new ticket for this to submit this bug. - Tony
+
+[2024-05-06 04:06 | Jhony Desinor] Jhony Desinor CPM, CSM, ITILv3, Project+, Lean6Sigma GB Project Manager III Utilities Finance Operations Office:239-252-8433 4420 Mercantile AVE Naples, Florida 34104 Jhony.Desinor@colliercountyfl.gov"
+"15285693","[EXTERNAL] Question about Transfer to GL","[2024-09-17 04:10 | cust] Chris Holloway - Ticket 24395 is in violation and is greater than 90 days. Please address this ticket and close immediately. Ticket Info: [EXTERNAL] Question about Transfer to GL Hurst, City of Support Customer Responded 0
+
+[2024-09-17 04:10 | Garrett Treece] Hello,The same issue occurred today. The account description shows internet payment while the pay method says cash. Just want to make sure this error/glitch is logged for future reference.
+
+[2024-09-17 04:12 | cust] Chris Holloway - Warning: Ticket 24395 is 75 days old and will be in violation if it reaches 90 days. Please address this ticket and close as soon as possible. Ticket Info: [EXTERNAL] Question about Transfer to GL Hurst, City of Support Customer Responded 0
+
+[2024-09-17 05:42 | Chris Holloway] Hi Garrett, I am moving this to another ticket so that we can keep this older ticket closed. The new ticket number is 94561."
+"15303912","[EXTERNAL] FW: Tokay Backflow","[2024-02-29 07:00 | Kendra Day] Hello... tomorrow is our billing day... we will start this process 7:30 am eastern time. Please make sure there are no back ups running, maintenance being done or a couple of other things running in the background.
+
+[2024-03-04 00:45 | Debra Laskowski] Were you able to successfully run your billing last week? Debra
+
+[2024-03-04 01:10 | Kendra Day] Well... we finally go them to go through but we are still having problems with the files being uploaded to Invoice Cloud.. I have another ticket in for this and I have emailed Chris as well. We really need this corrected early this morning, our customers are unable to make payments.
+
+[2024-03-04 01:14 | Debra Laskowski] Kendra, Debra
+
+[2024-03-04 01:40 | Debra Laskowski] Kendra, I contacted Chris and he will work with you on this under ticket #89162 I will close this ticket. Debra"
+"16809811","Trenton - IC and CC machines","[2024-01-04 06:42 | Tony Williams] Per IC/Inhance Meeting, no change and PS still has lead on issue.
+
+[2024-01-14 09:23 | Nathan Loan] 1/11/24 - Installed IC POS software, restored db and ran scripts on Oasis_IC_test.
+
+[2024-01-18 06:19 | Tony Williams] Update post InHance/Invoice Cloud Meeting of Ticket Review - InHance PS is still testing this with customer.
+
+[2024-02-01 07:19 | Tony Williams] Customer is still testing the setup and use.
+
+[2024-03-14 05:29 | Alex Mullins] No further updates on this at the moment.
+
+[2024-04-11 08:31 | Tony Williams] PS still working with customer
+
+[2024-06-06 04:23 | Tony Williams] Per PS, Everything is installed. Michael at Trenton is testing.
+
+[2024-07-18 08:50 | Tony Williams] Per PS, Trenton still working/testing this."
+"16942554","ON HOLD - Meter Re Routing - DO # 9783","[2022-01-19 05:21 | Kathy Romero] EAWSD is in the process of updating Routing information (Book/Sequence). We have done this in the past using parcel number, what information do you need from us and in what format?
+
+[2022-01-19 05:51 | Chris Holloway] HI Kathy, To recap what we looked at today, you will be rerouting and resequencing your reading books for a set of service locations. since your parcel numbers are unique in the system, if you can provide a .csv file with the parcel number, the book number and the sequence number that the meter is going to in separate fields, we should be able to create a script to re-sequence your meters. please let us know how many service locations will be included in the re-sequencing. a rough estimate should help with the quote process. I will send this request over to our professional services department to get the quote process started.
+
+[2022-01-27 03:51 | Debra Laskowski] Kathy, Attached you will find a quote for Harris to create a process for Eldorado to use when resequencing books. To order just sign and return both pages via this ticket or email.
+
+[2022-02-08 03:03 | Debra Laskowski] Kathy I wanted to follow up with you to see what the status is on the quote I sent in January. Do you have any questions? Are you still interested or should I close it? I look forward to your response.
+
+[2022-02-28 03:55 | Debra Laskowski] Spoke to Kathy and resend her the quote to use for preparing PO. Debra
+
+[2022-02-28 04:50 | Debra Laskowski] Sold re-sequence of routes. Created TFS 9783 for development queue.
+
+[2022-03-02 22:36 | Shaena Robertson] Eldorado Area Water & Sanitation, Your order for the Meter Re-Routing has been received. Your order has been submitted to the Professional Services & Development queue. Your project will be assigned a project manager which will keep you updated of the project status and work with you to get your solution in place. Part of the contract states that Eldorado will provide a .csv file with the information needed to do the meter re-routing programming. When will you be able to provide this file or a sample of the file so we can provide to our Development team? Once we have that file we will be able to get a schedule from Development, so it is important we get that as soon as possible. In the meantime, if you have any questions please do not hesitate to us this ticket #29696 to communicate regarding this project.
+
+[2022-03-22 00:13 | Shaena Robertson] Kathy, Good morning. I hope you are doing well. I wanted to reach out to you and see if we would be getting the sample re-sequencing file by the end of the month? We dont have to have the full completed file but need at least a sample with the layout and some data in it. We can't start any programming until we have one. Once I have the sample of the file I can get this into the development queue then it will be scheduled to start working on it. Which will take at least a few weeks based on their schedule right now. If you have any questions please let me know I would be more than happy to set up a quick call!
+
+[2022-03-22 05:45 | Kathy Romero] We will get one to you as soon as we get from Beacon. Kathy A. Romero Customer Service & Billing Supervisor P 505.466.1085 |F 505.466.2631 2 North Chamisa Drive Suite B|Santa Fe NM 87508
+
+[2022-03-22 08:02 | Shaena Robertson] Kathy -
+
+[2022-04-06 05:08 | Shaena Robertson] Good afternoon Kathy! I am just touching base with you to see if you have any updates on your file from Beacon? As I advised I would check in with you every couple weeks to make sure we don't miss anything. Please let me know if you have an update and if not we will reach out in another few weeks.
+
+[2022-04-25 08:44 | Shaena Robertson] Good afternoon Kathy! I am just touching base with you to see if you have any updates on your file from Beacon since it has been a month since your last update? Please let me know if you have an update of expected delivery date from Beacon.
+
+[2022-04-26 03:01 | Kathy Romero] Good Morning, Unfortunately we still do not have a file for you. Working on it though J. Kathy A. Romero Customer Service & Billing Supervisor P 505.466.1085 |F 505.466.2631 2 North Chamisa Drive Suite B|Santa Fe NM 87508
+
+[2022-05-16 02:21 | Shaena Robertson] Kathy, Good morning. I hope you are doing well. I am doing my every couple week check in on the Resequencing project for Eldorado. Are you able to provide just a sample of the file so we know the correct format we will be using to bring into the software? I wonder if Beacon could provide a sample so correct format and maybe a few rows of data so we can start to program and then when you get the real file we will have everything ready? Just let me know if you can do so or if you need us to talk with your vendor to explain the request?
+
+[2022-05-19 06:17 | Kathy Romero] Hi there, still not ready for this project.
+
+[2022-06-03 10:52 | Shaena Robertson] Project on hold until Eldorado starts back up in 3-6 months.
+
+[2022-10-30 10:05 | Shaena Robertson] Good afternoon Kathy. I am checking up on this project, Eldorado said they needed to hold off for 3 to 6 months and its been 5 months. Is Eldorado looking at starting this back up before the end of the year? Wanted to see if we needed to get this rolling again and get on our calendar. Any update would be appreciated.
+
+[2023-01-11 13:00 | Shaena Robertson] Good afternoon Kathy. I am checking up on this project, Eldorado said they needed to hold off for 3 to 6 months and its been 7 months. Is Eldorado looking at starting this back up? Wanted to see if we needed to get this rolling again and get on our calendar. Any update would be appreciated.
+
+[2023-01-12 04:30 | Shaena Robertson] Anthony,
+
+[2023-03-26 23:46 | Shaena Robertson] Anthony & Heather, Good morning. I had this project on hold per your request until the end of March. I wanted to reach out and see if you were ready to proceed and can we set up a time to discuss this week? Let me know at your earliest convenience.
+
+[2023-04-19 06:38 | Shaena Robertson] Per Anthony: Project is being pushed out to after July. They will need to develop routes 1st then work can start in Q4 with inHance. PS to follow up by Q4 on status.
+
+[2023-11-07 22:28 | Shaena Robertson] Good afternoon, Anthony! We had this project on hold for most of the year and you said you would be ready to start working on it this fall. It is beginning of November. We need to get this scheduled quickly due to the rest of the year getting booked up we want to get this done for Eldorado. Please let me know as soon as possible so we can get you on the calendar.
+
+[2024-01-15 09:58 | Shaena Robertson] Anthony,
+
+[2024-01-15 10:58 | Shaena Robertson] Anthony, Shaena
+
+[2024-01-16 02:01 | Anthony/ELD Marino] Hi Shaena,
+
+[2024-01-16 03:01 | Anthony/ELD Marino] Hi Shaena, Anthony
+
+[2024-01-16 04:19 | Shaena Robertson] Anthony, Of course, we want to make sure when you are ready we are too! Just let me know if you need anything before our next touch point!
+
+[2024-01-16 05:19 | Shaena Robertson] Anthony, Of course, we want to make sure when you are ready we are too! Just let me know if you need anything before our next touch point! Shaena
+
+[2024-02-08 00:30 | Shaena Robertson] Good morning, Anthony! I hope you are doing well! I am reaching out regarding the Meter Re-Routing project that you guys signed the contract on back on 1/31/22. We have been putting it on hold per your request but I have been notified by finance that if this doesn't start by end of 2024 we will need to cancel the contract and requote when you will be looking to do the work in the future. With this being said is this something that you will be wanting to schedule for later this year or do you think this is not going to happen? I am happy to jump on a call and we can discuss this but just wanted to give you a heads up since this was brought up to me this last in-house financial meeting. Please let me know if you have questions and what you wish to do with this project. Than you, Shaena Robertson
+
+[2024-02-08 01:30 | Shaena Robertson] Good morning, Anthony! I hope you are doing well! I am reaching out regarding the Meter Re-Routing project that you guys signed the contract on back on 1/31/22. We have been putting it on hold per your request but I have been notified by finance that if this doesn't start by end of 2024 we will need to cancel the contract and requote when you will be looking to do the work in the future. With this being said is this something that you will be wanting to schedule for later this year or do you think this is not going to happen? I am happy to jump on a call and we can discuss this but just wanted to give you a heads up since this was brought up to me this last in-house financial meeting. Please let me know if you have questions and what you wish to do with this project. Than you, Shaena Robertson
+
+[2024-02-22 23:54 | Shaena Robertson] Good morning. Just checking in that you seen my message from a few weeks ago and wanted to see if you had any updates on this?
+
+[2024-02-23 00:54 | Shaena Robertson] Good morning. Just checking in that you seen my message from a few weeks ago and wanted to see if you had any updates on this? Shaena
+
+[2024-02-23 00:54 | Anthony/ELD Marino] Hi Shaena, I just received a change order to complete the work on our end. I will keep you posted on when we think we might be ready. Anthony
+
+[2024-02-23 01:54 | Anthony/ELD Marino] Hi Shaena, I just received a change order to complete the work on our end. I will keep you posted on when we think we might be ready. Anthony
+
+[2024-02-23 01:58 | Shaena Robertson] Anthony, Oh that is great to hear! Yes please let me know so we can work scheduled.
+
+[2024-02-23 02:58 | Shaena Robertson] Anthony, Oh that is great to hear! Yes please let me know so we can work scheduled. Shaena
+
+[2024-06-03 02:39 | Shaena Robertson] Good morning. Just checking in since it has been a few months to see what the status of this project is? I know you said it will be happening but wanted to see if you all would like to get this scheduled to do a kick off call? Please let me know.
+
+[2024-06-03 03:39 | Shaena Robertson] Good morning. Just checking in since it has been a few months to see what the status of this project is? I know you said it will be happening but wanted to see if you all would like to get this scheduled to do a kick off call? Please let me know. Shaena
+
+[2024-06-04 05:02 | Heather Roybal] Good morning, We’re still working on the background work needed to implement this project, but we’re getting close. We hope to reach out to you after this in completed before the end of June. Heather Roybal (Pronouns: she/her) Jacobs Billing & Customer Support Supervisor 505.557.6338 505.466.2631 fax heather.roybal@jacobs.com 2 North Chamisa Drive Santa Fe, New Mexico 87508 United States www.jacobs.com
+
+[2024-06-04 06:02 | Heather Roybal] Good morning, We’re still working on the background work needed to implement this project, but we’re getting close. We hope to reach out to you after this in completed before the end of June. 😊 Heather Roybal (Pronouns: she/her) Jacobs
+
+[2024-06-04 06:30 | Shaena Robertson] Great
+
+[2024-12-01 09:52 | Shaena Robertson] Heather & Tony, Good afternoon. It is December and we need to get this project scheduled or due to its age (signed in 2022) we will need to cancel this project and when Eldorado is ready to start this up again we can get you a new quote. Could you please let me know if you want to schedule to start this work this month or do we need to start proceedings to cancel this project? I appreciate your prompt response. Let me know if you have any questions.
+
+[2024-12-01 10:52 | Shaena Robertson] Heather & Tony, Good afternoon. It is December and we need to get this project scheduled or due to its age (signed in 2022) we will need to cancel this project and when Eldorado is ready to start this up again we can get you a new quote. Could you please let me know if you want to schedule to start this work this month or do we need to start proceedings to cancel this project? I appreciate your prompt response. Let me know if you have any questions. Shaena
+
+[2025-05-01 05:30 | Shaena Robertson] Per Tony - June will get this going. Shaena to ask Finance to invoice Eldorado now. Shaena to get Dev to get programming ready to run in June. Anthony to provide Shaena with a sample file so our Dev team can get working on this and be ready by end of June.
+
+[2025-05-01 06:30 | Shaena Robertson] Per Tony - June will get this going. Shaena to ask Finance to invoice Eldorado now. Shaena to get Dev to get programming ready to run in June. Anthony to provide Shaena with a sample file so our Dev team can get working on this and be ready by end of June.
+
+[2025-05-13 07:09 | Shaena Robertson] Anthony, Will you be able to get me a sample file by end of this week? We need to give our programmers a few weeks to get programming ready for June delivery as we discussed on last call.
+
+[2025-05-13 07:12 | Anthony/ELD Marino] It appears that the user Anthony.Marino@jacobs.com has their out of office message turned on. Below is the automated reply we received from them: ﻿ I will be out of the office until May 14, with limited access to email. If you need assitance with Operations please contact Andy Beck at andy.beck@jacobs.com or 505-466-1085. If you need assitance with Customer Service or Billing please contact Heather Roybal at heather.roybal@jacobs.com or 505-466-1085.
+
+[2025-05-13 08:09 | Shaena Robertson] Anthony, Will you be able to get me a sample file by end of this week? We need to give our programmers a few weeks to get programming ready for June delivery as we discussed on last call. Shaena
+
+[2025-05-13 08:12 | Anthony/ELD Marino] ﻿ I will be out of the office until May 14, with limited access to email. If you need assitance with Operations please contact Andy Beck at andy.beck@jacobs.com or 505-466-1085. If you need assitance with Customer Service or Billing please contact Heather Roybal at heather.roybal@jacobs.com or 505-466-1085. Anthony Marino NOTICE - This communication may contain
+
+[2025-05-15 06:28 | Anthony/ELD Marino] No. The first draft did not come out very well and they are working on some edits. Anthony
+
+[2025-05-15 07:28 | Anthony/ELD Marino] No. The first draft did not come out very well and they are working on some edits. Anthony
+
+[2025-05-15 08:41 | Shaena Robertson] Ok
+
+[2025-05-15 09:41 | Shaena Robertson] Ok
+
+[2025-05-22 08:59 | Shaena Robertson] Good afternoon. Do you have an idea of when the new file or a sample of the new file will be available to provide to programmers?
+
+[2025-05-22 09:20 | Anthony/ELD Marino] This is what they have provided. Let me know if this will work or we need to adjust.
+
+[2025-05-22 09:59 | Shaena Robertson] Good afternoon. Do you have an idea of when the new file or a sample of the new file will be available to provide to programmers? Shaena
+
+[2025-05-22 10:20 | Anthony/ELD Marino] This is what they have provided. Let me know if this will work or we need to adjust. Anthony
+
+[2025-05-23 00:26 | Shaena Robertson] Great
+
+[2025-05-23 01:26 | Shaena Robertson] Great
+
+[2025-06-16 03:16 | Shaena Robertson] Anthony, Good morning. Development has completed the work on the rerouting. Here are some items that came out of the development and what we will need to look at when doing in test. File given only has CR not CR+LF at end of lines so compensated. If they change will affect the processing. After looking at the file I used columns 1, 3 and 4 for account number, book, and sequence. I did not use the location in the file as that rarely gives great matching. The account numbers in the file have had their leading zeroes stripped, so I had to do a numerical equivalence to match customer records (ie convert 000031 in DB to a literal 31 before comparing to file). This probably will not be a problem unless they have varying account number lengths and have accounts that have the same value with different leading zeroes (ex 00031 and 00031 are two different account in our system but numerically it is the same so a single value in the file may match more than one customer in system). MANY of the records in the file are for customers who are not at a location in the DB we have here. I am not sure how old the data is here, so we will use your database copy live to test and then test out this process with up to date data. I return a list of accounts not found, a list of accounts that do not have a service location, and a list of accounts with service locations without the group. After it updates the book/seq on the account, it checks the books affected and if any duplicates, will resequence them. We are ready to deliver this in test. Do you have new file to try out? If not you will need to let us know when you have a file and we can schedule to copy live to test and run on the test environment. Please let us know at your earliest convenience.
+
+[2025-06-16 03:19 | Shaena Robertson] Here is the sp to deliver to Eldorado. Waiting on Anthony to get file to work with .
+
+[2025-06-16 04:16 | Shaena Robertson] Anthony, Good morning. Development has completed the work on the rerouting. Here are some items that came out of the development and what we will need to look at when doing in test. File given only has CR not CR+LF at end of lines so compensated. If they change will affect the processing. After looking at the file I used columns 1, 3 and 4 for account number, book, and sequence. I did not use the location in the file as that rarely gives great matching. The account numbers in the file have had their leading zeroes stripped, so I had to do a numerical equivalence to match customer records (ie convert 000031 in DB to a literal 31 before comparing to file). This probably will not be a problem unless they have varying account number lengths and have accounts that have the same value with different leading zeroes (ex 00031 and 00031 are two different account in our system but numerically it is the same so a single value in the file may match more than one customer in system). MANY of the records in the file are for customers who are not at a location in the DB we have here. I am not sure how old the data is here, so we will use your database copy live to test and then test out this process with up to date data. I return a list of accounts not found, a list of accounts that do not have a service location, and a list of accounts with service locations without the group. After it updates the book/seq on the account, it checks the books affected and if any duplicates, will resequence them. We are ready to deliver this in test. Do you have new file to try out? If not you will need to let us know when you have a file and we can schedule to copy live to test and run on the test environment. Please let us know at your earliest convenience. Shaena
+
+[2025-06-16 04:19 | Shaena Robertson] Here is the sp to deliver to Eldorado. Waiting on Anthony to get file to work with .
+
+[2025-07-09 05:20 | Shaena Robertson] Anthony, Good afternoon. We are ready to deliver this programming in test. Do you have new file to try out? If not you will need to let us know when you have a file and we can schedule to copy live to test and run on the test environment. Do you have any outlook on when you will have a file ready if not already?
+
+[2025-07-09 05:42 | Anthony/ELD Marino] I have an updated file, but we are only about halfway through the process. Here is the updated draft file. It will probably be September before we are ready to pull the trigger. Need to get the data back from vendor and review.
+
+[2025-07-09 06:20 | Shaena Robertson] Anthony, Good afternoon. We are ready to deliver this programming in test. Do you have new file to try out? If not you will need to let us know when you have a file and we can schedule to copy live to test and run on the test environment. Do you have any outlook on when you will have a file ready if not already? Shaena
+
+[2025-07-09 06:42 | Anthony/ELD Marino] I have an updated file, but we are only about halfway through the process. Here is the updated draft file. It will probably be September before we are ready to pull the trigger. Need to get the data back from vendor and review.
+
+[2025-07-09 08:32 | Shaena Robertson] Anthony,
+
+[2025-07-09 09:32 | Shaena Robertson] Anthony, Shaena
+
+[2025-08-15 01:42 | Anthony/ELD Marino] Just wanted to let you know that I’m working on the final review. I think it should be ready by the end of the month. Can you please look at getting this on the schedule early to mid September.
+
+[2025-08-15 02:42 | Anthony/ELD Marino] Just wanted to let you know that I’m working on the final review. I think it should be ready by the end of the month. Can you please look at getting this on the schedule early to mid September. Anthony I have an updated file, but we are only about halfway through the process. Here is the updated draft file. It will probably be September before we are ready to pull the trigger. Need to get the data back from vendor and review.
+
+[2025-08-15 03:21 | Shaena Robertson] Anthony, Great news. I setup Monday 9/8 at 1pm ET/noon CT/11am MT/10am PT to have a call and review discuss timeline and setup install.
+
+[2025-08-15 04:21 | Shaena Robertson] Anthony, Great news. I setup Monday 9/8 at 1pm ET/noon CT/11am MT/10am PT to have a call and review discuss timeline and setup install.
+
+[2025-08-15 04:53 | Shaena Robertson] I have sent meeting for 9/9 @ 2:30pm ET/1:30pm CT/12:30pm MT/11:30pm PT
+
+[2025-08-15 05:53 | Shaena Robertson] I have sent meeting for 9/9 @ 2:30pm ET/1:30pm CT/12:30pm MT/11:30pm PT
+
+[2025-10-03 09:47 | Anthony/ELD Marino] Here are the final meter routes in csv and xlsx. There are currently 8 meters in the billing system that are not in these files. I would like to update those after these get uploaded. Please let us know next steps.
+
+[2025-10-03 10:47 | Anthony/ELD Marino] Here are the final meter routes in csv and xlsx. There are currently 8 meters in the billing system that are not in these files. I would like to update those after these get uploaded. Please let us know next steps. Anthony
+
+[2025-10-06 02:48 | Shaena Robertson] Anthony,
+
+[2025-10-06 03:48 | Shaena Robertson] Anthony, Could we get Nathan scheduled to do this work either Thursday between 11am CT and 1pm CT or Friday anytime. Please let us know what works Shaena
+
+[2025-10-06 04:06 | Heather Roybal] Good morning, I can get you on the server; Friday works
+
+[2025-10-06 05:06 | Heather Roybal] Good morning, I can get you on the server; Friday works Heather Roybal (Pronouns: she/her) Jacobs
+
+[2025-10-06 07:16 | Shaena Robertson] Great
+
+[2025-10-06 08:00 | Heather Roybal] Anytime works. Just send an invite Heather Roybal (Pronouns: she/her) Jacobs Billing & Customer Support Supervisor 505.557.6338 505.466.2631 fax heather.roybal@jacobs.com 2 North Chamisa Drive Santa Fe, New Mexico 87508 United States www.jacobs.com
+
+[2025-10-06 08:16 | Shaena Robertson] Great
+
+[2025-10-06 09:00 | Heather Roybal] Anytime works. Just send an invite 😊 Heather Roybal (Pronouns: she/her) Jacobs
+
+[2025-10-08 10:17 | Shaena Robertson] Friday @ 2pm ET/1pm CT/noon MT/11am PT meeting invite sent.
+
+[2025-10-08 11:17 | Shaena Robertson] Friday @ 2pm ET/1pm CT/noon MT/11am PT meeting invite sent.
+
+[2025-10-23 04:20 | Shaena Robertson] Anthony & Heather, I apologize for the delay. I would like to get this back on track and deliver this in test for you next week. Again I apologize for the delay. Can we get on the server 10/28 @ 5pm ET/4pm CT/3pm MT/2pm PT? I will send off a meeting invite to block that time off.
+
+[2025-10-23 05:20 | Shaena Robertson] Anthony & Heather, I apologize for the delay. I would like to get this back on track and deliver this in test for you next week. Again I apologize for the delay. Can we get on the server 10/28 @ 5pm ET/4pm CT/3pm MT/2pm PT? I will send off a meeting invite to block that time off.
+
+[2025-10-27 01:56 | Shaena Robertson] Heather, I sent a meeting for tomorrow at 5pm ET/4pm CT/3pm MT/2pm PT for Nathan to get on the server and run the final file in test for Anthony's review. Will that work or can Isaac get Nathan on at that time?
+
+[2025-10-27 02:56 | Shaena Robertson] Heather, I sent a meeting for tomorrow at 5pm ET/4pm CT/3pm MT/2pm PT for Nathan to get on the server and run the final file in test for Anthony's review. Will that work or can Isaac get Nathan on at that time?
+
+[2025-10-27 04:08 | Heather Roybal] Yes, we accepted the meeting. I can get you on the server at that time.
+
+[2025-10-27 05:08 | Heather Roybal] Yes, we accepted the meeting. I can get you on the server at that time. Heather Roybal Pronouns: she/her Billing & Customer Support Supervisor
+
+[2025-10-28 09:35 | Nathan Loan] Anthony, Take a look at the Oasis_PS_test database. I ran the re routing script. Can you let me know if everything looks good?
+
+[2025-10-28 10:35 | Nathan Loan] Anthony, Take a look at the Oasis_PS_test database. I ran the re routing script. Can you let me know if everything looks good?
+
+[2025-10-29 06:23 | Shaena Robertson] I know Anthony is out today - want to make sure he doesn't miss that we delivered the changes in test and need him to review and advise when to deliver in live.
+
+[2025-10-29 07:23 | Shaena Robertson] I know Anthony is out today - want to make sure he doesn't miss that we delivered the changes in test and need him to review and advise when to deliver in live. Shaena
+
+[2025-11-05 12:37 | Shaena Robertson] Anthony, We delivered the work in test, have you reviewed? When can we promote this work to live?
+
+[2025-11-05 13:37 | Shaena Robertson] Anthony, We delivered the work in test, have you reviewed? When can we promote this work to live? Shaena
+
+[2025-12-09 01:51 | Shaena Robertson] Anthony, We have never heard back from you on this delivery in test. Are we good to move to live? Shaena
+
+[2025-12-09 02:51 | Shaena Robertson] Anthony, We have never heard back from you on this delivery in test. Are we good to move to live? Shaena
+
+[2026-01-29 02:58 | Heather Roybal] Hi! So sorry for the delay. I ran the meter report this morning in PS_Test for Anthony, and the Book / Sequence has changed back to the original books. I think at some point the data was over-written during another project possibly? Can you drop the script back in this database?
+
+[2026-01-29 03:58 | Heather Roybal] Hi! So sorry for the delay. I ran the meter report this morning in PS_Test for Anthony, and the Book / Sequence has changed back to the original books. I think at some point the data was over-written during another project possibly? Can you drop the script back in this database?
+
+[2026-01-29 07:25 | Shaena Robertson] Oh yes we probably have repopulated that a few times since we ran the scripts. We can get this scheduled for next week, we do need to get on the server to do so. Can we schedule for Tuesday, 2/3 @ 2pm ET/1pm CT/noon MT? Let me know and I will get a meeting invite sent off.
+
+[2026-01-29 07:29 | Heather Roybal] I’m available at that time
+
+[2026-01-29 08:25 | Shaena Robertson] Oh yes we probably have repopulated that a few times since we ran the scripts. We can get this scheduled for next week, we do need to get on the server to do so. Can we schedule for Tuesday, 2/3 @ 2pm ET/1pm CT/noon MT? Let me know and I will get a meeting invite sent off.
+
+[2026-01-29 08:29 | Heather Roybal] I’m available at that time 😊 Heather Roybal Pronouns: she/her Billing & Customer Support Supervisor
+
+[2026-01-30 03:13 | Shaena Robertson] Great
+
+[2026-01-30 04:13 | Shaena Robertson] Great
+
+[2026-02-03 05:06 | Nathan Loan] Ran SP on PS_Test. Heather said she was sending a meter report to Anthony now and will update the ticket with a go live date.
+
+[2026-02-03 06:06 | Nathan Loan] Ran SP on PS_Test. Heather said she was sending a meter report to Anthony now and will update the ticket with a go live date.
+
+[2026-02-03 07:53 | Heather Roybal] Hi Nathan, Maybe I’m not following the project, but I ran the meter report from PS_Test to send to Anhtony for review. The Book / Sequence is still showing our current data instead of the new Book / Sequence. Heather Roybal Pronouns: she/her Billing & Customer Support Supervisor
+
+[2026-02-03 08:51 | Nathan Loan] Heather, It looks like I ran the stored procedure but didn't hook it up to anything. Can you let me know if you can get me connected tomorrow morning around 9 CST? If not i won't be available till after 12 CST. I am sorry about that. This should ingest Anthony's excel doc and change the sequence to match the document.
+
+[2026-02-03 09:51 | Nathan Loan] Heather, It looks like I ran the stored procedure but didn't hook it up to anything. Can you let me know if you can get me connected tomorrow morning around 9 CST? If not i won't be available till after 12 CST. I am sorry about that. This should ingest Anthony's excel doc and change the sequence to match the document.
+
+[2026-02-04 02:23 | Heather Roybal] I’m available after 1:30 MST. Just send over a request.
+
+[2026-02-04 03:23 | Heather Roybal] I’m available after 1:30 MST. Just send over a request. 😊 Heather Roybal Pronouns: she/her Billing & Customer Support Supervisor
+
+[2026-02-04 05:07 | Heather Roybal] Ok, heading to my meeting now. Please send over an invite for after 2:30 mst if that’s all you have left for the day.
+
+[2026-02-04 05:46 | Nathan Loan] Heather, I have a meeting at 2:30 CST which is 1:30 MST. Can you do it any sooner? Otherwise it will have to be 2:30 MST your time.
+
+[2026-02-04 05:53 | Heather Roybal] I can get you on the server now if you’re available. I have a lunch meeting but have a few minutes. Then I can ask for clarification on the other email you sent me too. Heather Roybal Pronouns: she/her Billing & Customer Support Supervisor
+
+[2026-02-04 06:07 | Heather Roybal] Ok, heading to my meeting now. Please send over an invite for after 2:30 mst if that’s all you have left for the day. Heather Roybal Pronouns: she/her Billing & Customer Support Supervisor
+
+[2026-02-09 03:48 | Heather Roybal] I ran the meter report so Anthony could review the data. Per Anthony: File is incorrect. 1,346 accounts with new book/seq and 1,734 with old book/seq. Anthony
+
+[2026-02-09 04:11 | Heather Roybal] Per Anthony, Here's the file you should be using on your side, just in case you need another copy.
+
+[2026-02-09 04:48 | Heather Roybal] I ran the meter report so Anthony could review the data. Per Anthony:File is incorrect. 1,346 accounts with new book/seq and 1,734 with old book/seq. Anthony
+
+[2026-02-09 05:11 | Heather Roybal] Per Anthony, Here's the file you should be using on your side, just in case you need another copy.
+
+[2026-02-09 12:12 | Shaena Robertson] Heather,
+
+[2026-02-20 07:14 | Heather Roybal] Bumping this one again.
+
+[2026-02-20 08:14 | Heather Roybal] Bumping this one again.
+
+[2026-03-04 01:54 | Heather Roybal] HI! Can we get this on the schedule please?
+
+[2026-03-04 02:54 | Heather Roybal] HI! Can we get this on the schedule please?
+
+[2026-03-09 11:53 | Shaena Robertson] Yes we sure can. We can get Nathan scheduled for Thursday or Friday this week? Do you have a preference on day? Time? Let me know.
+
+[2026-03-09 12:53 | Shaena Robertson] Yes we sure can. We can get Nathan scheduled for Thursday or Friday this week? Do you have a preference on day? Time? Let me know.
+
+[2026-03-10 02:45 | Heather Roybal] Friday works
+
+[2026-03-10 03:45 | Heather Roybal] Friday works
+
+[2026-03-10 06:27 | Shaena Robertson] Nathan is sending out a meeting for Friday 3/13 @ 9:30am CT/8:30am MT.
+
+[2026-03-10 07:27 | Shaena Robertson] Nathan is sending out a meeting for Friday 3/13 @ 9:30am CT/8:30am MT.
+
+[2026-03-10 08:10 | Heather Roybal] Heather Roybal Pronouns: she/her Billing & Customer Support Supervisor
+
+[2026-03-16 01:20 | Nathan Loan] Backed up live Restored to Oasis_PS_test Ran Anthony's file for resequencing Sent results to Heather
+
+[2026-03-16 09:26 | Heather Roybal] Hi Nathan, Anthony reviewed the attached report you saved to my desktop, and there's no information in there really to review. I attached it.
+
+[2026-03-17 01:33 | Shaena Robertson] Heather, The script did the resequencing. The attached file does have data in it and these are the exceptions from running the resequencing. This is what is in that file: 1. In column A, it is showing you Unknown Account numbers - meaning the file that Anthony provided has these 3 account numbers in it but the database does not have those 3 account numbers. 2. In column B, it is giving you a list of accounts that do not have a service location attached for the resequencing to happen on. 3. In column C, it is showing you that 1 account in the file has a location attached but no group attached. So there is no group with a book/sequence on that service location. Please let us know if this doesn't make sense. We can get on a call with you. But all resequencing is done in that database and needs reviewed to make sure it is correct and then you all will have to address the exceptions in this report.
+
+[2026-03-17 05:15 | Heather Roybal] Ah HA!
+
+[2026-03-17 05:16 | Heather Roybal] Forgot to attach the spreadsheet.
+
+[2026-03-17 05:17 | Heather Roybal] Perfect, I just responded to this via email with a screen shot. Separate question, how does this change affect my billing process? For example, when closing reading books?
+
+[2026-03-17 05:26 | Heather Roybal] Anthony just finished reviewing, and about half-way down the report, the same thing is happening. Only half are sequenced, and the other have revert back to 101/222."

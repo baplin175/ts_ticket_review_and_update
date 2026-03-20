@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSV Pipeline Runner</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         max-width: 640px; margin: 40px auto; padding: 0 20px; color: #222; }
+  h1 { font-size: 1.4rem; margin-bottom: 24px; }
+  .section { margin-bottom: 24px; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  input[type=file] { margin-bottom: 12px; }
+  button { padding: 8px 20px; font-size: 0.95rem; cursor: pointer;
+           background: #0366d6; color: #fff; border: none; border-radius: 4px; }
+  button:disabled { background: #94bfea; cursor: default; }
+  .progress-wrap { display: none; }
+  .progress-bar-bg { height: 22px; background: #e1e4e8; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .progress-bar { height: 100%; background: #28a745; width: 0%; transition: width 0.3s; }
+  .status-text { font-size: 0.9rem; color: #555; }
+  .downloads { display: none; margin-top: 16px; }
+  .downloads a { display: inline-block; margin-right: 12px; color: #0366d6; }
+  .error { color: #cb2431; font-weight: 600; }
+  .info { font-size: 0.85rem; color: #666; margin-top: 4px; }
+  .job-item { padding: 8px 0; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+  .job-item a { color: #0366d6; margin-left: 8px; }
+  .job-status { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 0.8rem; font-weight: 600; }
+  .job-status.running { background: #fff3cd; color: #856404; }
+  .job-status.complete { background: #d4edda; color: #155724; }
+  .job-status.failed { background: #f8d7da; color: #721c24; }
+  .job-status.queued { background: #e2e3e5; color: #383d41; }
+</style>
+</head>
+<body>
+
+<h1>CSV Pipeline Runner</h1>
+
+<nav style="margin-bottom: 16px;">
+  <a href="/files" style="color: #0366d6; font-size: 0.9rem;">📁 Browse Blob Storage</a>
+</nav>
+
+<div class="section">
+  <label for="csvFile">Upload ticket CSV</label>
+  <p class="info">Required columns: ticket_id, ticket_name, full_thread_text</p>
+  <input type="file" id="csvFile" accept=".csv" onchange="onFileSelected()">
+  <p id="fileInfo" class="info" style="margin-top:6px; font-weight:600; color:#155724;"></p>
+</div>
+
+<div class="section">
+  <label for="modelId">LLM Model ID (responseLLM)</label>
+  <input type="number" id="modelId" value="87" style="width:80px; padding:4px 8px; font-size:0.95rem;">
+</div>
+
+<div class="section">
+  <button id="runBtn" onclick="startPipeline()">Run Pipeline</button>
+</div>
+
+<div class="progress-wrap" id="progressWrap">
+  <div class="progress-bar-bg"><div class="progress-bar" id="bar"></div></div>
+  <p class="status-text" id="statusText">Waiting…</p>
+</div>
+
+<div class="downloads" id="downloads">
+  <label>Download Results</label>
+  <a id="dl1" href="#">pass1_results.csv</a>
+  <a id="dl3" href="#">pass3_results.csv</a>
+  <a id="dl4" href="#">pass4_results.csv</a>
+</div>
+
+<p class="error" id="errorText"></p>
+
+<div class="section" id="jobListSection" style="display:none; margin-top:24px; padding-top:16px; border-top:1px solid #e1e4e8;">
+  <label>Recent Jobs</label>
+  <div id="jobList"></div>
+</div>
+
+<script>
+let jobId = null;
+let pollTimer = null;
+
+function onFileSelected() {
+  const fileInput = document.getElementById('csvFile');
+  const infoEl = document.getElementById('fileInfo');
+  infoEl.textContent = '';
+  if (!fileInput.files.length) return;
+  const file = fileInput.files[0];
+  const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const text = e.target.result;
+    // Count CSV rows correctly: count occurrences of the ticket_id pattern
+    // (first column after header). Simple approach: count lines that start
+    // with a digit (ticket IDs) outside of quoted fields.
+    // More reliable: count rows by splitting on newlines outside quotes.
+    let ticketCount = 0;
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === '"') inQuotes = !inQuotes;
+      else if (text[i] === '\n' && !inQuotes) ticketCount++;
+    }
+    ticketCount = Math.max(0, ticketCount - 1); // minus header
+    infoEl.textContent = 'File loaded: ' + ticketCount.toLocaleString() + ' tickets (' + sizeMB + ' MB)';
+  };
+  reader.readAsText(file);
+}
+
+function startPipeline() {
+  const fileInput = document.getElementById('csvFile');
+  const btn = document.getElementById('runBtn');
+  const errorEl = document.getElementById('errorText');
+  errorEl.textContent = '';
+
+  if (!fileInput.files.length) {
+    errorEl.textContent = 'Please select a CSV file.';
+    return;
+  }
+
+  btn.disabled = true;
+  document.getElementById('progressWrap').style.display = 'block';
+  document.getElementById('downloads').style.display = 'none';
+  document.getElementById('statusText').textContent = 'Uploading…';
+  document.getElementById('bar').style.width = '0%';
+
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  const modelId = document.getElementById('modelId').value;
+  if (modelId) fd.append('inference_server', modelId);
+
+  fetch('/upload', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { throw new Error(data.error); }
+      jobId = data.job_id;
+      pollTimer = setInterval(pollStatus, 2000);
+    })
+    .catch(err => {
+      errorEl.textContent = err.message;
+      btn.disabled = false;
+    });
+}
+
+function pollStatus() {
+  if (!jobId) return;
+  fetch('/status/' + jobId)
+    .then(r => r.json())
+    .then(st => {
+      const bar = document.getElementById('bar');
+      const txt = document.getElementById('statusText');
+      const pct = st.total > 0 ? Math.round((st.processed / st.total) * 100) : 0;
+      bar.style.width = pct + '%';
+
+      const passLabel = st.current_pass ? 'Pass ' + st.current_pass : '';
+      txt.textContent = st.status === 'running'
+        ? passLabel + '  —  ' + st.processed + ' / ' + st.total + '  (' + pct + '%)'
+        : st.status;
+
+      if (st.status === 'complete') {
+        clearInterval(pollTimer);
+        bar.style.width = '100%';
+        txt.textContent = 'Complete!';
+        showDownloads();
+        document.getElementById('runBtn').disabled = false;
+      } else if (st.status === 'failed') {
+        clearInterval(pollTimer);
+        document.getElementById('errorText').textContent = 'Pipeline failed: ' + (st.error || 'unknown error');
+        document.getElementById('runBtn').disabled = false;
+      }
+    });
+}
+
+function showDownloads() {
+  const dl = document.getElementById('downloads');
+  dl.style.display = 'block';
+  document.getElementById('dl1').href = '/download/' + jobId + '/pass1_results.csv';
+  document.getElementById('dl3').href = '/download/' + jobId + '/pass3_results.csv';
+  document.getElementById('dl4').href = '/download/' + jobId + '/pass4_results.csv';
+}
+
+// On page load, check for active/recent jobs
+function checkActiveJobs() {
+  fetch('/jobs')
+    .then(r => r.json())
+    .then(jobs => {
+      if (!jobs.length) return;
+
+      // If there's a running job, auto-resume tracking it
+      const running = jobs.find(j => j.status === 'running' || j.status === 'queued');
+      if (running && !jobId) {
+        resumeJob(running.id);
+      }
+
+      // If no running job but there's a completed one, restore download links
+      if (!running && !jobId) {
+        const completed = jobs.find(j => j.status === 'complete');
+        if (completed) {
+          jobId = completed.id;
+          showDownloads();
+        }
+      }
+
+      // Show all jobs in the list
+      const section = document.getElementById('jobListSection');
+      const list = document.getElementById('jobList');
+      section.style.display = 'block';
+      list.innerHTML = jobs.map(j => {
+        const pct = j.total > 0 ? Math.round((j.processed / j.total) * 100) : 0;
+        const statusClass = j.status;
+        let info = '<span class="job-status ' + statusClass + '">' + j.status + '</span>';
+        if (j.status === 'running') {
+          info += ' Pass ' + j.current_pass + ' — ' + pct + '%';
+        }
+        let links = '';
+        if (j.status === 'complete') {
+          links = '<a href="/download/' + j.id + '/pass1_results.csv">P1</a>'
+                + '<a href="/download/' + j.id + '/pass3_results.csv">P3</a>'
+                + '<a href="/download/' + j.id + '/pass4_results.csv">P4</a>'
+                + '<a href="/files?prefix=' + j.id + '/">Files</a>';
+        }
+        if (j.status === 'failed' || j.status === 'complete') {
+          links += '<a href="/api/files/download/' + j.id + '/run.log">Log</a>';
+        }
+        const time = new Date(j.created_at).toLocaleString();
+        return '<div class="job-item">' + j.id + ' — ' + time + ' ' + info + links + '</div>';
+      }).join('');
+    });
+}
+
+function resumeJob(id) {
+  jobId = id;
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('progressWrap').style.display = 'block';
+  document.getElementById('statusText').textContent = 'Reconnecting…';
+  pollTimer = setInterval(pollStatus, 2000);
+  pollStatus();
+}
+
+checkActiveJobs();
+</script>
+</body>
+</html>

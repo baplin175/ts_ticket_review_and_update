@@ -11,14 +11,14 @@ See [DOMAIN_MODEL.md](DOMAIN_MODEL.md) for the complete operational domain model
 ## Architecture
 
 ```
-config.py              — Centralised settings (API creds, limits, target ticket, output dir, stage toggles, FORCE_ENRICHMENT, DATABASE_URL, SAFETY_BUFFER_MINUTES, INITIAL_BACKFILL_DAYS)
+config.py              — Centralised settings (API creds, limits, target ticket, output dir, stage toggles, FORCE_ENRICHMENT, DATABASE_URL, SAFETY_BUFFER_MINUTES, INITIAL_BACKFILL_DAYS, MATCHA_RESPONSE_LLM optional model override)
 ts_client.py           — TeamSupport REST API client (fetch tickets, activities, inHANCE users, all-users name→ID mapping, update_ticket with auto LastInhComment/LastCustComment, fetch_ticket_by_id)
 activity_cleaner.py    — Text-cleaning pipeline (HTML→text, boilerplate/signature removal)
-matcha_client.py       — Matcha LLM API client (send prompts, extract responses)
-db.py                  — Postgres data-access layer (connection pool, migration runner, upsert helpers, enrichment persistence, get_sync_state watermark reader)
-run_ingest.py          — DB-backed incremental ingestion CLI (watermark-based sync with automatic created-since merge for opened+closed tickets, single-ticket resync, replay mode, --sentiment flag for post-sync enrichment, status)
+matcha_client.py       — Matcha LLM API client (send prompts, extract responses, optional responseLLM override via config)
+db.py                  — Postgres data-access layer (connection pool, migration runner, upsert helpers, enrichment persistence, get_sync_state watermark reader, watermark-safe upsert_sync_state with optional watermark_at override)
+run_ingest.py          — DB-backed incremental ingestion CLI (watermark-based sync with automatic created-since merge for opened+closed tickets, single-ticket resync, replay mode, --sentiment flag for post-sync sentiment, --enrich flag for post-sync enrichment (sentiment + priority + complexity + health rollups), status; MAX_TICKETS-safe watermark: sorts tickets by DateModified ascending and advances only to min DateModified of processed tickets when set is truncated, ensuring incremental progress without skipping)
 action_classifier.py   — Deterministic rule-based action classification (no LLM; action_type='Description' → customer_problem_statement)
-run_rollups.py         — Rebuild action classification, thread rollups, metrics, and daily open counts from DB state; run_full_rollups() auto-triggers after any new migration
+run_rollups.py         — Rebuild action classification, thread rollups, metrics, and daily open counts from DB state; run_full_rollups() auto-triggers after any new migration; run_analytics_for_tickets() snapshots ALL tickets (not just touched ones) so aging/backlog views always have complete data for today
 run_all.py             — Orchestrator: runs all stages in sequence, merges fields, single API call per ticket (--force, --no-writeback)
 run_enrich_db.py       — DB-only enrichment: score tickets from Postgres (priority + complexity + sentiment by default), no TS API calls
 run_csv_import.py      — Bulk-import Activities.csv into DB (synthetic action IDs, streaming, idempotent, derives closed_at from Days Closed)
@@ -43,14 +43,24 @@ migrations/            — Numbered SQL migration files applied by db.py
 web/app.py             — Dash + Mantine web dashboard entry point (read-only, live Postgres queries)
 web/dashboard.yaml     — YAML-driven dashboard configuration (pages, nav, queries, grids, charts, stat cards)
 web/renderer.py        — YAML config renderer: parses dashboard.yaml, builds Dash layouts for YAML-driven pages, imports custom page modules
-web/data.py            — Data access layer for the web dashboard (SELECT-only for analytics, plus dashboard-local CRUD for saved reports; no TS writes)
+web/data.py            — Data access layer for the web dashboard (SELECT-only for analytics, plus dashboard-local CRUD for saved reports; no TS writes); includes root cause analytics queries (mechanism class/intervention type distributions, component/operation aggregations, Sankey flow data, pipeline funnel, per-product breakdown, top engineering fixes from vw_intervention_roi)
 web/pages/overview.py  — Overview page: KPI stat cards, backlog trend chart, aging distribution, open-by-product, chart drill-down (custom)
-web/pages/tickets.py   — Ticket explorer: AG Grid with filters, sorting, row-click navigation to detail, saved filter reports (custom)
-web/pages/ticket_detail.py — Ticket detail: metadata header, thread timeline, score cards, wait profile chart, issue summary (custom)
+web/pages/tickets.py   — Ticket explorer: AG Grid with filters, sorting, row-click navigation to detail, saved filter reports, background sync via subprocess with live log panel and auto-dismiss; tabbed view with Open (default, excludes Closed) and All Tickets tabs; rowSelection uses string format "single" for compatibility (custom)
+web/pages/ticket_detail.py — Ticket detail: metadata header, thread timeline (newest-first), score cards, wait profile chart, issue summary, refresh button (re-syncs single ticket from TeamSupport via run_ingest.py --ticket-id, then re-renders page) (custom)
 web/pages/health.py    — Health dashboards: Customer and Product health AG Grid tables (kept for reference; now YAML-driven)
-web/pages/root_cause.py — Root Cause analysis: AG Grid of pass-processed tickets with CSV export, detail view with Pass 1 (phenomenon + grammar + confidence), Pass 3 (mechanism + evidence), Pass 4 (intervention mapping + proposed_class/proposed_type), cleaned thread text (custom)
-web/pages/config_view.py — Pipeline config viewer (read-only display of all settings + sync status, custom)
+web/pages/root_cause.py — Root Cause Analytics dashboard: tabbed layout (Dashboard + Detail + Glossary). Dashboard tab: KPI stat cards (tickets analyzed, mechanisms found, interventions mapped, pipeline completion %, top mechanism), pipeline completion funnel chart, mechanism class distribution (horizontal bar), intervention type breakdown (donut), component treemap, operation verb frequency bar chart, Sankey flow diagram (Component → Mechanism Class → Intervention Type), root cause by product (stacked bar), top engineering fixes AG Grid (ROI-ranked from vw_intervention_roi). Detail tab: original AG Grid of pass-processed tickets with CSV export, row-click expands Pass 1/3/4 cards + cleaned thread text. Glossary tab: reference guide for pipeline passes, canonical failure grammar fields, all 14 mechanism classes, all 8 intervention types, and dashboard metrics (custom)
+web/pages/config_view.py — Pipeline config editor (editable settings with Save button writes to config.py + live reload; MATCHA_RESPONSE_LLM model override, toggles, text fields, sync status; custom)
 web_requirements.txt   — Python dependencies for the web dashboard (dash, dash-mantine-components, dash-ag-grid, PyYAML, etc.)
+pipeline/__init__.py   — Standalone CSV pipeline package (no DB dependency, self-contained)
+pipeline/csv_runner.py — CSV-only pipeline orchestrator: Pass 1→3→4 using Matcha LLM + existing parsers, per-row error isolation, background job manager with disk + blob-persisted state tracking, progress callbacks; uploads each pass CSV to Azure Blob Storage on completion so results survive container restarts; per-job run.log captured via JobLogger (timestamps, per-row failures, tracebacks) and uploaded to blob on completion
+pipeline/blob_store.py — Azure Blob Storage helper: uploads/downloads output CSVs and job state JSON to the `csv-pipeline-results` container; graceful fallback when no AZURE_STORAGE_CONNECTION_STRING is set (local-dev mode); list_blobs() for browsing all blobs by prefix, upload_text() for plain-text log uploads, download_blob_bytes() for raw blob access
+pipeline/app.py        — Standalone Flask web app (port 5001): upload CSV, run pipeline as background job, poll status via JSON API, download result CSVs (pass1/pass3/pass4_results.csv); download route falls back to blob storage when local file is missing after container restart; /files browser page for navigating Azure Blob Storage with inline preview of .log and .json files; /api/files and /api/files/download/<path> endpoints
+pipeline/templates/index.html — Single-page HTML/JS UI for CSV upload, progress bar with pass indicator, download links, link to blob storage browser; job list includes Log links for completed/failed jobs
+pipeline/templates/files.html — Blob Storage browser UI: folder navigation, breadcrumbs, file listing with size/date, inline preview for .log and .json files, direct download for CSVs
+pipeline/azure.env     — Deployment resource names (RESOURCE_GROUP, ACR_NAME, APP_NAME, IMAGE) sourced by deploy.sh
+pipeline/Dockerfile    — Container image: python:3.13-slim + gunicorn + flask + requests + azure-storage-blob; copies only pipeline code + parsers + prompts (no DB files); serves on port 80 with 600s timeout for long LLM runs
+pipeline/deploy.sh     — Azure Container Apps deployment script: sources pipeline/azure.env for resource names; full deploy (no args) or --build-only for quick rebuild + update; Matcha credentials + AZURE_STORAGE_CONNECTION_STRING passed via az containerapp update --set-env-vars
+run_export_pipeline_input.py — Export up to 1000 PM/PowerManager/Impresa tickets without RCA (no successful pass1_phenomenon) and less than 18 months old as a CSV-pipeline-compatible input file (ticket_id, ticket_name, full_thread_text)
 ```
 
 ## Data Dictionary

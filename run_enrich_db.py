@@ -13,6 +13,7 @@ Usage:
     python run_enrich_db.py --limit 100            # process at most 100 tickets
     python run_enrich_db.py --batch-size 10        # priority batch size (default 20)
     python run_enrich_db.py --status Open          # target Open tickets instead of Closed
+    python run_enrich_db.py --no-closed              # all tickets except Closed / Closed with Survey
 """
 
 import argparse
@@ -41,6 +42,8 @@ def main() -> None:
                         help="Exclude sentiment analysis (on by default).")
     parser.add_argument("--status", default="Closed",
                         help="Ticket status to target (default: Closed).")
+    parser.add_argument("--no-closed", action="store_true",
+                        help="Exclude closed tickets (all other statuses included).")
     args = parser.parse_args()
 
     from config import FORCE_ENRICHMENT
@@ -61,17 +64,18 @@ def main() -> None:
         _log(f"[enrich] DB connection failed: {e}")
         sys.exit(1)
 
-    # ── Fetch closed ticket numbers with rollups ──
-    _log(f"[enrich] Querying {args.status} tickets with rollups...")
-    all_tickets = db.fetch_ticket_numbers_by_status(args.status)
+    # ── Fetch ticket numbers with rollups ──
+    status_label = "non-Closed" if args.no_closed else args.status
+    _log(f"[enrich] Querying {status_label} tickets with rollups...")
+    all_tickets = db.fetch_ticket_numbers_by_status(args.status, exclude_closed=args.no_closed)
     if not all_tickets:
-        _log(f"[enrich] No {args.status} tickets with rollups found.")
+        _log(f"[enrich] No {status_label} tickets with rollups found.")
         return
 
     if args.limit > 0:
         all_tickets = all_tickets[:args.limit]
 
-    _log(f"[enrich] Found {len(all_tickets)} {args.status} ticket(s) to process.")
+    _log(f"[enrich] Found {len(all_tickets)} {status_label} ticket(s) to process.")
     _log("=" * 60)
 
     start_time = time.time()

@@ -6,7 +6,7 @@ import time
 
 import requests
 
-from config import LOG_API_CALLS, MATCHA_URL, MATCHA_API_KEY, MATCHA_MISSION_ID
+from config import LOG_API_CALLS, MATCHA_URL, MATCHA_API_KEY, MATCHA_MISSION_ID, MATCHA_RESPONSE_LLM
 from ts_client import _log_api_call
 
 MAX_RETRIES = 3
@@ -36,6 +36,7 @@ def call_matcha(
     timeout: int = 300,
     max_retries: int = MAX_RETRIES,
     retry_backoff: int = RETRY_BACKOFF,
+    inference_server: int | None = MATCHA_RESPONSE_LLM,
 ) -> str:
     headers = {
         "Content-Type": "application/json",
@@ -45,6 +46,8 @@ def call_matcha(
         "mission_id": MATCHA_MISSION_ID,
         "input": prompt,
     }
+    if inference_server:
+        payload["options"] = {"responseLLM": inference_server}
 
     last_error = None
     for attempt in range(1, max_retries + 1):

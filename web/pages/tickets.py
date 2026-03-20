@@ -39,7 +39,6 @@ def _run_sync_in_background():
 
     try:
         env = os.environ.copy()
-        env["MAX_TICKETS"] = "5"  # TODO: remove limit after testing
         proc = subprocess.Popen(
             [sys.executable, _INGEST_SCRIPT, "sync", "--verbose"],
             stdout=subprocess.PIPE,
@@ -156,6 +155,17 @@ DEFAULT_COL_DEF = {
 }
 
 
+# ── Open-ticket filter model for AG Grid ─────────────────────────────
+
+_OPEN_FILTER_MODEL = {
+    "status": {
+        "filterType": "text",
+        "type": "notEqual",
+        "filter": "Closed",
+    }
+}
+
+
 # ── Layout ───────────────────────────────────────────────────────────
 
 def _build_report_chips(reports):
@@ -193,6 +203,7 @@ def _build_report_chips(reports):
 def tickets_layout():
     rows = data.get_ticket_list()
     reports = data.get_saved_reports()
+    open_count = sum(1 for r in rows if (r.get("status") or "").lower() != "closed")
 
     return dmc.Stack(
         [
@@ -201,7 +212,7 @@ def tickets_layout():
                     dmc.Title("Tickets", order=2),
                     dmc.Group(
                         [
-                            dmc.Badge(f"{len(rows)} tickets", id="ticket-count-badge", size="lg", variant="light"),
+                            dmc.Badge(f"{open_count} open tickets", id="ticket-count-badge", size="lg", variant="light"),
                             dmc.Button(
                                 "Refresh from TeamSupport",
                                 id="refresh-tickets-btn",
@@ -281,7 +292,17 @@ def tickets_layout():
             # Sync progress panel (above the grid so it's visible)
             html.Div(id="sync-progress-panel"),
             dcc.Interval(id="sync-poll-interval", interval=800, disabled=True),
-            dcc.Interval(id="sync-dismiss-interval", interval=5000, max_intervals=1, disabled=True),
+            dcc.Interval(id="sync-dismiss-interval", interval=5000, disabled=True),
+            dmc.Tabs(
+                [
+                    dmc.TabsList([
+                        dmc.TabsTab("Open", value="open"),
+                        dmc.TabsTab("All Tickets", value="all"),
+                    ]),
+                ],
+                id="ticket-view-tabs",
+                value="open",
+            ),
             grid_with_export(
                 dag.AgGrid(
                     id="ticket-grid",
@@ -290,7 +311,7 @@ def tickets_layout():
                     defaultColDef=DEFAULT_COL_DEF,
                     getRowId="String(params.data.ticket_id)",
                     dashGridOptions={
-                        "rowSelection": {"mode": "singleRow", "enableClickSelection": True},
+                        "rowSelection": "single",
                         "pagination": True,
                         "paginationPageSize": 50,
                         "animateRows": True,
@@ -312,7 +333,6 @@ def tickets_layout():
     Output("sync-progress-panel", "children"),
     Output("sync-poll-interval", "disabled"),
     Output("sync-dismiss-interval", "disabled"),
-    Output("sync-dismiss-interval", "n_intervals", allow_duplicate=True),
     Output("refresh-tickets-btn", "disabled"),
     Output("ticket-grid", "rowData"),
     Output("ticket-count-badge", "children"),
@@ -328,7 +348,7 @@ def handle_sync(_n_clicks, _n_intervals):
     if trigger == "refresh-tickets-btn":
         with _sync_lock:
             if _sync_state["running"]:
-                return no_update, no_update, no_update, no_update, no_update, no_update, no_update
+                return no_update, no_update, no_update, no_update, no_update, no_update
 
         thread = threading.Thread(target=_run_sync_in_background, daemon=True)
         thread.start()
@@ -354,7 +374,7 @@ def handle_sync(_n_clicks, _n_intervals):
             p="sm",
             withBorder=True,
         )
-        return initial_panel, False, True, 0, True, no_update, no_update
+        return initial_panel, False, True, True, no_update, no_update
 
     # ── Interval tick: poll for progress ─────────────────────────────
     with _sync_lock:
@@ -386,7 +406,8 @@ def handle_sync(_n_clicks, _n_intervals):
             p="sm",
             withBorder=True,
         )
-        return panel, False, True, no_update, True, no_update, no_update
+        # Sync still running — don't touch grid data
+        return panel, False, True, True, no_update, no_update
     # Treat as success if exit code is 0 OR the log shows completion markers
     # (Python 3.13 can produce a non-zero exit on stdout pipe flush)
     log_has_done = any("] Done" in ln for ln in lines)
@@ -419,7 +440,7 @@ def handle_sync(_n_clicks, _n_intervals):
 
     rows = data.get_ticket_list()
     # Stop polling, enable dismiss timer, re-enable button, refresh grid
-    return panel, True, False, no_update, False, rows, f"{len(rows)} tickets"
+    return panel, True, False, False, rows, f"{len(rows)} tickets"
 
 
 @callback(
@@ -434,4 +455,19 @@ def auto_dismiss_sync_panel(_n):
     """Auto-clear the sync panel after 5 seconds and refresh grid."""
     rows = data.get_ticket_list()
     return None, rows, f"{len(rows)} tickets", True
-    return None
+
+
+@callback(
+    Output("ticket-grid", "filterModel", allow_duplicate=True),
+    Output("ticket-count-badge", "children", allow_duplicate=True),
+    Input("ticket-view-tabs", "value"),
+    State("ticket-grid", "rowData"),
+    prevent_initial_call=True,
+)
+def switch_tab(tab_value, all_rows):
+    """Apply open filter on initial load and when switching tabs."""
+    if tab_value == "open":
+        count = sum(1 for r in (all_rows or []) if (r.get("status") or "").lower() != "closed")
+        return _OPEN_FILTER_MODEL, f"{count} open tickets"
+    count = len(all_rows or [])
+    return {}, f"{count} tickets"

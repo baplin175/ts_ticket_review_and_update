@@ -1016,7 +1016,8 @@ def run_analytics_for_tickets(ticket_ids: list[int]) -> None:
     rebuild_ticket_participants(ticket_ids)
     rebuild_ticket_handoffs(ticket_ids)
     rebuild_ticket_wait_states(ticket_ids)
-    snapshot_tickets_daily(ticket_ids=ticket_ids)
+    # Snapshot ALL tickets so aging / backlog views are complete for today.
+    snapshot_tickets_daily()
     rebuild_customer_ticket_health()
     rebuild_product_ticket_health()
     rebuild_daily_open_counts()  # today only; skips if already computed

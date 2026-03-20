@@ -24,7 +24,7 @@ from dash_iconify import DashIconify                               # noqa: E402
 
 import renderer                                                    # noqa: E402
 import data                                                        # noqa: E402
-from pages.ticket_detail import ticket_detail_layout               # noqa: E402
+from pages.ticket_detail import ticket_detail_layout, register_callbacks as td_callbacks  # noqa: E402
 from pages.root_cause import register_callbacks as rc_callbacks    # noqa: E402
 
 # Import custom page modules declared in dashboard.yaml
@@ -45,6 +45,7 @@ server = app.server  # for gunicorn: gunicorn web.app:server
 
 # Register page-specific callbacks
 rc_callbacks(app)
+td_callbacks(app)
 
 # ── Navigation items (from dashboard.yaml) ───────────────────────────
 
@@ -348,7 +349,7 @@ app.clientside_callback(
         }
         return filterData;
     }""",
-    Output("ticket-grid", "filterModel"),
+    Output("ticket-grid", "filterModel", allow_duplicate=True),
     Input("report-filter-store", "data"),
     prevent_initial_call=True,
 )

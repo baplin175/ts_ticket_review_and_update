@@ -176,7 +176,7 @@ def get_ticket_actions(ticket_id):
                action_class, is_empty
         FROM ticket_actions
         WHERE ticket_id = %s
-        ORDER BY created_at
+        ORDER BY created_at DESC
     """, (ticket_id,))
 
 
@@ -352,7 +352,7 @@ def get_root_cause_tickets():
                      lp.updated_at DESC
             LIMIT 1
         ) p4 ON TRUE
-        WHERE p1.status IS NOT NULL OR p3.status IS NOT NULL OR p4.status IS NOT NULL
+        WHERE p1.status = 'success'
         ORDER BY COALESCE(p4.completed_at, p3.completed_at, p1.completed_at) DESC NULLS LAST
     """)
 
@@ -378,6 +378,188 @@ def get_root_cause_detail(ticket_id):
     """, (ticket_id,))
 
     return {"passes": passes, "thread": thread}
+
+
+# ── Root Cause analytics (dashboard visualizations) ─────────────────
+
+def get_root_cause_stats():
+    """KPI counts for the root cause dashboard."""
+    return query_one("""
+        SELECT
+            COUNT(DISTINCT CASE WHEN p1.status = 'success' THEN p1.ticket_id END) AS pass1_success,
+            COUNT(DISTINCT CASE WHEN p3.status = 'success' THEN p3.ticket_id END) AS pass3_success,
+            COUNT(DISTINCT CASE WHEN p4.status = 'success' THEN p4.ticket_id END) AS pass4_success,
+            COUNT(DISTINCT p4.mechanism_class)
+                FILTER (WHERE p4.status = 'success' AND p4.mechanism_class IS NOT NULL
+                        AND p4.mechanism_class != 'other')                        AS distinct_mechanism_classes,
+            COUNT(DISTINCT p1.component)
+                FILTER (WHERE p1.status = 'success' AND p1.component IS NOT NULL) AS distinct_components
+        FROM tickets t
+        LEFT JOIN LATERAL (
+            SELECT ticket_id, status, component
+            FROM ticket_llm_pass_results lp
+            WHERE lp.ticket_id = t.ticket_id AND lp.pass_name = 'pass1_phenomenon'
+            ORDER BY CASE WHEN lp.status='success' THEN 0 ELSE 1 END, lp.updated_at DESC
+            LIMIT 1
+        ) p1 ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT ticket_id, status
+            FROM ticket_llm_pass_results lp
+            WHERE lp.ticket_id = t.ticket_id AND lp.pass_name = 'pass3_mechanism'
+            ORDER BY CASE WHEN lp.status='success' THEN 0 ELSE 1 END, lp.updated_at DESC
+            LIMIT 1
+        ) p3 ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT ticket_id, status, mechanism_class
+            FROM ticket_llm_pass_results lp
+            WHERE lp.ticket_id = t.ticket_id AND lp.pass_name = 'pass4_intervention'
+            ORDER BY CASE WHEN lp.status='success' THEN 0 ELSE 1 END, lp.updated_at DESC
+            LIMIT 1
+        ) p4 ON TRUE
+        WHERE p1.status IS NOT NULL OR p3.status IS NOT NULL OR p4.status IS NOT NULL
+    """) or {
+        "pass1_success": 0, "pass3_success": 0, "pass4_success": 0,
+        "distinct_mechanism_classes": 0, "distinct_components": 0,
+    }
+
+
+def get_mechanism_class_distribution():
+    """Mechanism class counts from successful Pass 4 results."""
+    return query("""
+        SELECT mechanism_class, ticket_count
+        FROM vw_intervention_roi
+        ORDER BY ticket_count DESC
+    """)
+
+
+def get_intervention_type_distribution():
+    """Intervention type counts from successful Pass 4 results."""
+    return query("""
+        SELECT intervention_type, SUM(ticket_count)::int AS ticket_count
+        FROM vw_intervention_roi
+        GROUP BY intervention_type
+        ORDER BY ticket_count DESC
+    """)
+
+
+def get_component_distribution(limit=20):
+    """Top components by ticket count from successful Pass 1 results."""
+    return query("""
+        SELECT component, COUNT(*) AS ticket_count
+        FROM ticket_llm_pass_results
+        WHERE pass_name = 'pass1_phenomenon'
+          AND status = 'success'
+          AND component IS NOT NULL
+          AND component != ''
+        GROUP BY component
+        ORDER BY ticket_count DESC
+        LIMIT %s
+    """, (limit,))
+
+
+def get_operation_distribution():
+    """Operation verb counts from successful Pass 1 results."""
+    return query("""
+        SELECT operation, COUNT(*) AS ticket_count
+        FROM ticket_llm_pass_results
+        WHERE pass_name = 'pass1_phenomenon'
+          AND status = 'success'
+          AND operation IS NOT NULL
+          AND operation != ''
+        GROUP BY operation
+        ORDER BY ticket_count DESC
+    """)
+
+
+def get_top_engineering_fixes(limit=25):
+    """Top engineering fixes ranked by ticket count (from vw_intervention_roi)."""
+    return query("""
+        SELECT mechanism_class, intervention_type,
+               ticket_count, representative_action
+        FROM vw_intervention_roi
+        ORDER BY ticket_count DESC
+        LIMIT %s
+    """, (limit,))
+
+
+def get_root_cause_by_product(limit=10):
+    """Mechanism class counts broken down by product (top products only)."""
+    return query("""
+        WITH ranked_products AS (
+            SELECT t.product_name, COUNT(*) AS total
+            FROM ticket_llm_pass_results lp
+            JOIN tickets t ON t.ticket_id = lp.ticket_id
+            WHERE lp.pass_name = 'pass4_intervention'
+              AND lp.status = 'success'
+              AND lp.mechanism_class IS NOT NULL
+            GROUP BY t.product_name
+            ORDER BY total DESC
+            LIMIT %s
+        )
+        SELECT
+            COALESCE(NULLIF(t.product_name, ''), 'Unknown') AS product_name,
+            lp.mechanism_class,
+            COUNT(*) AS ticket_count
+        FROM ticket_llm_pass_results lp
+        JOIN tickets t ON t.ticket_id = lp.ticket_id
+        JOIN ranked_products rp ON rp.product_name = t.product_name
+        WHERE lp.pass_name = 'pass4_intervention'
+          AND lp.status = 'success'
+          AND lp.mechanism_class IS NOT NULL
+        GROUP BY t.product_name, lp.mechanism_class
+        ORDER BY t.product_name, ticket_count DESC
+    """, (limit,))
+
+
+def get_root_cause_sankey(component_limit=15):
+    """Flow data for Sankey: component → mechanism_class → intervention_type."""
+    return query("""
+        WITH top_components AS (
+            SELECT component
+            FROM ticket_llm_pass_results
+            WHERE pass_name = 'pass1_phenomenon'
+              AND status = 'success'
+              AND component IS NOT NULL AND component != ''
+            GROUP BY component
+            ORDER BY COUNT(*) DESC
+            LIMIT %s
+        )
+        SELECT
+            COALESCE(NULLIF(p1.component, ''), 'Unknown') AS component,
+            COALESCE(p4.mechanism_class, 'unclassified')  AS mechanism_class,
+            COALESCE(p4.intervention_type, 'unmapped')    AS intervention_type,
+            COUNT(*) AS ticket_count
+        FROM ticket_llm_pass_results p1
+        LEFT JOIN LATERAL (
+            SELECT mechanism_class, intervention_type
+            FROM ticket_llm_pass_results lp
+            WHERE lp.ticket_id = p1.ticket_id
+              AND lp.pass_name = 'pass4_intervention'
+              AND lp.status = 'success'
+            ORDER BY lp.updated_at DESC
+            LIMIT 1
+        ) p4 ON TRUE
+        WHERE p1.pass_name = 'pass1_phenomenon'
+          AND p1.status = 'success'
+          AND p1.component IS NOT NULL AND p1.component != ''
+          AND p1.component IN (SELECT component FROM top_components)
+        GROUP BY p1.component, p4.mechanism_class, p4.intervention_type
+        HAVING COUNT(*) >= 1
+        ORDER BY ticket_count DESC
+    """, (component_limit,))
+
+
+def get_pipeline_completion_funnel():
+    """Count tickets at each pipeline pass stage for a funnel chart."""
+    return query_one("""
+        SELECT
+            (SELECT COUNT(DISTINCT ticket_id) FROM ticket_llm_pass_results
+             WHERE pass_name = 'pass1_phenomenon' AND status = 'success') AS pass1,
+            (SELECT COUNT(DISTINCT ticket_id) FROM ticket_llm_pass_results
+             WHERE pass_name = 'pass3_mechanism' AND status = 'success')  AS pass3,
+            (SELECT COUNT(DISTINCT ticket_id) FROM ticket_llm_pass_results
+             WHERE pass_name = 'pass4_intervention' AND status = 'success') AS pass4
+    """) or {"pass1": 0, "pass3": 0, "pass4": 0}
 
 
 # ── Saved reports (dashboard-local CRUD — never touches TeamSupport) ─

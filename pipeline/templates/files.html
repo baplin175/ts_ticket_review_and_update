@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blob Storage Browser</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         max-width: 800px; margin: 40px auto; padding: 0 20px; color: #222; }
+  h1 { font-size: 1.4rem; margin-bottom: 8px; }
+  .breadcrumb { font-size: 0.9rem; margin-bottom: 16px; color: #555; }
+  .breadcrumb a { color: #0366d6; cursor: pointer; text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  nav { margin-bottom: 16px; }
+  nav a { color: #0366d6; font-size: 0.9rem; margin-right: 16px; text-decoration: none; }
+  nav a:hover { text-decoration: underline; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  th { text-align: left; padding: 8px 12px; border-bottom: 2px solid #e1e4e8; font-weight: 600; }
+  td { padding: 8px 12px; border-bottom: 1px solid #eee; }
+  .folder { cursor: pointer; color: #0366d6; font-weight: 600; }
+  .folder:hover { text-decoration: underline; }
+  .file-link { color: #0366d6; text-decoration: none; }
+  .file-link:hover { text-decoration: underline; }
+  .size { color: #666; white-space: nowrap; }
+  .date { color: #666; white-space: nowrap; }
+  .empty { color: #999; padding: 20px 12px; }
+  .log-preview { display: none; margin-top: 16px; }
+  .log-preview pre { background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 6px;
+                     overflow-x: auto; font-size: 0.82rem; line-height: 1.5; max-height: 500px; overflow-y: auto; }
+  .log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .log-header h2 { font-size: 1rem; }
+  .log-header button { padding: 4px 12px; font-size: 0.85rem; cursor: pointer;
+                       background: #e1e4e8; border: none; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<nav><a href="/">← Pipeline Runner</a></nav>
+
+<h1>Blob Storage Browser</h1>
+<div class="breadcrumb" id="breadcrumb"></div>
+
+<table>
+  <thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead>
+  <tbody id="listing"></tbody>
+</table>
+
+<div class="log-preview" id="logPreview">
+  <div class="log-header">
+    <h2 id="logTitle">run.log</h2>
+    <button onclick="closePreview()">Close</button>
+  </div>
+  <pre id="logContent"></pre>
+</div>
+
+<script>
+let currentPrefix = '';
+
+function formatSize(bytes) {
+  if (bytes == null) return '—';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString();
+}
+
+function navigate(prefix) {
+  currentPrefix = prefix;
+  updateBreadcrumb();
+  loadFiles(prefix);
+  closePreview();
+}
+
+function updateBreadcrumb() {
+  const el = document.getElementById('breadcrumb');
+  if (!currentPrefix) {
+    el.innerHTML = '<strong>/</strong> (all jobs)';
+    return;
+  }
+  const parts = currentPrefix.replace(/\/$/, '').split('/');
+  let html = '<a onclick="navigate(\'\')">root</a>';
+  let path = '';
+  parts.forEach((p, i) => {
+    path += p + '/';
+    if (i === parts.length - 1) {
+      html += ' / <strong>' + p + '</strong>';
+    } else {
+      html += ' / <a onclick="navigate(\'' + path + '\')">' + p + '</a>';
+    }
+  });
+  el.innerHTML = html;
+}
+
+function loadFiles(prefix) {
+  const listing = document.getElementById('listing');
+  listing.innerHTML = '<tr><td colspan="3" class="empty">Loading…</td></tr>';
+
+  fetch('/api/files?prefix=' + encodeURIComponent(prefix))
+    .then(r => r.json())
+    .then(blobs => {
+      if (!blobs.length) {
+        listing.innerHTML = '<tr><td colspan="3" class="empty">No files found.</td></tr>';
+        return;
+      }
+
+      // Group into folders and files at the current level
+      const folders = new Set();
+      const files = [];
+      const prefixLen = prefix.length;
+
+      blobs.forEach(b => {
+        const rest = b.name.slice(prefixLen);
+        const slashIdx = rest.indexOf('/');
+        if (slashIdx >= 0) {
+          folders.add(rest.slice(0, slashIdx));
+        } else {
+          files.push(b);
+        }
+      });
+
+      let html = '';
+
+      // Parent folder link
+      if (prefix) {
+        const parent = prefix.replace(/[^/]+\/$/, '');
+        html += '<tr><td colspan="3"><span class="folder" onclick="navigate(\'' + parent + '\')">⬆ ..</span></td></tr>';
+      }
+
+      // Folders
+      Array.from(folders).sort().forEach(f => {
+        const fullPath = prefix + f + '/';
+        html += '<tr><td><span class="folder" onclick="navigate(\'' + fullPath + '\')">📁 ' + f + '</span></td>'
+              + '<td></td><td></td></tr>';
+      });
+
+      // Files
+      files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
+        const fname = f.name.slice(prefixLen);
+        const isPreviewable = fname.endsWith('.log') || fname.endsWith('.json');
+        const link = isPreviewable
+          ? '<a class="file-link" href="#" onclick="previewFile(\'' + f.name + '\', \'' + fname + '\'); return false;">📄 ' + fname + '</a>'
+          : '<a class="file-link" href="/api/files/download/' + encodeURIComponent(f.name) + '">📄 ' + fname + '</a>';
+        html += '<tr><td>' + link + '</td>'
+              + '<td class="size">' + formatSize(f.size) + '</td>'
+              + '<td class="date">' + formatDate(f.last_modified) + '</td></tr>';
+      });
+
+      listing.innerHTML = html;
+    })
+    .catch(() => {
+      listing.innerHTML = '<tr><td colspan="3" class="empty">Error loading files. Is AZURE_STORAGE_CONNECTION_STRING set?</td></tr>';
+    });
+}
+
+function previewFile(blobName, displayName) {
+  const preview = document.getElementById('logPreview');
+  const content = document.getElementById('logContent');
+  const title = document.getElementById('logTitle');
+
+  title.textContent = displayName;
+  content.textContent = 'Loading…';
+  preview.style.display = 'block';
+
+  fetch('/api/files/download/' + encodeURIComponent(blobName))
+    .then(r => r.text())
+    .then(text => { content.textContent = text; })
+    .catch(() => { content.textContent = 'Failed to load file.'; });
+}
+
+function closePreview() {
+  document.getElementById('logPreview').style.display = 'none';
+}
+
+// Initial load
+navigate('');
+</script>
+</body>
+</html>

@@ -15,10 +15,13 @@ TS_USER_ID = os.getenv("TS_USER_ID", "1189708")
 MATCHA_URL = os.getenv("MATCHA_URL", "https://matcha.harriscomputer.com/rest/api/v1/completions")
 MATCHA_API_KEY = os.getenv("MATCHA_API_KEY", "15c0db915567455e98b90f1ecc22e088")
 MATCHA_MISSION_ID = os.getenv("MATCHA_MISSION_ID", "27301")
+# Optional LLM override (Matcha model id). Set to a model id to override
+# the mission default, or None to use the mission's configured LLM.
+MATCHA_RESPONSE_LLM = 87
 
 # ── Pull limits ──────────────────────────────────────────────────────
 # Maximum number of tickets to pull (for testing). Set to 0 for unlimited.
-MAX_TICKETS = int(os.getenv("MAX_TICKETS", "45"))
+MAX_TICKETS = int(os.getenv("MAX_TICKETS", "0"))
 
 # ── Target specific ticket(s) (by TicketNumber) ────────────────────
 # When set, only these tickets are processed (overrides MAX_TICKETS).
@@ -27,7 +30,7 @@ _TARGET_RAW = os.getenv("TARGET_TICKET", "").strip()
 TARGET_TICKETS = [t.strip() for t in _TARGET_RAW.split(",") if t.strip()]
 
 # ── Output ───────────────────────────────────────────────────────────
-OUTPUT_DIR = os.getenv("OUTPUT_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "output"))
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/Users/baplin/ts_ticket_review_and_update/ts_ticket_review_and_update/output")
 
 # ── Stage toggles (1 = run, 0 = skip) ───────────────────────────────
 RUN_SENTIMENT = os.getenv("RUN_SENTIMENT", "1").strip() == "1"

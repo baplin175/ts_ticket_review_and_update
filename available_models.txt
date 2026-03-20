@@ -1,0 +1,496 @@
+[
+  {
+    "allowed_file_input_mime_types": [
+      "image/*"
+    ],
+    "id": 43,
+    "name": "Ultimate 8-in-1 LLM Router"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/pdf"
+    ],
+    "id": 42,
+    "name": "GPT 4.1"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*"
+    ],
+    "id": 29,
+    "name": "Harris Rapid LLM (Internal)"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*"
+    ],
+    "id": 1,
+    "name": "Harris Precise LLM (Internal)"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "text/x-csrc",
+      "text/x-c++src",
+      "text/csv",
+      "text/html",
+      "image/*",
+      "text/x-java-source",
+      "application/javascript",
+      "application/json",
+      "text/markdown",
+      "application/pdf",
+      "application/x-httpd-php",
+      "application/x-powershell",
+      "text/x-python",
+      "text/x-ruby",
+      "application/x-sh",
+      "text/x-sql",
+      "text/plain",
+      "application/xml",
+      "application/x-yaml",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ],
+    "id": 26,
+    "name": "Gemini 2.5 Flash"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "text/x-csrc",
+      "text/x-c++src",
+      "text/csv",
+      "text/html",
+      "image/*",
+      "text/x-java-source",
+      "application/javascript",
+      "application/json",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/pdf",
+      "application/x-httpd-php",
+      "application/x-powershell",
+      "text/x-python",
+      "text/x-ruby",
+      "application/x-sh",
+      "text/x-sql",
+      "text/plain",
+      "application/xml",
+      "application/x-yaml"
+    ],
+    "id": 35,
+    "name": "Gemini 2.5 Flash-Lite"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "text/plain"
+    ],
+    "id": 47,
+    "name": "Cohere Command A (Azure)"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*"
+    ],
+    "id": 39,
+    "name": "Llama3.2 Vision 90B (Azure)"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*",
+      "text/plain"
+    ],
+    "id": 50,
+    "name": "OpenAI o3-mini  - Reasoning Model"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*"
+    ],
+    "id": 38,
+    "name": "OpenAI o3 - Reasoning Model"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "text/plain"
+    ],
+    "id": 44,
+    "name": "DeepSeek R1 528 - Reasoning Model"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain"
+    ],
+    "id": 74,
+    "name": "GPT-5 Pro"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*"
+    ],
+    "id": 21,
+    "name": "[Legacy] GPT-4o Mini"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain"
+    ],
+    "id": 67,
+    "name": "GPT-5"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "text/x-csrc",
+      "text/x-c++src",
+      "text/csv",
+      "text/html",
+      "image/*",
+      "text/x-java-source",
+      "application/javascript",
+      "application/json",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/pdf",
+      "application/x-httpd-php",
+      "application/x-powershell",
+      "text/x-python",
+      "text/x-ruby",
+      "application/x-sh",
+      "text/x-sql",
+      "text/plain",
+      "application/xml",
+      "application/x-yaml"
+    ],
+    "id": 36,
+    "name": "Gemini 2.5 Pro - Reasoning Model"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain"
+    ],
+    "id": 68,
+    "name": "GPT-5 Mini"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*"
+    ],
+    "id": 73,
+    "name": "Gemini 2.5 Flash Image (Nano Banana)"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain"
+    ],
+    "id": 77,
+    "name": "GPT-5.1"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain"
+    ],
+    "id": 79,
+    "name": "GPT-5.1-Codex"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain"
+    ],
+    "id": 80,
+    "name": "GPT-5.1 Codex Mini"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "text/x-csrc",
+      "text/x-c++src",
+      "text/csv",
+      "text/html",
+      "image/*",
+      "text/x-java-source",
+      "application/javascript",
+      "application/json",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/pdf",
+      "application/x-httpd-php",
+      "application/x-powershell",
+      "text/x-python",
+      "text/x-ruby",
+      "application/x-sh",
+      "text/x-sql",
+      "text/plain",
+      "application/xml",
+      "application/x-yaml"
+    ],
+    "id": 71,
+    "name": "Claude Sonnet 4.5"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain"
+    ],
+    "id": 86,
+    "name": "GPT-5.1-Codex-Max"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "application/pdf",
+      "text/plain"
+    ],
+    "id": 89,
+    "name": "Grok 4 (Azure)"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "text/plain"
+    ],
+    "id": 90,
+    "name": "Kimi K2 Thinking"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/pdf",
+      "text/plain"
+    ],
+    "id": 87,
+    "name": "GPT-5.2"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "text/x-csrc",
+      "text/x-c++src",
+      "text/csv",
+      "text/html",
+      "image/*",
+      "text/x-java-source",
+      "application/javascript",
+      "application/json",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/pdf",
+      "application/x-httpd-php",
+      "application/x-powershell",
+      "text/x-python",
+      "text/x-ruby",
+      "application/x-sh",
+      "text/x-sql",
+      "text/plain",
+      "application/xml",
+      "application/x-yaml"
+    ],
+    "id": 76,
+    "name": "Gemini 3.1 Pro - Reasoning Model"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "text/x-csrc",
+      "text/x-c++src",
+      "text/csv",
+      "text/html",
+      "image/*",
+      "text/x-java-source",
+      "application/javascript",
+      "application/json",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/pdf",
+      "application/x-httpd-php",
+      "application/x-powershell",
+      "text/x-python",
+      "text/x-ruby",
+      "application/x-sh",
+      "text/x-sql",
+      "text/plain",
+      "application/xml",
+      "application/x-yaml"
+    ],
+    "id": 91,
+    "name": "Claude Opus 4.6 - Reasoning Model"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "image/*",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain"
+    ],
+    "id": 92,
+    "name": "GPT-5.2-Codex"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "text/x-csrc",
+      "text/x-c++src",
+      "text/csv",
+      "text/html",
+      "image/*",
+      "text/x-java-source",
+      "application/javascript",
+      "application/json",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/pdf",
+      "application/x-httpd-php",
+      "application/x-powershell",
+      "text/x-python",
+      "text/x-ruby",
+      "application/x-sh",
+      "text/x-sql",
+      "text/plain",
+      "application/xml",
+      "application/x-yaml"
+    ],
+    "id": 93,
+    "name": "Gemini 3 Flash"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "text/x-csrc",
+      "text/x-c++src",
+      "text/csv",
+      "text/html",
+      "image/*",
+      "text/x-java-source",
+      "application/javascript",
+      "application/json",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/pdf",
+      "application/x-httpd-php",
+      "application/x-powershell",
+      "text/x-python",
+      "text/x-ruby",
+      "application/x-sh",
+      "text/x-sql",
+      "text/plain",
+      "application/xml",
+      "application/x-yaml"
+    ],
+    "id": 94,
+    "name": "Claude Sonnet 4.6"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "text/x-csrc",
+      "text/x-c++src",
+      "text/csv",
+      "text/html",
+      "image/*",
+      "text/x-java-source",
+      "application/javascript",
+      "application/json",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/pdf",
+      "application/x-httpd-php",
+      "application/x-powershell",
+      "text/x-python",
+      "text/x-ruby",
+      "application/x-sh",
+      "text/x-sql",
+      "text/plain",
+      "application/xml",
+      "application/x-yaml"
+    ],
+    "id": 83,
+    "name": "Claude Opus 4.5 - Reasoning Model"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "text/x-csrc",
+      "text/x-c++src",
+      "text/csv",
+      "text/html",
+      "image/*",
+      "text/x-java-source",
+      "application/javascript",
+      "application/json",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/pdf",
+      "application/x-httpd-php",
+      "application/x-powershell",
+      "text/x-python",
+      "text/x-ruby",
+      "application/x-sh",
+      "text/x-sql",
+      "text/plain",
+      "application/xml",
+      "application/x-yaml"
+    ],
+    "id": 84,
+    "name": "Claude Haiku 4.5"
+  },
+  {
+    "allowed_file_input_mime_types": [
+      "text/plain"
+    ],
+    "id": 98,
+    "name": "Mistral-Large-3"
+  }
+]

@@ -378,9 +378,19 @@ def _sync(
                 flush=True,
             )
 
+        # ── Sort by DateModified ascending so that when MAX_TICKETS
+        # truncates the list, we process the oldest-modified first and the
+        # watermark advances incrementally without skipping tickets.
+        raw_tickets.sort(
+            key=lambda t: _parse_ts_datetime(str(t.get("DateModified") or "")) or datetime.min.replace(tzinfo=timezone.utc)
+        )
+
         # ── Apply max_tickets limit
         effective_max = max_tickets if max_tickets is not None else config.MAX_TICKETS
+        was_truncated = False
         if effective_max and not ticket_numbers and not ticket_ids:
+            if len(raw_tickets) > effective_max:
+                was_truncated = True
             raw_tickets = raw_tickets[:effective_max]
 
         tickets_seen = len(raw_tickets)
@@ -474,11 +484,33 @@ def _sync(
         # replay).  Advancing the watermark on a targeted sync would falsely
         # signal that all tickets are up to date.
         advance_watermark = (status == "completed") and not is_targeted
+
+        # When MAX_TICKETS truncated the set, only advance the watermark
+        # to the latest DateModified among tickets we actually processed.
+        # This ensures the next incremental sync will pick up tickets that
+        # were filtered-in but not processed due to the limit.
+        watermark_override = None
+        if advance_watermark and was_truncated and raw_tickets:
+            processed_dates = [
+                _parse_ts_datetime(str(t.get("DateModified") or ""))
+                for t in raw_tickets
+            ]
+            processed_dates = [d for d in processed_dates if d is not None]
+            if processed_dates:
+                watermark_override = min(processed_dates)
+                print(
+                    f"[ingest] MAX_TICKETS truncated the set — advancing "
+                    f"watermark to {watermark_override.isoformat()} "
+                    f"(earliest DateModified of processed tickets).",
+                    flush=True,
+                )
+
         db.upsert_sync_state(
             SOURCE_NAME,
             status=status,
             error=error_text,
             is_success=advance_watermark,
+            watermark_at=watermark_override,
         )
 
     return {
@@ -655,6 +687,10 @@ def main():
         "--sentiment", action="store_true",
         help="Run sentiment enrichment for all tickets touched during this sync.",
     )
+    p_sync.add_argument(
+        "--enrich", action="store_true",
+        help="Run enrichment (sentiment, priority, complexity) for touched tickets.",
+    )
 
     # status
     sub.add_parser("status", help="Show sync state and recent ingest runs.")
@@ -760,14 +796,17 @@ def main():
             rebuild_metrics(all_touched)
             run_analytics_for_tickets(all_touched)
 
-    # ── Post-sync: sentiment enrichment for touched tickets ──
-    if args.sentiment and not args.dry_run and result["status"] == "completed":
+    # ── Post-sync: enrichment for touched tickets ──
+    run_enrichment = (args.enrich or args.sentiment) and not args.dry_run and result["status"] == "completed"
+    if run_enrichment:
         all_touched = result.get("upserted_ids", []) + reconciled_ids
         if all_touched:
-            from run_sentiment import main as sentiment_main
             num_map = db.ticket_numbers_for_ids(all_touched)
             touched_numbers = [num_map[tid] for tid in all_touched if tid in num_map]
+
+            # Sentiment (runs for --sentiment or --enrich)
             if touched_numbers:
+                from run_sentiment import main as sentiment_main
                 print(
                     f"\n[ingest] Post-sync: running sentiment for "
                     f"{len(touched_numbers)} ticket(s)\u2026",
@@ -779,6 +818,48 @@ def main():
                     print("[ingest] Sentiment stage exited.", flush=True)
                 except Exception as exc:
                     print(f"[ingest] Sentiment error: {exc}", flush=True)
+
+            # Full enrichment (only with --enrich)
+            if args.enrich and touched_numbers:
+                # Priority
+                from run_priority import main as priority_main
+                print(
+                    f"\n[ingest] Post-sync: running priority for "
+                    f"{len(touched_numbers)} ticket(s)\u2026",
+                    flush=True,
+                )
+                try:
+                    priority_main(write_back=False, force=False, ticket_numbers=touched_numbers)
+                except SystemExit:
+                    print("[ingest] Priority stage exited.", flush=True)
+                except Exception as exc:
+                    print(f"[ingest] Priority error: {exc}", flush=True)
+
+                # Complexity
+                from run_complexity import main as complexity_main
+                print(
+                    f"\n[ingest] Post-sync: running complexity for "
+                    f"{len(touched_numbers)} ticket(s)\u2026",
+                    flush=True,
+                )
+                try:
+                    complexity_main(write_back=False, force=False, ticket_numbers=touched_numbers)
+                except SystemExit:
+                    print("[ingest] Complexity stage exited.", flush=True)
+                except Exception as exc:
+                    print(f"[ingest] Complexity error: {exc}", flush=True)
+
+                # Rebuild health rollups after enrichment is complete
+                from run_rollups import (
+                    rebuild_customer_ticket_health,
+                    rebuild_product_ticket_health,
+                )
+                print("\n[ingest] Post-enrich: rebuilding health rollups\u2026", flush=True)
+                try:
+                    rebuild_customer_ticket_health()
+                    rebuild_product_ticket_health()
+                except Exception as exc:
+                    print(f"[ingest] Health rollup error: {exc}", flush=True)
 
     if result["status"] != "completed":
         log_fh.close()

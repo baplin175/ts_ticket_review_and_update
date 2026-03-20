@@ -493,9 +493,17 @@ def upsert_sync_state(
     error: Optional[str] = None,
     cursor: Optional[str] = None,
     is_success: bool = False,
+    watermark_at: Optional[datetime] = None,
 ) -> None:
-    """Upsert the sync-state row for a named source."""
+    """Upsert the sync-state row for a named source.
+
+    When *watermark_at* is provided and *is_success* is True, the watermark
+    is set to that timestamp instead of the current time.  This allows the
+    caller to advance the watermark only as far as the last ticket that was
+    actually processed (important when MAX_TICKETS truncates the result set).
+    """
     now = datetime.now(timezone.utc)
+    success_ts = watermark_at or now
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -512,7 +520,7 @@ def upsert_sync_state(
                 ON CONFLICT (source_name) DO UPDATE SET
                     last_attempted_sync_at  = %(now)s,
                     last_successful_sync_at = CASE
-                        WHEN %(is_success)s THEN %(now)s
+                        WHEN %(is_success)s THEN %(success_ts)s
                         ELSE sync_state.last_successful_sync_at
                     END,
                     last_status  = %(status)s,
@@ -522,7 +530,8 @@ def upsert_sync_state(
             """, {
                 "source_name": source_name,
                 "now": now,
-                "success_at": now if is_success else None,
+                "success_at": success_ts if is_success else None,
+                "success_ts": success_ts,
                 "status": status,
                 "error": error,
                 "cursor": cursor,
@@ -843,15 +852,27 @@ def ticket_numbers_for_ids(ticket_ids: list[int]) -> Dict[int, str]:
     return {r[0]: (str(r[1]) if r[1] else None) for r in rows}
 
 
-def fetch_ticket_numbers_by_status(status: str) -> list[str]:
+def fetch_ticket_numbers_by_status(status: str, *, exclude_closed: bool = False) -> list[str]:
     """Return all ticket_numbers matching the given status that have rollups.
 
     Special values:
       - ``"Open"`` — all non-closed tickets (closed_at IS NULL and status
         NOT IN ('Closed', 'Closed with Survey')).
       - Any other string — exact status match.
+
+    When *exclude_closed* is True, *status* is ignored and all tickets
+    whose status is NOT 'Closed' or 'Closed with Survey' are returned.
     """
-    if status == "Open":
+    if exclude_closed:
+        rows = fetch_all(
+            """SELECT t.ticket_number
+                 FROM tickets t
+                 JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
+                WHERE COALESCE(t.status, '') NOT IN ('Closed', 'Closed with Survey')
+                  AND r.thread_hash IS NOT NULL
+                ORDER BY t.ticket_number;""",
+        )
+    elif status == "Open":
         rows = fetch_all(
             """SELECT t.ticket_number
                  FROM tickets t
@@ -1285,7 +1306,7 @@ def fetch_pending_pass1_tickets(
 
     Returns list of (ticket_id, ticket_name, full_thread_text) tuples.
     """
-    conditions = ["r.full_thread_text IS NOT NULL"]
+    conditions = ["r.full_thread_text IS NOT NULL", "t.closed_at IS NOT NULL"]
     params: list = []
 
     if ticket_ids:
@@ -1439,6 +1460,7 @@ def fetch_pending_pass3_tickets(
         "p2.status = 'success'",
         "p2.canonical_failure IS NOT NULL",
         "p2.canonical_failure != ''",
+        "t.closed_at IS NOT NULL",
     ]
     params: list = [pass2_pass_name, pass2_prompt_version]
 
@@ -1515,6 +1537,7 @@ def fetch_pending_pass4_tickets(
         "p3.status = 'success'",
         "p3.mechanism IS NOT NULL",
         "p3.mechanism != ''",
+        "t.closed_at IS NOT NULL",
     ]
     params: list = [pass3_pass_name, pass3_prompt_version]
 
