@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.git/
+.github/
+output/
+temp_working_files/
+tests/
+web/
+migrations/
+reuse_functions/
+*.csv
+*.json
+*.log
+*.md
+.env
+.venv/
+node_modules/
