@@ -1,0 +1,82 @@
+from unittest.mock import MagicMock, patch
+
+import psycopg2
+
+import web.data as data
+
+
+def test_create_dashboard_uses_returning_insert():
+    with patch.object(data, "_execute_returning", return_value={"id": 1, "name": "Ops"}) as mocked:
+        result = data.create_dashboard("Ops", "ops")
+    assert result["id"] == 1
+    sql = mocked.call_args[0][0]
+    assert "INSERT INTO dashboards" in sql
+    assert "RETURNING" in sql
+
+
+def test_list_dashboards_filters_for_global_active():
+    with patch.object(data, "query", return_value=[]) as mocked:
+        data.list_dashboards()
+    sql = mocked.call_args[0][0]
+    params = mocked.call_args[0][1]
+    assert "FROM dashboards" in sql
+    assert "owner_type = %s" in sql
+    assert "owner_id IS NULL" in sql
+    assert "is_active = TRUE" in sql
+    assert params == ("global",)
+
+
+def test_get_dashboard_tree_assembles_sections_and_widgets():
+    dashboard = {"id": 10, "name": "Ops"}
+    sections = [
+        {"id": 100, "dashboard_id": 10, "title": "Summary"},
+        {"id": 101, "dashboard_id": 10, "title": "Details"},
+    ]
+    widgets = [
+        {"id": 1000, "section_id": 100, "widget_type": "stat_row"},
+        {"id": 1001, "section_id": 101, "widget_type": "grid"},
+    ]
+
+    with patch.object(data, "query_one", return_value=dashboard), \
+         patch.object(data, "query", side_effect=[sections, widgets]):
+        result = data.get_dashboard_tree(10)
+
+    assert result["sections"][0]["widgets"] == [widgets[0]]
+    assert result["sections"][1]["widgets"] == [widgets[1]]
+
+
+def test_delete_dashboard_widget_delegates_to_execute():
+    with patch.object(data, "_execute") as mocked:
+        data.delete_dashboard_widget(123)
+    mocked.assert_called_once()
+    assert "DELETE FROM dashboard_widgets" in mocked.call_args[0][0]
+
+
+def test_list_dashboards_returns_empty_when_tables_are_missing():
+    with patch.object(data, "query", side_effect=psycopg2.errors.UndefinedTable()):
+        result = data.list_dashboards()
+    assert result == []
+
+
+def test_get_dashboard_by_slug_returns_none_when_tables_are_missing():
+    with patch.object(data, "query_one", side_effect=psycopg2.errors.UndefinedTable()):
+        result = data.get_dashboard_by_slug("ops")
+    assert result is None
+
+
+def test_get_dashboard_tree_returns_none_when_tables_are_missing():
+    with patch.object(data, "query_one", side_effect=psycopg2.errors.UndefinedTable()):
+        result = data.get_dashboard_tree(1)
+    assert result is None
+
+
+def test_list_dashboards_returns_empty_when_db_is_unavailable():
+    with patch.object(data, "query", side_effect=psycopg2.OperationalError()):
+        result = data.list_dashboards()
+    assert result == []
+
+
+def test_get_dashboard_by_slug_returns_none_when_db_is_unavailable():
+    with patch.object(data, "query_one", side_effect=psycopg2.OperationalError()):
+        result = data.get_dashboard_by_slug("ops")
+    assert result is None

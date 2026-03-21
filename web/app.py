@@ -24,10 +24,12 @@ from dash_iconify import DashIconify                               # noqa: E402
 
 import renderer                                                    # noqa: E402
 import data                                                        # noqa: E402
+import dashboard_registry                                          # noqa: E402
 from pages.ticket_detail import ticket_detail_layout, register_callbacks as td_callbacks  # noqa: E402
 from pages.root_cause import register_callbacks as rc_callbacks    # noqa: E402
 from pages.overview import register_overview_callbacks as ov_callbacks  # noqa: E402
 from pages.health import register_health_callbacks as health_callbacks  # noqa: E402
+from pages.dashboard_editor import register_callbacks as dashboard_editor_callbacks  # noqa: E402
 
 # Import custom page modules declared in dashboard.yaml
 renderer.import_custom_layouts()
@@ -50,13 +52,11 @@ rc_callbacks(app)
 td_callbacks(app)
 ov_callbacks(app)
 health_callbacks(app)
+dashboard_editor_callbacks(app)
 
-# ── Navigation items (from dashboard.yaml) ───────────────────────────
+# ── Navigation items (static + DB-backed) ────────────────────────────
 
-NAV_ITEMS = [
-    {"label": p["label"], "icon": p.get("icon", "tabler:point"), "href": p["route"]}
-    for p in _PAGES
-]
+STATIC_NAV_ITEMS = dashboard_registry.build_static_nav_items(_PAGES)
 
 # ── Layout ───────────────────────────────────────────────────────────
 
@@ -84,20 +84,7 @@ app.layout = dmc.MantineProvider(
                     ),
                 ),
                 dmc.AppShellNavbar(
-                    dmc.Stack(
-                        [
-                            dmc.NavLink(
-                                id=f"nav-{item['label'].lower()}",
-                                label=item["label"],
-                                leftSection=DashIconify(icon=item["icon"], width=20),
-                                href=item["href"],
-                                variant="light",
-                            )
-                            for item in NAV_ITEMS
-                        ],
-                        gap=2,
-                        p="sm",
-                    ),
+                    dmc.Stack(id="sidebar-nav", gap=2, p="sm"),
                 ),
                 dmc.AppShellMain(
                     html.Div(id="page-content", style={"padding": "1.5rem"}),
@@ -134,6 +121,13 @@ def display_page(pathname):
                 return custom_fn()
             return renderer.render_page(page)
 
+    if pathname.startswith(dashboard_registry.DASHBOARD_ROUTE_PREFIX):
+        slug = pathname[len(dashboard_registry.DASHBOARD_ROUTE_PREFIX):]
+        definition = dashboard_registry.get_runtime_dashboard_definition(slug)
+        if definition:
+            return renderer.render_dashboard(definition)
+        return dmc.Text("Dashboard not found.", c="red")
+
     # Default to first page
     first = _PAGES[0] if _PAGES else None
     if first:
@@ -145,18 +139,21 @@ def display_page(pathname):
 # ── Nav active state ─────────────────────────────────────────────────
 
 @callback(
-    [Output(f"nav-{item['label'].lower()}", "active") for item in NAV_ITEMS],
+    Output("sidebar-nav", "children"),
     Input("url", "pathname"),
 )
-def set_active_nav(pathname):
-    result = []
-    for page in _PAGES:
-        active = pathname == page["route"]
-        active = active or pathname in page.get("aliases", [])
-        if page.get("match_prefix") and pathname:
-            active = active or pathname.startswith(page["match_prefix"])
-        result.append(active)
-    return result
+def render_sidebar_nav(pathname):
+    items = dashboard_registry.build_nav_items(_PAGES)
+    return [
+        dmc.NavLink(
+            label=item["label"],
+            leftSection=DashIconify(icon=item["icon"], width=20),
+            href=item["href"],
+            variant="light",
+            active=dashboard_registry.nav_item_active(item, pathname),
+        )
+        for item in items
+    ]
 
 
 # ── Ticket grid row click → navigate ────────────────────────────────
