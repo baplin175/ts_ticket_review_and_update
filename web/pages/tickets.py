@@ -40,7 +40,7 @@ def _run_sync_in_background():
     try:
         env = os.environ.copy()
         proc = subprocess.Popen(
-            [sys.executable, _INGEST_SCRIPT, "sync", "--verbose"],
+            [sys.executable, _INGEST_SCRIPT, "sync", "--verbose", "--enrich-new"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -311,12 +311,11 @@ def tickets_layout():
                     rowData=rows,
                     columnDefs=COLUMN_DEFS,
                     defaultColDef=DEFAULT_COL_DEF,
-                    getRowId="String(params.data.ticket_id)",
                     dashGridOptions={
                         "rowSelection": "single",
                         "pagination": True,
                         "paginationPageSize": 50,
-                        "animateRows": True,
+                        "animateRows": False,
                         "enableCellTextSelection": True,
                     },
                     style={"height": "calc(100vh - 250px)", "cursor": "pointer"},

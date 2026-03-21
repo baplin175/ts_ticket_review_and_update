@@ -311,6 +311,7 @@ def _sync(
     actions_seen = 0
     actions_upserted = 0
     upserted_ids: list[int] = []
+    new_ticket_ids: list[int] = []
     errors: list[str] = []
 
     try:
@@ -396,6 +397,25 @@ def _sync(
         tickets_seen = len(raw_tickets)
         print(f"[ingest] Processing {tickets_seen} ticket(s) …", flush=True)
 
+        existing_ticket_ids: set[int] = set()
+        if not dry_run and raw_tickets:
+            fetched_ids = []
+            for ticket_raw in raw_tickets:
+                tid_str = extract_ticket_id(ticket_raw)
+                if not tid_str:
+                    continue
+                try:
+                    fetched_ids.append(int(tid_str))
+                except ValueError:
+                    continue
+            if fetched_ids:
+                placeholders = ",".join(["%s"] * len(fetched_ids))
+                rows = db.fetch_all(
+                    f"SELECT ticket_id FROM tickets WHERE ticket_id IN ({placeholders});",
+                    tuple(fetched_ids),
+                )
+                existing_ticket_ids = {int(r[0]) for r in rows}
+
         # ── Process each ticket
         for idx, ticket_raw in enumerate(raw_tickets, 1):
             tid_str = extract_ticket_id(ticket_raw)
@@ -439,10 +459,14 @@ def _sync(
 
                 # ── Batch upsert ticket + actions in a single transaction
                 if not dry_run:
+                    was_new_ticket = tid not in existing_ticket_ids
                     db.upsert_ticket_with_actions(ticket_row, action_rows, now=now)
                     tickets_upserted += 1
                     actions_upserted += len(action_rows)
                     upserted_ids.append(tid)
+                    if was_new_ticket:
+                        new_ticket_ids.append(tid)
+                        existing_ticket_ids.add(tid)
 
             except Exception as exc:
                 msg = f"Error processing ticket #{tnum} (id={tid_str}): {exc}"
@@ -520,6 +544,7 @@ def _sync(
         "actions_seen": actions_seen,
         "actions_upserted": actions_upserted,
         "upserted_ids": upserted_ids,
+        "new_ticket_ids": new_ticket_ids,
         "errors": errors,
     }
 
@@ -691,6 +716,10 @@ def main():
         "--enrich", action="store_true",
         help="Run enrichment (sentiment, priority, complexity) for touched tickets.",
     )
+    p_sync.add_argument(
+        "--enrich-new", action="store_true",
+        help="Run enrichment (sentiment, priority, complexity) only for newly added tickets.",
+    )
 
     # status
     sub.add_parser("status", help="Show sync state and recent ingest runs.")
@@ -797,15 +826,19 @@ def main():
             run_analytics_for_tickets(all_touched)
 
     # ── Post-sync: enrichment for touched tickets ──
-    run_enrichment = (args.enrich or args.sentiment) and not args.dry_run and result["status"] == "completed"
+    run_enrichment = (
+        args.enrich or args.sentiment or args.enrich_new
+    ) and not args.dry_run and result["status"] == "completed"
     if run_enrichment:
-        all_touched = result.get("upserted_ids", []) + reconciled_ids
-        if all_touched:
-            num_map = db.ticket_numbers_for_ids(all_touched)
-            touched_numbers = [num_map[tid] for tid in all_touched if tid in num_map]
+        enrich_ids = result.get("new_ticket_ids", []) if args.enrich_new else (
+            result.get("upserted_ids", []) + reconciled_ids
+        )
+        if enrich_ids:
+            num_map = db.ticket_numbers_for_ids(enrich_ids)
+            touched_numbers = [num_map[tid] for tid in enrich_ids if tid in num_map]
 
             # Sentiment (runs for --sentiment or --enrich)
-            if touched_numbers:
+            if touched_numbers and (args.sentiment or args.enrich or args.enrich_new):
                 from run_sentiment import main as sentiment_main
                 print(
                     f"\n[ingest] Post-sync: running sentiment for "
@@ -819,8 +852,8 @@ def main():
                 except Exception as exc:
                     print(f"[ingest] Sentiment error: {exc}", flush=True)
 
-            # Full enrichment (only with --enrich)
-            if args.enrich and touched_numbers:
+            # Full enrichment (only with --enrich / --enrich-new)
+            if (args.enrich or args.enrich_new) and touched_numbers:
                 # Priority
                 from run_priority import main as priority_main
                 print(
@@ -860,6 +893,8 @@ def main():
                     rebuild_product_ticket_health()
                 except Exception as exc:
                     print(f"[ingest] Health rollup error: {exc}", flush=True)
+        elif args.enrich_new:
+            print("\n[ingest] Post-sync: no newly added tickets to enrich.", flush=True)
 
     if result["status"] != "completed":
         log_fh.close()

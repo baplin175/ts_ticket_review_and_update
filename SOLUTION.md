@@ -130,7 +130,7 @@ All database objects live in the `tickets_ai` schema. Every table that reference
 
 1. **Fetch tickets** — `ts_client.fetch_open_tickets(ticket_number=...)` queries the TeamSupport `/Tickets` endpoint. When `TARGET_TICKET` is set, the ticket is fetched by number regardless of open/closed status. When no target is set, only open tickets are returned (`isClosed=False`) with full pagination. If the API returns 403 (rate limit), the pipeline falls back to `Activities.csv`.
 2. **CSV fallback** — When the API is rate-limited or unavailable, `run_pull_activities.py` reads `Activities.csv` from the project root. Party classification uses cached inHANCE names from prior activity JSON files; if none exist, party is set to `"unknown"`. Some metadata fields (`ticket_id`, `status`, `severity`, `assignee`, `date_created`, `date_modified`) are unavailable from CSV.
-2. **Limit tickets** — When not targeting a specific ticket, `config.MAX_TICKETS` (default **5**) caps how many are processed. Set to `0` for unlimited.
+2. **Limit tickets** — When not targeting a specific ticket, `config.MAX_TICKETS` (default **0** = unlimited) caps how many are processed.
 3. **Fetch activities per ticket** — `ts_client.fetch_all_activities(ticket_id)` pages through `/Tickets/{id}/Actions`. Deduplicates by action ID to guard against the TS API recycling pages past the real end, with a 500-page safety cap.
 4. **Load inHANCE user IDs** — `ts_client.fetch_inhance_user_ids()` calls `/Users?Organization=inHANCE` once and caches the set of CS-team user IDs.
 5. **Cleanse & classify each activity** — `activity_cleaner.clean_activity_dict(action)` runs the full pipeline:
@@ -150,7 +150,7 @@ All database objects live in the `tickets_ai` schema. Every table that reference
 7. **Extract customer comments** — `run_sentiment.py` reads the latest activities JSON, filters to `party=cust` with non-empty descriptions, and takes the last N (default **4**).
 8. **Build prompt** — The instructions from `prompts/sentiment.md` are combined with the customer comments as a JSON input block.
 9. **Call Matcha** — `matcha_client.call_matcha()` sends the prompt to the Matcha LLM API with retry logic for transient failures.
-9a. **Parse response** — `run_sentiment.py` strips markdown code fences (`` ```json `` blocks) from Matcha responses before JSON parsing, with regex fallback extraction. This matches the robust parsing already used in `run_priority.py` and `run_complexity.py`. The response now includes `frustrated_reason` — a one-sentence explanation of the frustration classification.
+9a. **Parse response** — `run_sentiment.py` strips markdown code fences (`` ```json `` blocks) from Matcha responses before JSON parsing, with regex fallback extraction. Unlike `run_priority.py` and `run_complexity.py` (which skip fence-stripping and go directly to regex extraction), sentiment has an explicit fence-removal step before the shared regex fallback. The response includes `frustrated_reason` — a one-sentence explanation of the frustration classification.
 10. **Write sentiment JSON** — The response is written to `output/sentiment_YYYYMMDD_HHMMSS.json`.
 
 ## Activities JSON Schema
@@ -184,7 +184,7 @@ The output file is an array of ticket objects. Each ticket object:
 | `action_type`   | e.g. "Comment", "Email", etc.                       |
 | `creator_id`    | ID of the user who created the activity             |
 | `creator_name`  | Display name of the creator                         |
-| `party`         | `inh` (inHANCE CS team) or `cust` (customer)       |
+| `party`         | `inh` (inHANCE CS team), `cust` (customer), or `unknown` (CSV fallback when no cached inHANCE names exist) |
 | `is_visible`    | `true` if visible on portal (public), `false` if private |
 | `description`   | Cleaned plain-text body                             |
 
@@ -235,6 +235,7 @@ The output file is an array of ticket objects. Each ticket object:
 | `comments_sent` | Number of customer comments sent to Matcha          |
 | `source_file`   | Activities JSON filename used as input              |
 | `frustrated`    | `"Yes"` or `"No"`                                   |
+| `frustrated_reason` | One-sentence explanation of frustration classification (or `null` when not frustrated) |
 | `activity_id`   | ID of first frustration activity (or `null`)        |
 | `created_at`    | Timestamp of first frustration activity (or `null`) |
 
@@ -289,7 +290,7 @@ All settings live in `config.py` and can be overridden with environment variable
 | `MATCHA_URL`       | Matcha completions URL | Matcha LLM endpoint                  |
 | `MATCHA_API_KEY`   | *(set)*                | Matcha API key                       |
 | `MATCHA_MISSION_ID`| `27301`                | Matcha mission ID                    |
-| `MAX_TICKETS`      | `5`                    | Max tickets to pull (0=unlimited)    |
+| `MAX_TICKETS`      | `0`                    | Max tickets to pull (0=unlimited)    |
 | `TARGET_TICKET`    | *(empty)*              | Comma-delimited ticket number(s) to target |
 | `RUN_SENTIMENT`    | `1`                    | Run sentiment analysis (0 = skip)    |
 | `RUN_PRIORITY`     | `1`                    | Run AI priority scoring (0 = skip)   |
@@ -297,17 +298,18 @@ All settings live in `config.py` and can be overridden with environment variable
 | `LOG_TO_FILE`      | `1`                    | Save pipeline logs to output dir     |
 | `LOG_API_CALLS`    | `1`                    | Save API call log to output dir      |
 | `CUST_COMMENT_COUNT`| `4`                   | Customer comments sent to Matcha     |
-| `OUTPUT_DIR`       | `./output`             | Where JSONL files are written        |
-| `DATABASE_URL`     | *(empty)*              | Postgres DSN; empty = JSON-only mode |
+| `OUTPUT_DIR`       | *(absolute path to `output/`)* | Where JSONL files are written |
+| `DATABASE_URL`     | *(local Postgres DSN)* | Postgres DSN; empty = JSON-only mode |
 | `DATABASE_SCHEMA`  | `tickets_ai`           | Postgres schema for all pipeline tables |
 | `TS_WRITEBACK`     | `0`                    | Enable TeamSupport write-back (`1` = on, `0` = off) |
-| `SKIP_OUTPUT_FILES`| `0`                    | Skip JSON artifact files when DB is active (`1` = skip) |
+| `FORCE_ENRICHMENT` | `1`                    | Bypass hash-based skipping on first run (`1` = force, `0` = incremental) |
+| `SKIP_OUTPUT_FILES`| `1`                    | Skip JSON artifact files when DB is active (`1` = skip) |
 
 ## Logging
 
 When `LOG_TO_FILE=1` (default), all pipeline stdout/stderr is teed to `output/pipeline_YYYYMMDD_HHMMSS.log`.
 
-When `LOG_API_CALLS=1` (default), every TeamSupport and Matcha API call (GET, PUT, POST) is recorded in `output/api_calls.json` with timestamp, method, URL, params/payload, and HTTP status code. Matcha entries include `input_length` (prompt size) instead of the full prompt text.
+When `LOG_API_CALLS=1` (default), every TeamSupport and Matcha API call (GET, PUT, POST) is recorded in `output/api_calls.json` with timestamp, method, URL, params/payload, and HTTP status code. Matcha entries include the full payload (including the prompt text); no redaction is applied.
 
 ## Dry-Run Payloads
 
@@ -326,7 +328,7 @@ This allows verification of payload contents when the API is unavailable.
 
 ### Overview
 
-When `DATABASE_URL` is set, the pipeline can persist tickets, actions, enrichment results, and sync state to a Postgres database via `db.py`. When `DATABASE_URL` is empty (the default), the pipeline runs in JSON-only mode — all existing scripts work unchanged.
+When `DATABASE_URL` is set, the pipeline can persist tickets, actions, enrichment results, and sync state to a Postgres database via `db.py`. The default `config.py` ships with a local Postgres DSN; set `DATABASE_URL` to an empty string to run in JSON-only mode (all existing scripts work unchanged).
 
 ### Setup
 
@@ -835,7 +837,7 @@ Two config flags control side-effects:
 
 - **`TS_WRITEBACK`** (default `0`): When `0`, no enrichment data is written back to TeamSupport — this is a **hard lock** that the `--no-writeback` CLI flag cannot override. `TS_WRITEBACK=0` in config always wins, regardless of CLI flags. When `1`, write-back is enabled but can be suppressed for a specific run using `--no-writeback`. When run standalone, `run_priority.py` and `run_complexity.py` also respect this default (their `write_back` parameter defaults to `TS_WRITEBACK` when not explicitly passed).
 
-- **`SKIP_OUTPUT_FILES`** (default `0`): When `1`, **no** files are written to the `output/` directory during enrichment — this includes activities JSON, enrichment result JSON, pipeline log files, and API call logs. This is useful when the DB is the canonical store and file artifacts are unwanted. When `0`, all files are written as usual.
+- **`SKIP_OUTPUT_FILES`** (default `1`): When `1`, **no** files are written to the `output/` directory during enrichment — this includes activities JSON, enrichment result JSON, pipeline log files, and API call logs. This is useful when the DB is the canonical store and file artifacts are unwanted. When `0`, all files are written as usual.
 
 ## Web Dashboard
 
