@@ -143,9 +143,9 @@ def _build_dashboard_tab():
 
     # ── KPI stat row ─────────────────────────────────────────────────
     p1 = stats.get("pass1_success", 0) or 0
+    p2 = stats.get("pass2_success", 0) or 0
     p3 = stats.get("pass3_success", 0) or 0
-    p4 = stats.get("pass4_success", 0) or 0
-    completion_pct = f"{round(p4 / p1 * 100)}%" if p1 else "—"
+    completion_pct = f"{round(p3 / p1 * 100)}%" if p1 else "—"
     top_mech = mech_dist[0]["mechanism_class"] if mech_dist else "—"
 
     children.append(
@@ -154,9 +154,9 @@ def _build_dashboard_tab():
             children=[
                 _stat_card("Tickets Analyzed", p1,
                            "tabler:search", "blue"),
-                _stat_card("Mechanisms Found", p3,
+                _stat_card("Mechanisms Found", p2,
                            "tabler:bulb", "violet"),
-                _stat_card("Interventions Mapped", p4,
+                _stat_card("Interventions Mapped", p3,
                            "tabler:tools", "teal"),
                 _stat_card("Pipeline Completion", completion_pct,
                            "tabler:chart-arrows-vertical", "green"),
@@ -310,9 +310,9 @@ def _build_dashboard_tab():
 # ── Chart builders ───────────────────────────────────────────────────
 
 def _pipeline_funnel_chart(funnel):
-    """Horizontal bar funnel: Pass 1 → Pass 3 → Pass 4 completion."""
-    stages = ["Pass 1 — Phenomenon", "Pass 3 — Mechanism", "Pass 4 — Intervention"]
-    values = [funnel.get("pass1", 0), funnel.get("pass3", 0), funnel.get("pass4", 0)]
+    """Horizontal bar funnel: Pass 1 → Pass 2 → Pass 3 completion."""
+    stages = ["Pass 1 — Phenomenon", "Pass 2 — Mechanism", "Pass 3 — Intervention"]
+    values = [funnel.get("pass1", 0), funnel.get("pass2", 0), funnel.get("pass3", 0)]
     colors = ["#4263eb", "#ae3ec9", "#099268"]
 
     if not any(values):
@@ -643,10 +643,10 @@ _GRID_COLS = [
     {"field": "phenomenon", "headerName": "Phenomenon", "minWidth": 200, "flex": 1},
     {"field": "component", "headerName": "Component", "width": 160},
     {"field": "operation", "headerName": "Operation", "width": 120},
-    {"field": "pass3_status", "headerName": "Pass 3", "width": 90},
+    {"field": "pass2_status", "headerName": "Pass 2", "width": 90},
     {"field": "mechanism", "headerName": "Mechanism", "minWidth": 200, "flex": 1},
     {"field": "evidence", "headerName": "Evidence", "width": 120},
-    {"field": "pass4_status", "headerName": "Pass 4", "width": 90},
+    {"field": "pass3_status", "headerName": "Pass 3", "width": 90},
     {"field": "mechanism_class", "headerName": "Mechanism Class", "width": 180},
     {"field": "intervention_type", "headerName": "Intervention Type", "width": 160},
     {"field": "intervention_action", "headerName": "Intervention Action", "minWidth": 200, "flex": 1},
@@ -801,54 +801,54 @@ def register_callbacks(app):
         else:
             pass1_card = _placeholder_card("Pass 1 — Phenomenon + Grammar", "tabler:search")
 
-        # Pass 3 — Mechanism Inference
-        p3 = by_name.get("pass3_mechanism")
+        # Pass 2 — Mechanism Inference
+        p2 = by_name.get("pass2_mechanism")
+        if p2:
+            pj2 = p2.get("parsed_json") or {}
+            pass2_card = _pass_card(
+                "Pass 2 — Mechanism Inference", "tabler:bulb",
+                p2.get("status"),
+                [
+                    ("Mechanism", p2.get("mechanism")),
+                    ("Evidence", pj2.get("evidence", "")),
+                    ("Category", pj2.get("category", "")),
+                    ("Model", p2.get("model_name")),
+                    ("Prompt Version", p2.get("prompt_version")),
+                    ("Completed", str(p2.get("completed_at", ""))[:19]),
+                ],
+                raw_json=p2.get("parsed_json"),
+                error=p2.get("error_message"),
+            )
+        else:
+            pass2_card = _placeholder_card("Pass 2 — Mechanism Inference", "tabler:bulb")
+
+        # Pass 3 — Intervention Mapping
+        p3 = by_name.get("pass3_intervention")
         if p3:
             pj3 = p3.get("parsed_json") or {}
+            p3_fields = [
+                ("Mechanism Class", p3.get("mechanism_class")),
+                ("Intervention Type", p3.get("intervention_type")),
+                ("Intervention Action", p3.get("intervention_action")),
+            ]
+            if pj3.get("proposed_class"):
+                p3_fields.append(("Proposed Class", pj3["proposed_class"]))
+            if pj3.get("proposed_type"):
+                p3_fields.append(("Proposed Type", pj3["proposed_type"]))
+            p3_fields.extend([
+                ("Model", p3.get("model_name")),
+                ("Prompt Version", p3.get("prompt_version")),
+                ("Completed", str(p3.get("completed_at", ""))[:19]),
+            ])
             pass3_card = _pass_card(
-                "Pass 3 — Mechanism Inference", "tabler:bulb",
+                "Pass 3 — Intervention Mapping", "tabler:tools",
                 p3.get("status"),
-                [
-                    ("Mechanism", p3.get("mechanism")),
-                    ("Evidence", pj3.get("evidence", "")),
-                    ("Category", pj3.get("category", "")),
-                    ("Model", p3.get("model_name")),
-                    ("Prompt Version", p3.get("prompt_version")),
-                    ("Completed", str(p3.get("completed_at", ""))[:19]),
-                ],
+                p3_fields,
                 raw_json=p3.get("parsed_json"),
                 error=p3.get("error_message"),
             )
         else:
-            pass3_card = _placeholder_card("Pass 3 — Mechanism Inference", "tabler:bulb")
-
-        # Pass 4 — Intervention Mapping
-        p4 = by_name.get("pass4_intervention")
-        if p4:
-            pj4 = p4.get("parsed_json") or {}
-            p4_fields = [
-                ("Mechanism Class", p4.get("mechanism_class")),
-                ("Intervention Type", p4.get("intervention_type")),
-                ("Intervention Action", p4.get("intervention_action")),
-            ]
-            if pj4.get("proposed_class"):
-                p4_fields.append(("Proposed Class", pj4["proposed_class"]))
-            if pj4.get("proposed_type"):
-                p4_fields.append(("Proposed Type", pj4["proposed_type"]))
-            p4_fields.extend([
-                ("Model", p4.get("model_name")),
-                ("Prompt Version", p4.get("prompt_version")),
-                ("Completed", str(p4.get("completed_at", ""))[:19]),
-            ])
-            pass4_card = _pass_card(
-                "Pass 4 — Intervention Mapping", "tabler:tools",
-                p4.get("status"),
-                p4_fields,
-                raw_json=p4.get("parsed_json"),
-                error=p4.get("error_message"),
-            )
-        else:
-            pass4_card = _placeholder_card("Pass 4 — Intervention Mapping", "tabler:tools")
+            pass3_card = _placeholder_card("Pass 3 — Intervention Mapping", "tabler:tools")
 
         # Cleaned thread text
         thread_text = thread.get("technical_core_text") or thread.get("full_thread_text") or ""
@@ -877,7 +877,7 @@ def register_callbacks(app):
             ),
             dmc.SimpleGrid(
                 cols={"base": 1, "lg": 2},
-                children=[pass1_card, pass3_card, pass4_card],
+                children=[pass1_card, pass2_card, pass3_card],
             ),
             thread_section,
         ], gap="md")

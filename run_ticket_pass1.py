@@ -24,11 +24,10 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, timezone
 
 from config import MATCHA_MISSION_ID
-from matcha_client import call_matcha
-from pass1_parser import parse_pass1_response, Pass1ParseError
+from passes.runtime import load_prompt_template, process_ticket_pass
+from pass1_parser import parse_pass1_response
 
 PROMPT_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "prompts", "pass1_phenomenon.txt"
@@ -52,8 +51,7 @@ def _log(msg: str) -> None:
 
 
 def _load_prompt_template() -> str:
-    with open(PROMPT_PATH, "r", encoding="utf-8") as f:
-        return f.read()
+    return load_prompt_template(PROMPT_PATH)
 
 
 def _strip_violation_warnings(text: str) -> str:
@@ -80,140 +78,54 @@ def process_ticket(
 
     Returns a result dict with status, phenomenon, grammar fields, timing, etc.
     """
-    import db
-
-    result = {
-        "ticket_id": ticket_id,
-        "status": "pending",
-        "phenomenon": None,
-        "component": None,
-        "operation": None,
-        "unexpected_state": None,
-        "canonical_failure": None,
-        "confidence": None,
-        "error": None,
-        "elapsed_s": 0.0,
-    }
-
-    started_at = datetime.now(timezone.utc)
-    start_time = time.monotonic()
-
-    # If force, clean up prior failed/pending rows to allow fresh attempt
-    if force:
-        db.delete_prior_failed_pass(ticket_id, PASS_NAME, PROMPT_VERSION)
-        # Also remove prior success so the unique index allows a new one
-        conn = db.get_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    DELETE FROM ticket_llm_pass_results
-                     WHERE ticket_id = %s
-                       AND pass_name = %s
-                       AND prompt_version = %s
-                       AND status = 'success';
-                """, (ticket_id, PASS_NAME, PROMPT_VERSION))
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            db.put_conn(conn)
-    else:
-        # Clean up prior failed/pending rows for a fresh attempt
-        db.delete_prior_failed_pass(ticket_id, PASS_NAME, PROMPT_VERSION)
-
     # Strip violation warnings before building prompt
     cleaned_thread = _strip_violation_warnings(full_thread_text)
-
-    # Build prompt with ticket_name and cleaned thread text
     full_prompt = _build_prompt(prompt_template, cleaned_thread, ticket_name)
 
-    # Insert pending row
-    row_id = db.insert_pass_result(
+    def _success_update(parsed_output):
+        parsed_json, phenomenon = parsed_output
+        return {
+            "parsed_json": parsed_json,
+            "phenomenon": phenomenon,
+            "component": parsed_json.get("component"),
+            "operation": parsed_json.get("operation"),
+            "unexpected_state": parsed_json.get("unexpected_state"),
+            "canonical_failure": parsed_json.get("canonical_failure"),
+        }
+
+    def _result_update(parsed_output):
+        parsed_json, phenomenon = parsed_output
+        return {
+            "phenomenon": phenomenon,
+            "component": parsed_json.get("component"),
+            "operation": parsed_json.get("operation"),
+            "unexpected_state": parsed_json.get("unexpected_state"),
+            "canonical_failure": parsed_json.get("canonical_failure"),
+            "confidence": parsed_json.get("confidence"),
+        }
+
+    result = process_ticket_pass(
         ticket_id,
         pass_name=PASS_NAME,
         prompt_version=PROMPT_VERSION,
         model_name=MODEL_NAME,
         input_text=full_thread_text,
-        status="pending",
-        started_at=started_at,
+        prompt_text=full_prompt,
+        force=force,
+        initial_result={
+            "phenomenon": None,
+            "component": None,
+            "operation": None,
+            "unexpected_state": None,
+            "canonical_failure": None,
+            "confidence": None,
+        },
+        parse_response=parse_pass1_response,
+        build_success_update=_success_update,
+        build_result_update=_result_update,
     )
-
-    raw_response = None
-    try:
-        # Call Matcha
-        raw_response = call_matcha(full_prompt)
-
-        # Parse + validate (v2 format includes grammar fields)
-        parsed_json, phenomenon = parse_pass1_response(raw_response)
-
-        completed_at = datetime.now(timezone.utc)
-        elapsed = time.monotonic() - start_time
-
-        # Extract grammar fields from parsed response
-        component = parsed_json.get("component")
-        operation = parsed_json.get("operation")
-        unexpected_state = parsed_json.get("unexpected_state")
-        canonical_failure = parsed_json.get("canonical_failure")
-
-        # Update row to success with both phenomenon and grammar fields
-        db.update_pass_result(
-            row_id,
-            status="success",
-            raw_response_text=raw_response,
-            parsed_json=parsed_json,
-            phenomenon=phenomenon,
-            component=component,
-            operation=operation,
-            unexpected_state=unexpected_state,
-            canonical_failure=canonical_failure,
-            completed_at=completed_at,
-        )
-
-        result["status"] = "success"
-        result["phenomenon"] = phenomenon
-        result["component"] = component
-        result["operation"] = operation
-        result["unexpected_state"] = unexpected_state
-        result["canonical_failure"] = canonical_failure
-        result["confidence"] = parsed_json.get("confidence")
-        result["elapsed_s"] = round(elapsed, 2)
-        if phenomenon is None:
-            _log(f"[pass1]   (no observable phenomenon — confidence: {parsed_json.get('confidence', 'N/A')})")
-
-    except Pass1ParseError as exc:
-        completed_at = datetime.now(timezone.utc)
-        elapsed = time.monotonic() - start_time
-
-        # Store the malformed raw response for inspection
-        db.update_pass_result(
-            row_id,
-            status="failed",
-            raw_response_text=raw_response,
-            error_message=str(exc),
-            completed_at=completed_at,
-        )
-
-        result["status"] = "failed"
-        result["error"] = str(exc)
-        result["elapsed_s"] = round(elapsed, 2)
-
-    except Exception as exc:
-        completed_at = datetime.now(timezone.utc)
-        elapsed = time.monotonic() - start_time
-
-        db.update_pass_result(
-            row_id,
-            status="failed",
-            raw_response_text=raw_response,
-            error_message=str(exc),
-            completed_at=completed_at,
-        )
-
-        result["status"] = "failed"
-        result["error"] = str(exc)
-        result["elapsed_s"] = round(elapsed, 2)
-
+    if result["status"] == "success" and result["phenomenon"] is None:
+        _log(f"[pass1]   (no observable phenomenon — confidence: {result.get('confidence', 'N/A')})")
     return result
 
 

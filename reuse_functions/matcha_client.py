@@ -1,10 +1,11 @@
 import time
+import os
 
 import requests
 
 MATCHA_URL = "https://matcha.harriscomputer.com/rest/api/v1/completions"
-MATCHA_API_KEY = "15c0db915567455e98b90f1ecc22e088"
-MATCHA_MISSION_ID = "27301"
+MATCHA_API_KEY = os.getenv("MATCHA_API_KEY", "")
+MATCHA_MISSION_ID = os.getenv("MATCHA_MISSION_ID", "")
 
 MAX_RETRIES = 3
 RETRY_BACKOFF = 10  # seconds; doubles each retry

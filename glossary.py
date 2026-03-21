@@ -21,10 +21,10 @@ PIPELINE_PASSES = {
         ("Pass 1 — Phenomenon",
          "Extracts the single observable system behavior from the ticket thread. "
          "Also decomposes it into Component + Operation + Unexpected State (the canonical failure grammar)."),
-        ("Pass 3 — Mechanism",
+        ("Pass 2 — Mechanism",
          "Infers the most plausible internal system mechanism that would produce "
          "the observed failure — e.g. a validation bug, config mismatch, or integration error."),
-        ("Pass 4 — Intervention",
+        ("Pass 3 — Intervention",
          "Maps the mechanism to a normalized mechanism class and recommends a "
          "specific intervention type and action to fix the root cause."),
     ],
@@ -133,11 +133,11 @@ DASHBOARD_METRICS = {
         ("Tickets Analyzed",
          "Number of tickets that have a successful Pass 1 (phenomenon extraction) result."),
         ("Mechanisms Found",
-         "Number of tickets with a successful Pass 3 (mechanism inference) result."),
+         "Number of tickets with a successful Pass 2 (mechanism inference) result."),
         ("Interventions Mapped",
-         "Number of tickets with a successful Pass 4 (intervention mapping) result."),
+         "Number of tickets with a successful Pass 3 (intervention mapping) result."),
         ("Pipeline Completion",
-         "Percentage of Pass 1 tickets that made it all the way through to Pass 4."),
+         "Percentage of Pass 1 tickets that made it all the way through to Pass 3."),
         ("Top Mechanism",
          "The mechanism class with the highest ticket count across all analyzed tickets."),
         ("Sankey Diagram",

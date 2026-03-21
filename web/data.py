@@ -388,7 +388,7 @@ def get_recent_ingest_runs(limit=10):
 # ── Root Cause (LLM pass results) ───────────────────────────────────
 
 def get_root_cause_tickets():
-    """Return tickets that have at least one pass1, pass3, or pass4 result."""
+    """Return tickets that have at least one pass1, pass2, or pass3 result."""
     return query("""
         SELECT
             t.ticket_id,
@@ -406,13 +406,13 @@ def get_root_cause_tickets():
             p1.completed_at  AS pass1_completed_at,
             p3.mechanism,
             p3.evidence,
-            p3.status        AS pass3_status,
-            p3.completed_at  AS pass3_completed_at,
+            p3.status        AS pass2_status,
+            p3.completed_at  AS pass2_completed_at,
             p4.mechanism_class,
             p4.intervention_type,
             p4.intervention_action,
-            p4.status        AS pass4_status,
-            p4.completed_at  AS pass4_completed_at
+            p4.status        AS pass3_status,
+            p4.completed_at  AS pass3_completed_at
         FROM tickets t
         LEFT JOIN LATERAL (
             SELECT phenomenon, component, operation, canonical_failure,
@@ -431,7 +431,7 @@ def get_root_cause_tickets():
                    status, completed_at
             FROM ticket_llm_pass_results lp
             WHERE lp.ticket_id = t.ticket_id
-              AND lp.pass_name = 'pass3_mechanism'
+              AND lp.pass_name = 'pass2_mechanism'
             ORDER BY CASE WHEN lp.status = 'success' THEN 0 ELSE 1 END,
                      lp.updated_at DESC
             LIMIT 1
@@ -441,7 +441,7 @@ def get_root_cause_tickets():
                    status, completed_at
             FROM ticket_llm_pass_results lp
             WHERE lp.ticket_id = t.ticket_id
-              AND lp.pass_name = 'pass4_intervention'
+              AND lp.pass_name = 'pass3_intervention'
             ORDER BY CASE WHEN lp.status = 'success' THEN 0 ELSE 1 END,
                      lp.updated_at DESC
             LIMIT 1
@@ -483,8 +483,8 @@ def get_root_cause_stats():
     return query_one("""
         SELECT
             COUNT(DISTINCT CASE WHEN p1.status = 'success' THEN p1.ticket_id END) AS pass1_success,
-            COUNT(DISTINCT CASE WHEN p3.status = 'success' THEN p3.ticket_id END) AS pass3_success,
-            COUNT(DISTINCT CASE WHEN p4.status = 'success' THEN p4.ticket_id END) AS pass4_success,
+            COUNT(DISTINCT CASE WHEN p3.status = 'success' THEN p3.ticket_id END) AS pass2_success,
+            COUNT(DISTINCT CASE WHEN p4.status = 'success' THEN p4.ticket_id END) AS pass3_success,
             COUNT(DISTINCT p4.mechanism_class)
                 FILTER (WHERE p4.status = 'success' AND p4.mechanism_class IS NOT NULL
                         AND p4.mechanism_class != 'other')                        AS distinct_mechanism_classes,
@@ -501,14 +501,14 @@ def get_root_cause_stats():
         LEFT JOIN LATERAL (
             SELECT ticket_id, status
             FROM ticket_llm_pass_results lp
-            WHERE lp.ticket_id = t.ticket_id AND lp.pass_name = 'pass3_mechanism'
+            WHERE lp.ticket_id = t.ticket_id AND lp.pass_name = 'pass2_mechanism'
             ORDER BY CASE WHEN lp.status='success' THEN 0 ELSE 1 END, lp.updated_at DESC
             LIMIT 1
         ) p3 ON TRUE
         LEFT JOIN LATERAL (
             SELECT ticket_id, status, mechanism_class
             FROM ticket_llm_pass_results lp
-            WHERE lp.ticket_id = t.ticket_id AND lp.pass_name = 'pass4_intervention'
+            WHERE lp.ticket_id = t.ticket_id AND lp.pass_name = 'pass3_intervention'
             ORDER BY CASE WHEN lp.status='success' THEN 0 ELSE 1 END, lp.updated_at DESC
             LIMIT 1
         ) p4 ON TRUE
@@ -516,13 +516,13 @@ def get_root_cause_stats():
           AND COALESCE(t.status, '') != 'Open'
           AND COALESCE(t.assignee, '') != 'Marketing'
     """) or {
-        "pass1_success": 0, "pass3_success": 0, "pass4_success": 0,
+        "pass1_success": 0, "pass2_success": 0, "pass3_success": 0,
         "distinct_mechanism_classes": 0, "distinct_components": 0,
     }
 
 
 def get_mechanism_class_distribution():
-    """Mechanism class counts from successful Pass 4 results."""
+    """Mechanism class counts from successful Pass 3 results."""
     return query("""
         SELECT mechanism_class, ticket_count
         FROM vw_intervention_roi
@@ -531,7 +531,7 @@ def get_mechanism_class_distribution():
 
 
 def get_intervention_type_distribution():
-    """Intervention type counts from successful Pass 4 results."""
+    """Intervention type counts from successful Pass 3 results."""
     return query("""
         SELECT intervention_type, SUM(ticket_count)::int AS ticket_count
         FROM vw_intervention_roi
@@ -598,7 +598,7 @@ def get_tickets_by_fixes(fix_keys):
                p4.mechanism_class, p4.intervention_type, p4.intervention_action
         FROM ticket_llm_pass_results p4
         JOIN vw_ticket_analytics_core v ON v.ticket_id = p4.ticket_id
-        WHERE p4.pass_name = 'pass4_intervention'
+        WHERE p4.pass_name = 'pass3_intervention'
           AND p4.status = 'success'
           AND ({where})
         ORDER BY v.date_modified DESC NULLS LAST
@@ -612,7 +612,7 @@ def get_root_cause_by_product(limit=10):
             SELECT t.product_name, COUNT(*) AS total
             FROM ticket_llm_pass_results lp
             JOIN tickets t ON t.ticket_id = lp.ticket_id
-            WHERE lp.pass_name = 'pass4_intervention'
+            WHERE lp.pass_name = 'pass3_intervention'
               AND lp.status = 'success'
               AND lp.mechanism_class IS NOT NULL
             GROUP BY t.product_name
@@ -626,7 +626,7 @@ def get_root_cause_by_product(limit=10):
         FROM ticket_llm_pass_results lp
         JOIN tickets t ON t.ticket_id = lp.ticket_id
         JOIN ranked_products rp ON rp.product_name = t.product_name
-        WHERE lp.pass_name = 'pass4_intervention'
+        WHERE lp.pass_name = 'pass3_intervention'
           AND lp.status = 'success'
           AND lp.mechanism_class IS NOT NULL
         GROUP BY t.product_name, lp.mechanism_class
@@ -657,7 +657,7 @@ def get_root_cause_sankey(component_limit=15):
             SELECT mechanism_class, intervention_type
             FROM ticket_llm_pass_results lp
             WHERE lp.ticket_id = p1.ticket_id
-              AND lp.pass_name = 'pass4_intervention'
+              AND lp.pass_name = 'pass3_intervention'
               AND lp.status = 'success'
             ORDER BY lp.updated_at DESC
             LIMIT 1
@@ -679,10 +679,10 @@ def get_pipeline_completion_funnel():
             (SELECT COUNT(DISTINCT ticket_id) FROM ticket_llm_pass_results
              WHERE pass_name = 'pass1_phenomenon' AND status = 'success') AS pass1,
             (SELECT COUNT(DISTINCT ticket_id) FROM ticket_llm_pass_results
-             WHERE pass_name = 'pass3_mechanism' AND status = 'success')  AS pass3,
+             WHERE pass_name = 'pass2_mechanism' AND status = 'success')  AS pass2,
             (SELECT COUNT(DISTINCT ticket_id) FROM ticket_llm_pass_results
-             WHERE pass_name = 'pass4_intervention' AND status = 'success') AS pass4
-    """) or {"pass1": 0, "pass3": 0, "pass4": 0}
+             WHERE pass_name = 'pass3_intervention' AND status = 'success') AS pass3
+    """) or {"pass1": 0, "pass2": 0, "pass3": 0}
 
 
 # ── Saved reports (dashboard-local CRUD — never touches TeamSupport) ─

@@ -3,6 +3,12 @@ CSV-only pipeline runner — Pass 1 → Pass 3 → Pass 4.
 
 Pure CSV orchestration with no database dependency.
 Reuses matcha_client.call_matcha and existing parsers/validators.
+
+Backward compatibility note:
+the historical implementation called the mechanism inference stage
+"Pass 2" and the intervention mapping stage "Pass 3". The exported CSV
+pipeline API now follows the product-facing Pass 1/3/4 naming used by
+the web UI and tests, while retaining a ``run_pass2_csv`` alias.
 """
 
 import csv
@@ -138,7 +144,7 @@ PASS3_COLUMNS = [
 ]
 
 
-def run_pass3_csv(
+def _run_pass3_mechanism_csv(
     pass1_csv: str,
     input_csv: str,
     output_csv: str,
@@ -209,6 +215,45 @@ def run_pass3_csv(
                 progress_cb(3, idx, total)
 
     return total
+
+
+# Public names for Pass 3 mechanism inference. Keep run_pass2_csv as a
+# compatibility alias for callers that still use the older naming.
+
+def run_pass3_csv(
+    pass1_csv: str,
+    input_csv: str,
+    output_csv: str,
+    progress_cb: Optional[Callable] = None,
+    inference_server: Optional[int] = None,
+    log_cb: Optional[Callable] = None,
+) -> int:
+    return _run_pass3_mechanism_csv(
+        pass1_csv,
+        input_csv,
+        output_csv,
+        progress_cb=progress_cb,
+        inference_server=inference_server,
+        log_cb=log_cb,
+    )
+
+
+def run_pass2_csv(
+    pass1_csv: str,
+    input_csv: str,
+    output_csv: str,
+    progress_cb: Optional[Callable] = None,
+    inference_server: Optional[int] = None,
+    log_cb: Optional[Callable] = None,
+) -> int:
+    return _run_pass3_mechanism_csv(
+        pass1_csv,
+        input_csv,
+        output_csv,
+        progress_cb=progress_cb,
+        inference_server=inference_server,
+        log_cb=log_cb,
+    )
 
 
 # ── Pass 4 ───────────────────────────────────────────────────────────
@@ -325,7 +370,12 @@ def run_full_pipeline(
     if job_id:
         blob_upload_file(job_id, "pass4_results.csv", p4_csv)
 
-    return {"pass1": p1_csv, "pass3": p3_csv, "pass4": p4_csv}
+    return {
+        "pass1": p1_csv,
+        "pass2": p3_csv,
+        "pass3": p3_csv,
+        "pass4": p4_csv,
+    }
 
 
 # ── CSV helper ───────────────────────────────────────────────────────
