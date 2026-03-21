@@ -93,35 +93,16 @@ WHERE pass1_status = 'success';
 
 See [SOLUTION.md](SOLUTION.md) for full architecture docs, configuration, and operational notes.
 
-## Pass 2 — Canonical Failure Grammar
+Pass 1 also performs the grammar extraction that used to live in the old Pass 2 script. The active numbered sequence is now:
 
-Pass 2 converts each Pass 1 phenomenon into the standardized form: `<Component> + <Operation> + <Unexpected State>`. Requires successful Pass 1 results.
+- Pass 1: phenomenon + canonical failure grammar
+- Pass 2: mechanism inference
+- Pass 3: intervention mapping
 
-**Requires** `DATABASE_URL` to be set.
+## Legacy Grammar Pass
 
 ```bash
-# Apply migrations (adds Pass 2 columns + views)
-python db.py migrate
-
-# Run all pending tickets (with optional limit)
 python run_ticket_pass2.py --limit 100
-
-# Run for specific ticket(s)
-python run_ticket_pass2.py --ticket-id 99784
-python run_ticket_pass2.py --ticket-id 99784,98154,100289
-
-# Rerun only previously failed tickets
-python run_ticket_pass2.py --failed-only
-
-# Force rerun (overwrite existing success results)
-python run_ticket_pass2.py --force
 ```
 
-Results can be queried via the `vw_ticket_pass2_results` and `vw_ticket_pass_pipeline` views:
-
-```sql
-SELECT ticket_id, phenomenon, component, operation, unexpected_state,
-       canonical_failure, pass2_status
-FROM vw_ticket_pass2_results
-WHERE pass2_status = 'success';
-```
+`run_ticket_pass2.py` is deprecated and retained only for backward compatibility.

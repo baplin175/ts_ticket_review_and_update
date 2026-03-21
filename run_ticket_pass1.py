@@ -6,7 +6,7 @@ with the Pass 1 v2 prompt, parses the JSON response (phenomenon + component +
 operation + unexpected_state + confidence), and stores both the raw response
 and parsed output in ticket_llm_pass_results.
 
-This pass now absorbs the work previously done by Pass 2 (grammar extraction).
+This pass now absorbs the work previously done by the legacy grammar pass.
 
 Requires DATABASE_URL to be set (Postgres mode).
 
@@ -28,6 +28,7 @@ import time
 from config import MATCHA_MISSION_ID
 from passes.runtime import load_prompt_template, process_ticket_pass
 from pass1_parser import parse_pass1_response
+from pipeline_stages import stage_title
 
 PROMPT_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "prompts", "pass1_phenomenon.txt"
@@ -226,7 +227,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Pass 1 — Phenomenon extraction from support ticket threads."
+        description=f"{stage_title('phenomenon')} from support ticket threads."
     )
     parser.add_argument(
         "--ticket-id",

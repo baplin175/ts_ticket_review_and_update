@@ -3,25 +3,36 @@ TS Ticket Analytics — Dash + Mantine web dashboard.
 
 Entry point.  Run with:
     python -m web.app
+    python web/app.py
 
 Reads from the existing Postgres database via db.py.
 Does NOT modify any existing project code or write to TeamSupport.
 """
 
 import os
+import traceback
 
 from dash import Dash, html, callback, Input, Output, State, no_update, ALL  # noqa: E402
 import dash_mantine_components as dmc                              # noqa: E402
 from dash import dcc                                               # noqa: E402
 from dash_iconify import DashIconify                               # noqa: E402
 
-from . import dashboard_registry                                   # noqa: E402
-from . import renderer                                             # noqa: E402
-from .pages.dashboard_editor import register_callbacks as dashboard_editor_callbacks  # noqa: E402
-from .pages.health import register_health_callbacks as health_callbacks  # noqa: E402
-from .pages.overview import register_overview_callbacks as ov_callbacks  # noqa: E402
-from .pages.root_cause import register_callbacks as rc_callbacks    # noqa: E402
-from .pages.ticket_detail import ticket_detail_layout, register_callbacks as td_callbacks  # noqa: E402
+if __package__ in (None, ""):
+    import web.dashboard_registry as dashboard_registry            # noqa: E402
+    import web.renderer as renderer                               # noqa: E402
+    from web.pages.dashboard_editor import register_callbacks as dashboard_editor_callbacks  # noqa: E402
+    from web.pages.health import register_health_callbacks as health_callbacks  # noqa: E402
+    from web.pages.overview import register_overview_callbacks as ov_callbacks  # noqa: E402
+    from web.pages.root_cause import register_callbacks as rc_callbacks  # noqa: E402
+    from web.pages.ticket_detail import ticket_detail_layout, register_callbacks as td_callbacks  # noqa: E402
+else:
+    from . import dashboard_registry                               # noqa: E402
+    from . import renderer                                         # noqa: E402
+    from .pages.dashboard_editor import register_callbacks as dashboard_editor_callbacks  # noqa: E402
+    from .pages.health import register_health_callbacks as health_callbacks  # noqa: E402
+    from .pages.overview import register_overview_callbacks as ov_callbacks  # noqa: E402
+    from .pages.root_cause import register_callbacks as rc_callbacks  # noqa: E402
+    from .pages.ticket_detail import ticket_detail_layout, register_callbacks as td_callbacks  # noqa: E402
 
 # Import custom page modules declared in dashboard.yaml
 renderer.import_custom_layouts()
@@ -92,40 +103,52 @@ app.layout = dmc.MantineProvider(
 
 # ── URL routing ──────────────────────────────────────────────────────
 
+def _page_error(message: str):
+    return dmc.Alert(
+        title="Page Load Error",
+        color="red",
+        children=message,
+    )
+
 @callback(Output("page-content", "children"), Input("url", "pathname"))
 def display_page(pathname):
-    if pathname is None:
-        pathname = "/"
+    try:
+        if pathname is None:
+            pathname = "/"
 
-    # Dynamic route: ticket detail
-    if pathname and pathname.startswith("/ticket/"):
-        try:
-            ticket_id = int(pathname.split("/")[-1])
-            return ticket_detail_layout(ticket_id)
-        except (ValueError, IndexError):
-            return dmc.Text("Invalid ticket ID.", c="red")
+        # Dynamic route: ticket detail
+        if pathname and pathname.startswith("/ticket/"):
+            try:
+                ticket_id = int(pathname.split("/")[-1])
+                return ticket_detail_layout(ticket_id)
+            except (ValueError, IndexError):
+                return dmc.Text("Invalid ticket ID.", c="red")
 
-    # Match against YAML-defined pages
-    for page in _PAGES:
-        if pathname == page["route"] or pathname in page.get("aliases", []):
-            custom_fn = renderer.get_custom_layout(page["route"])
-            if custom_fn:
-                return custom_fn()
-            return renderer.render_page(page)
+        # Match against YAML-defined pages
+        for page in _PAGES:
+            if pathname == page["route"] or pathname in page.get("aliases", []):
+                custom_fn = renderer.get_custom_layout(page["route"])
+                if custom_fn:
+                    return custom_fn()
+                return renderer.render_page(page)
 
-    if pathname.startswith(dashboard_registry.DASHBOARD_ROUTE_PREFIX):
-        slug = pathname[len(dashboard_registry.DASHBOARD_ROUTE_PREFIX):]
-        definition = dashboard_registry.get_runtime_dashboard_definition(slug)
-        if definition:
-            return renderer.render_dashboard(definition)
-        return dmc.Text("Dashboard not found.", c="red")
+        if pathname.startswith(dashboard_registry.DASHBOARD_ROUTE_PREFIX):
+            slug = pathname[len(dashboard_registry.DASHBOARD_ROUTE_PREFIX):]
+            definition = dashboard_registry.get_runtime_dashboard_definition(slug)
+            if definition:
+                return renderer.render_dashboard(definition)
+            return dmc.Text("Dashboard not found.", c="red")
 
-    # Default to first page
-    first = _PAGES[0] if _PAGES else None
-    if first:
-        custom_fn = renderer.get_custom_layout(first["route"])
-        return custom_fn() if custom_fn else renderer.render_page(first)
-    return dmc.Text("No pages configured.")
+        # Default to first page
+        first = _PAGES[0] if _PAGES else None
+        if first:
+            custom_fn = renderer.get_custom_layout(first["route"])
+            return custom_fn() if custom_fn else renderer.render_page(first)
+        return dmc.Text("No pages configured.")
+    except Exception as exc:
+        print(f"[web] page-content fallback for {pathname}: {exc}", flush=True)
+        traceback.print_exc()
+        return _page_error(str(exc))
 
 
 # ── Nav active state ─────────────────────────────────────────────────
@@ -135,7 +158,12 @@ def display_page(pathname):
     Input("url", "pathname"),
 )
 def render_sidebar_nav(pathname):
-    items = dashboard_registry.build_nav_items(_PAGES)
+    try:
+        items = dashboard_registry.build_nav_items(_PAGES)
+    except Exception as exc:
+        print(f"[web] sidebar nav fallback: {exc}", flush=True)
+        traceback.print_exc()
+        items = dashboard_registry.build_static_nav_items(_PAGES)
     return [
         dmc.NavLink(
             label=item["label"],

@@ -276,6 +276,7 @@ class TestDBPersistence:
         assert row_id == 42
         sql = cur.execute.call_args[0][0]
         assert "INSERT INTO ticket_llm_pass_results" in sql
+        assert "ticket_number" in sql
         assert "RETURNING id" in sql
         conn.commit.assert_called_once()
 

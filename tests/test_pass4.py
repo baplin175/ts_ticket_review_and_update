@@ -472,6 +472,7 @@ class TestDBPersistence:
         )
         sql = cur.execute.call_args[0][0]
         assert "INSERT INTO ticket_llm_pass_results" in sql
+        assert "ticket_number" in sql
         assert row_id == 42
 
     def test_update_pass_result_with_pass4_fields(self, patch_pool):

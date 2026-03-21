@@ -1,10 +1,13 @@
 """
-Pass 2 — Canonical failure grammar extraction from Pass 1 phenomenon.
+Legacy grammar pass — canonical failure grammar extraction from Pass 1 phenomenon.
 
 Reads the phenomenon from a successful Pass 1 result, sends it to Matcha
 with the Pass 2 prompt, parses the JSON response into structured fields
 (component, operation, unexpected_state, canonical_failure), and stores
 both the raw response and parsed output in ticket_llm_pass_results.
+
+Deprecated. Pass 1 now performs the grammar extraction used by the active
+pipeline. This script is retained only for backward compatibility.
 
 Requires DATABASE_URL to be set (Postgres mode).
 
@@ -58,7 +61,7 @@ def process_ticket(
     *,
     force: bool = False,
 ) -> dict:
-    """Process a single ticket through Pass 2.
+    """Process a single ticket through the legacy grammar pass.
 
     Returns a result dict with status, parsed fields, timing, etc.
     """
@@ -110,7 +113,7 @@ def main(
     force: bool = False,
     failed_only: bool = False,
 ) -> list[dict]:
-    """Run Pass 2 for eligible tickets.
+    """Run the legacy grammar pass for eligible tickets.
 
     Returns a list of result dicts (one per ticket processed).
     """
@@ -196,7 +199,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Pass 2 — Canonical failure grammar extraction from Pass 1 phenomenon."
+        description="Legacy grammar pass retained for backward compatibility."
     )
     parser.add_argument(
         "--ticket-id",

@@ -310,8 +310,8 @@ def _build_dashboard_tab():
 # ── Chart builders ───────────────────────────────────────────────────
 
 def _pipeline_funnel_chart(funnel):
-    """Horizontal bar funnel: Pass 1 → Pass 3 → Pass 4 completion."""
-    stages = ["Pass 1 — Phenomenon", "Pass 3 — Mechanism", "Pass 4 — Intervention"]
+    """Horizontal bar funnel: Pass 1 → Pass 2 → Pass 3 completion."""
+    stages = ["Pass 1 — Phenomenon", "Pass 2 — Mechanism", "Pass 3 — Intervention"]
     values = [funnel.get("pass1", 0), funnel.get("pass3", 0), funnel.get("pass4", 0)]
     colors = ["#4263eb", "#ae3ec9", "#099268"]
 
@@ -643,10 +643,10 @@ _GRID_COLS = [
     {"field": "phenomenon", "headerName": "Phenomenon", "minWidth": 200, "flex": 1},
     {"field": "component", "headerName": "Component", "width": 160},
     {"field": "operation", "headerName": "Operation", "width": 120},
-    {"field": "pass3_status", "headerName": "Pass 3", "width": 90},
+    {"field": "pass3_status", "headerName": "Pass 2", "width": 90},
     {"field": "mechanism", "headerName": "Mechanism", "minWidth": 200, "flex": 1},
     {"field": "evidence", "headerName": "Evidence", "width": 120},
-    {"field": "pass4_status", "headerName": "Pass 4", "width": 90},
+    {"field": "pass4_status", "headerName": "Pass 3", "width": 90},
     {"field": "mechanism_class", "headerName": "Mechanism Class", "width": 180},
     {"field": "intervention_type", "headerName": "Intervention Type", "width": 160},
     {"field": "intervention_action", "headerName": "Intervention Action", "minWidth": 200, "flex": 1},
@@ -801,12 +801,12 @@ def register_callbacks(app):
         else:
             pass1_card = _placeholder_card("Pass 1 — Phenomenon + Grammar", "tabler:search")
 
-        # Pass 3 — Mechanism Inference
+        # Pass 2 — Mechanism Inference
         p3 = by_name.get("pass3_mechanism")
         if p3:
             pj3 = p3.get("parsed_json") or {}
             pass3_card = _pass_card(
-                "Pass 3 — Mechanism Inference", "tabler:bulb",
+                "Pass 2 — Mechanism Inference", "tabler:bulb",
                 p3.get("status"),
                 [
                     ("Mechanism", p3.get("mechanism")),
@@ -820,9 +820,9 @@ def register_callbacks(app):
                 error=p3.get("error_message"),
             )
         else:
-            pass3_card = _placeholder_card("Pass 3 — Mechanism Inference", "tabler:bulb")
+            pass3_card = _placeholder_card("Pass 2 — Mechanism Inference", "tabler:bulb")
 
-        # Pass 4 — Intervention Mapping
+        # Pass 3 — Intervention Mapping
         p4 = by_name.get("pass4_intervention")
         if p4:
             pj4 = p4.get("parsed_json") or {}
@@ -841,14 +841,14 @@ def register_callbacks(app):
                 ("Completed", str(p4.get("completed_at", ""))[:19]),
             ])
             pass4_card = _pass_card(
-                "Pass 4 — Intervention Mapping", "tabler:tools",
+                "Pass 3 — Intervention Mapping", "tabler:tools",
                 p4.get("status"),
                 p4_fields,
                 raw_json=p4.get("parsed_json"),
                 error=p4.get("error_message"),
             )
         else:
-            pass4_card = _placeholder_card("Pass 4 — Intervention Mapping", "tabler:tools")
+            pass4_card = _placeholder_card("Pass 3 — Intervention Mapping", "tabler:tools")
 
         # Cleaned thread text
         thread_text = thread.get("technical_core_text") or thread.get("full_thread_text") or ""

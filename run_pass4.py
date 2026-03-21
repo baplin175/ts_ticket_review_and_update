@@ -1,8 +1,8 @@
 """
-Pass 4 — Intervention mapping from Pass 3 mechanism.
+Pass 3 — Intervention mapping from Pass 2 mechanism.
 
-Reads the mechanism from a successful Pass 3 result, sends it to
-Matcha with the Pass 4 prompt, parses the JSON response into
+Reads the mechanism from a successful Pass 2 result, sends it to
+Matcha with the intervention prompt, parses the JSON response into
 mechanism_class / intervention_type / intervention_action, and stores
 both the raw response and parsed output in ticket_llm_pass_results.
 
@@ -27,6 +27,7 @@ import sys
 import time
 
 from config import OUTPUT_DIR
+from pipeline_stages import stage_title
 from pass4.intervention_mapper import (
     PASS_NAME,
     PROMPT_VERSION,
@@ -40,7 +41,7 @@ from pass4.intervention_aggregator import (
     write_artifacts,
 )
 
-# Pass 3 dependency
+# Upstream dependency: user-facing Pass 2, internal pass3_mechanism
 PASS3_PASS_NAME = "pass3_mechanism"
 PASS3_PROMPT_VERSION = "3"
 
@@ -57,14 +58,14 @@ def main(
     failed_only: bool = False,
     aggregate_only: bool = False,
 ) -> list[dict]:
-    """Run Pass 4 for eligible tickets.
+    """Run the user-facing Pass 3 stage for eligible tickets.
 
     Returns a list of result dicts (one per ticket processed).
     """
     import db
 
     if not db._is_enabled():
-        _log("[pass4] DATABASE_URL is not set. Pass 4 requires a Postgres DB.")
+        _log("[pass4] DATABASE_URL is not set. Pass 3 requires a Postgres DB.")
         sys.exit(1)
 
     # Run migrations to ensure table/columns exist
@@ -88,10 +89,10 @@ def main(
 
     prompt_template = _load_prompt_template()
     _log(f"[pass4] Loaded prompt from {os.path.basename(prompt_template) if isinstance(prompt_template, str) and os.path.exists(prompt_template) else 'pass4_intervention.txt'}")
-    _log(f"[pass4] Pass: {PASS_NAME}  Prompt version: {PROMPT_VERSION}  Model: {MODEL_NAME}")
-    _log(f"[pass4] Requires Pass 3: {PASS3_PASS_NAME} v{PASS3_PROMPT_VERSION}")
+    _log(f"[pass4] Stage: {stage_title('intervention')}  Internal pass: {PASS_NAME}  Prompt version: {PROMPT_VERSION}  Model: {MODEL_NAME}")
+    _log(f"[pass4] Requires Pass 2: {PASS3_PASS_NAME} v{PASS3_PROMPT_VERSION}")
 
-    # Fetch eligible tickets (those with successful Pass 3 mechanism)
+    # Fetch eligible tickets (those with successful Pass 2 mechanism)
     rows = db.fetch_pending_pass4_tickets(
         PROMPT_VERSION,
         pass3_pass_name=PASS3_PASS_NAME,
@@ -195,7 +196,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Pass 4 — Intervention mapping from Pass 3 mechanism."
+        description=f"{stage_title('intervention')} from Pass 2 mechanism."
     )
     parser.add_argument(
         "--ticket-id",

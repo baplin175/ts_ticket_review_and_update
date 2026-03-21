@@ -96,8 +96,8 @@ TEMPLATES = {
                         "display_config": {
                             "items": [
                                 {"field": "pass1_success", "title": "Pass 1", "icon": "tabler:search", "color": "blue"},
-                                {"field": "pass3_success", "title": "Pass 3", "icon": "tabler:bulb", "color": "violet"},
-                                {"field": "pass4_success", "title": "Pass 4", "icon": "tabler:tools", "color": "teal"},
+                                {"field": "pass3_success", "title": "Pass 2", "icon": "tabler:bulb", "color": "violet"},
+                                {"field": "pass4_success", "title": "Pass 3", "icon": "tabler:tools", "color": "teal"},
                                 {"field": "distinct_mechanism_classes", "title": "Mechanisms", "icon": "tabler:git-branch", "color": "orange"},
                             ]
                         },

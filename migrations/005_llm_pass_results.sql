@@ -8,6 +8,7 @@
 CREATE TABLE IF NOT EXISTS ticket_llm_pass_results (
     id                  BIGSERIAL       PRIMARY KEY,
     ticket_id           BIGINT          NOT NULL REFERENCES tickets (ticket_id),
+    ticket_number       TEXT,
     pass_name           TEXT            NOT NULL,          -- e.g. pass1_phenomenon
     input_text          TEXT,
     prompt_version      TEXT            NOT NULL,

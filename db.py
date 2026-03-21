@@ -1139,16 +1139,18 @@ def insert_pass_result(
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO ticket_llm_pass_results (
-                    ticket_id, pass_name, prompt_version, model_name,
+                    ticket_id, ticket_number, pass_name, prompt_version, model_name,
                     input_text, status, raw_response_text, parsed_json,
                     phenomenon, error_message, started_at, completed_at,
                     updated_at
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()
+                    %s,
+                    (SELECT ticket_number FROM tickets WHERE ticket_id = %s),
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()
                 )
                 RETURNING id;
             """, (
-                ticket_id, pass_name, prompt_version, model_name,
+                ticket_id, ticket_id, pass_name, prompt_version, model_name,
                 input_text, status, raw_response_text,
                 psycopg2.extras.Json(parsed_json) if parsed_json is not None else None,
                 phenomenon, error_message, started_at, completed_at,

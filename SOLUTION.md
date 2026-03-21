@@ -11,6 +11,14 @@ Pull open-ticket activities from TeamSupport, cleanse the text, classify each ac
 - CSV pipeline app: standalone Flask service in `pipeline/`
 - Legacy compatibility path: `run_all.py` and the JSON-only orchestration flow
 
+## Active Pass Sequence
+
+- Pass 1: phenomenon extraction plus canonical failure grammar
+- Pass 2: mechanism inference
+- Pass 3: intervention mapping
+
+The old grammar-only pass remains in the codebase as a deprecated compatibility path, but it is not part of the active numbered sequence.
+
 ## Domain Model
 
 See [DOMAIN_MODEL.md](DOMAIN_MODEL.md) for the complete operational domain model, including system purpose, end-to-end data pipeline, table semantics, LLM pipeline design, failure ontology, clustering system, intervention model, and product/domain knowledge.
@@ -34,13 +42,13 @@ run_pull_activities.py — Part 1: fetch, clean, classify activities → activit
 run_sentiment.py       — Part 2: sentiment analysis via Matcha (DB persistence + hash-based skipping when DB available)
 run_priority.py        — Part 3: AI priority scoring via Matcha (DB persistence + hash-based skipping when DB available)
 run_complexity.py      — Part 4: complexity analysis via Matcha (DB persistence + hash-based skipping when DB available)
-run_ticket_pass1.py    — Pass 1 v2: phenomenon extraction + grammar decomposition from full_thread_text via Matcha (DB-only, idempotent, prompt-versioned; absorbs former Pass 2 grammar extraction; includes ticket_name context, violation warning stripping, confidence gate)
+run_ticket_pass1.py    — Pass 1: phenomenon extraction + grammar decomposition from full_thread_text via Matcha (DB-only, idempotent, prompt-versioned; absorbs the former grammar pass; includes ticket_name context, violation warning stripping, confidence gate)
 pass1_parser.py        — Pass 1 response parser (strict JSON validation, phenomenon + confidence + grammar field extraction with operation normalization; null phenomenon accepted as valid "no observable behavior"; LOW confidence auto-nulls)
-run_ticket_pass2.py    — Pass 2: canonical failure grammar from Pass 1 phenomenon via Matcha (DEPRECATED — grammar now extracted in Pass 1 v2; kept for backward compatibility)
+run_ticket_pass2.py    — Legacy grammar pass: canonical failure grammar from Pass 1 phenomenon via Matcha (DEPRECATED — grammar now extracted in Pass 1; kept for backward compatibility)
 pass2_parser.py        — Pass 2 response parser (strict JSON validation, operation normalization, canonical_failure reconstruction; normalize_operation reused by Pass 1 v2 parser)
-run_ticket_pass3.py    — Pass 3 v3: failure mechanism inference from Pass 1 v2 canonical_failure + full_thread_text via Matcha (DB-only, idempotent, prompt-versioned; insufficient_evidence rule prevents fabrication)
+run_ticket_pass3.py    — Pass 2: failure mechanism inference from Pass 1 canonical_failure + full_thread_text via Matcha (DB-only, idempotent, prompt-versioned; insufficient_evidence rule prevents fabrication)
 pass3_parser.py        — Pass 3 response parser (strict JSON validation, mechanism extraction, phrase-level admin-text rejection allowing technical "customer" references)
-run_pass4.py           — Pass 4: intervention mapping from Pass 3 mechanism via Matcha (DB-only, idempotent, prompt-versioned, ROI aggregation, --aggregate-only mode; invalidates stale P4 results for tickets missing required P3 mechanism version)
+run_pass4.py           — Pass 3: intervention mapping from Pass 2 mechanism via Matcha (DB-only, idempotent, prompt-versioned, ROI aggregation, --aggregate-only mode; invalidates stale results for tickets missing required upstream mechanism version)
 pass4/mechanism_classes.py  — Normalized mechanism class taxonomy (14 classes including 'other' catch-all with proposed_class for taxonomy expansion)
 pass4/intervention_types.py — Normalized intervention type taxonomy (8 types including 'other' catch-all with proposed_type for taxonomy expansion)
 pass4/mechanism_classifier.py — Pass 4 response parser (strict JSON validation, taxonomy enforcement with soft 'other' + proposed_class/proposed_type, action validation)

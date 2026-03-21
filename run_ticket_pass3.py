@@ -1,8 +1,8 @@
 """
-Pass 3 — Failure mechanism inference from Pass 2 canonical failure.
+Pass 2 — Failure mechanism inference from Pass 1 canonical failure.
 
-Reads the canonical_failure from a successful Pass 2 result, sends it to
-Matcha with the Pass 3 prompt, parses the JSON response into a structured
+Reads the canonical_failure from a successful Pass 1 result, sends it to
+Matcha with the mechanism prompt, parses the JSON response into a structured
 mechanism field, and stores both the raw response and parsed output in
 ticket_llm_pass_results.
 
@@ -24,6 +24,7 @@ import time
 from config import MATCHA_MISSION_ID
 from passes.runtime import load_prompt_template, process_ticket_pass
 from pass3_parser import parse_pass3_response, validate_mechanism
+from pipeline_stages import stage_title
 
 PROMPT_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "prompts", "pass3_mechanism.txt"
@@ -63,7 +64,7 @@ def process_ticket(
     thread_context: str = "",
     force: bool = False,
 ) -> dict:
-    """Process a single ticket through Pass 3.
+    """Process a single ticket through the user-facing Pass 2 stage.
 
     Returns a result dict with status, parsed fields, timing, etc.
     """
@@ -107,14 +108,14 @@ def main(
     force: bool = False,
     failed_only: bool = False,
 ) -> list[dict]:
-    """Run Pass 3 for eligible tickets.
+    """Run the user-facing Pass 2 stage for eligible tickets.
 
     Returns a list of result dicts (one per ticket processed).
     """
     import db
 
     if not db._is_enabled():
-        _log("[pass3] DATABASE_URL is not set. Pass 3 requires a Postgres DB.")
+        _log("[pass3] DATABASE_URL is not set. Pass 2 requires a Postgres DB.")
         sys.exit(1)
 
     # Run migrations to ensure table/columns exist
@@ -125,10 +126,10 @@ def main(
 
     prompt_template = _load_prompt_template()
     _log(f"[pass3] Loaded prompt from {PROMPT_PATH}")
-    _log(f"[pass3] Pass: {PASS_NAME}  Prompt version: {PROMPT_VERSION}  Model: {MODEL_NAME}")
-    _log(f"[pass3] Requires Pass 2: {PASS2_PASS_NAME} v{PASS2_PROMPT_VERSION}")
+    _log(f"[pass3] Stage: {stage_title('mechanism')}  Internal pass: {PASS_NAME}  Prompt version: {PROMPT_VERSION}  Model: {MODEL_NAME}")
+    _log(f"[pass3] Requires Pass 1: {PASS2_PASS_NAME} v{PASS2_PROMPT_VERSION}")
 
-    # Fetch eligible tickets (those with successful Pass 2 canonical_failure)
+    # Fetch eligible tickets (those with successful Pass 1 canonical_failure)
     rows = db.fetch_pending_pass3_tickets(
         PROMPT_VERSION,
         pass2_pass_name=PASS2_PASS_NAME,
@@ -194,7 +195,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Pass 3 — Failure mechanism inference from Pass 2 canonical failure."
+        description=f"{stage_title('mechanism')} from Pass 1 canonical failure."
     )
     parser.add_argument(
         "--ticket-id",
