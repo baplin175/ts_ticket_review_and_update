@@ -76,3 +76,9 @@ pages:
     icon: tabler:settings
     module: pages.config_view
     layout_func: config_layout
+
+  - label: Dashboards
+    route: /dashboards/manage
+    icon: tabler:layout-dashboard
+    module: pages.dashboard_editor
+    layout_func: dashboard_editor_layout

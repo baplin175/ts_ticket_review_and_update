@@ -17,6 +17,7 @@ from decimal import Decimal
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import psycopg2.extras  # noqa: E402
+from psycopg2 import errors as psycopg2_errors  # noqa: E402
 import db               # noqa: E402
 
 
@@ -721,3 +722,269 @@ def save_report(name, filter_model):
 
 def delete_report(report_id):
     _execute("DELETE FROM saved_reports WHERE id = %s", (report_id,))
+
+
+# ── Runtime dashboards (shared in v1, ownership-ready for future) ───
+
+def _execute_returning(sql, params=()):
+    """Run an INSERT/UPDATE/DELETE ... RETURNING and commit."""
+    conn = db.get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params)
+            row = cur.fetchone()
+        conn.commit()
+        return {k: _serialize_value(v) for k, v in dict(row).items()} if row else None
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        db.put_conn(conn)
+
+
+def _is_dashboard_read_fallback_error(exc):
+    cause = getattr(exc, "__cause__", None)
+    fallback_types = (
+        psycopg2_errors.UndefinedTable,
+        psycopg2.OperationalError,
+    )
+    return isinstance(exc, fallback_types) or isinstance(cause, fallback_types)
+
+
+def list_dashboards(owner_type="global", owner_id=None, include_inactive=False):
+    conditions = ["owner_type = %s"]
+    params = [owner_type]
+
+    if owner_id is None:
+        conditions.append("owner_id IS NULL")
+    else:
+        conditions.append("owner_id = %s")
+        params.append(owner_id)
+
+    if not include_inactive:
+        conditions.append("is_active = TRUE")
+
+    where = " AND ".join(conditions)
+    try:
+        return query(f"""
+            SELECT id, name, slug, description, icon, sort_order, is_default,
+                   is_active, owner_type, owner_id, created_at, updated_at
+            FROM dashboards
+            WHERE {where}
+            ORDER BY sort_order, name
+        """, tuple(params))
+    except Exception as exc:
+        if _is_dashboard_read_fallback_error(exc):
+            return []
+        raise
+
+
+def get_dashboard_by_slug(slug, owner_type="global", owner_id=None, include_inactive=False):
+    conditions = ["slug = %s", "owner_type = %s"]
+    params = [slug, owner_type]
+
+    if owner_id is None:
+        conditions.append("owner_id IS NULL")
+    else:
+        conditions.append("owner_id = %s")
+        params.append(owner_id)
+
+    if not include_inactive:
+        conditions.append("is_active = TRUE")
+
+    where = " AND ".join(conditions)
+    try:
+        return query_one(f"""
+            SELECT id, name, slug, description, icon, sort_order, is_default,
+                   is_active, owner_type, owner_id, created_at, updated_at
+            FROM dashboards
+            WHERE {where}
+        """, tuple(params))
+    except Exception as exc:
+        if _is_dashboard_read_fallback_error(exc):
+            return None
+        raise
+
+
+def get_dashboard_tree(dashboard_id):
+    try:
+        dashboard = query_one("""
+            SELECT id, name, slug, description, icon, sort_order, is_default,
+                   is_active, owner_type, owner_id, created_at, updated_at
+            FROM dashboards
+            WHERE id = %s
+        """, (dashboard_id,))
+    except Exception as exc:
+        if _is_dashboard_read_fallback_error(exc):
+            return None
+        raise
+    if not dashboard:
+        return None
+
+    try:
+        sections = query("""
+            SELECT id, dashboard_id, title, description, layout_columns,
+                   sort_order, is_active, created_at, updated_at
+            FROM dashboard_sections
+            WHERE dashboard_id = %s
+              AND is_active = TRUE
+            ORDER BY sort_order, id
+        """, (dashboard_id,))
+
+        widgets = query("""
+            SELECT id, section_id, widget_type, title, query_key, query_params_json,
+                   display_config_json, sort_order, is_active, created_at, updated_at
+            FROM dashboard_widgets
+            WHERE section_id IN (
+                SELECT id FROM dashboard_sections
+                WHERE dashboard_id = %s
+                  AND is_active = TRUE
+            )
+              AND is_active = TRUE
+            ORDER BY sort_order, id
+        """, (dashboard_id,))
+    except Exception as exc:
+        if _is_dashboard_read_fallback_error(exc):
+            return None
+        raise
+
+    widgets_by_section = {}
+    for widget in widgets:
+        widgets_by_section.setdefault(widget["section_id"], []).append(widget)
+
+    dashboard["sections"] = []
+    for section in sections:
+        section["widgets"] = widgets_by_section.get(section["id"], [])
+        dashboard["sections"].append(section)
+    return dashboard
+
+
+def create_dashboard(name, slug, description=None, icon=None, sort_order=0,
+                     is_default=False, is_active=True, owner_type="global", owner_id=None):
+    return _execute_returning("""
+        INSERT INTO dashboards (
+            name, slug, description, icon, sort_order, is_default,
+            is_active, owner_type, owner_id, created_at, updated_at
+        )
+        VALUES (
+            %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, now(), now()
+        )
+        RETURNING id, name, slug, description, icon, sort_order, is_default,
+                  is_active, owner_type, owner_id, created_at, updated_at
+    """, (
+        name, slug, description, icon, sort_order, is_default,
+        is_active, owner_type, owner_id,
+    ))
+
+
+def update_dashboard(dashboard_id, name, slug, description=None, icon=None,
+                     sort_order=0, is_default=False, is_active=True):
+    return _execute_returning("""
+        UPDATE dashboards
+        SET name = %s,
+            slug = %s,
+            description = %s,
+            icon = %s,
+            sort_order = %s,
+            is_default = %s,
+            is_active = %s,
+            updated_at = now()
+        WHERE id = %s
+        RETURNING id, name, slug, description, icon, sort_order, is_default,
+                  is_active, owner_type, owner_id, created_at, updated_at
+    """, (
+        name, slug, description, icon, sort_order, is_default, is_active, dashboard_id,
+    ))
+
+
+def delete_dashboard(dashboard_id):
+    _execute("DELETE FROM dashboards WHERE id = %s", (dashboard_id,))
+
+
+def create_dashboard_section(dashboard_id, title=None, description=None,
+                             layout_columns=1, sort_order=0, is_active=True):
+    return _execute_returning("""
+        INSERT INTO dashboard_sections (
+            dashboard_id, title, description, layout_columns, sort_order,
+            is_active, created_at, updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, now(), now())
+        RETURNING id, dashboard_id, title, description, layout_columns,
+                  sort_order, is_active, created_at, updated_at
+    """, (dashboard_id, title, description, layout_columns, sort_order, is_active))
+
+
+def update_dashboard_section(section_id, title=None, description=None,
+                             layout_columns=1, sort_order=0, is_active=True):
+    return _execute_returning("""
+        UPDATE dashboard_sections
+        SET title = %s,
+            description = %s,
+            layout_columns = %s,
+            sort_order = %s,
+            is_active = %s,
+            updated_at = now()
+        WHERE id = %s
+        RETURNING id, dashboard_id, title, description, layout_columns,
+                  sort_order, is_active, created_at, updated_at
+    """, (title, description, layout_columns, sort_order, is_active, section_id))
+
+
+def delete_dashboard_section(section_id):
+    _execute("DELETE FROM dashboard_sections WHERE id = %s", (section_id,))
+
+
+def create_dashboard_widget(section_id, widget_type, title=None, query_key=None,
+                            query_params=None, display_config=None, sort_order=0,
+                            is_active=True):
+    return _execute_returning("""
+        INSERT INTO dashboard_widgets (
+            section_id, widget_type, title, query_key, query_params_json,
+            display_config_json, sort_order, is_active, created_at, updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now(), now())
+        RETURNING id, section_id, widget_type, title, query_key, query_params_json,
+                  display_config_json, sort_order, is_active, created_at, updated_at
+    """, (
+        section_id,
+        widget_type,
+        title,
+        query_key,
+        json.dumps(query_params or {}),
+        json.dumps(display_config or {}),
+        sort_order,
+        is_active,
+    ))
+
+
+def update_dashboard_widget(widget_id, widget_type, title=None, query_key=None,
+                            query_params=None, display_config=None, sort_order=0,
+                            is_active=True):
+    return _execute_returning("""
+        UPDATE dashboard_widgets
+        SET widget_type = %s,
+            title = %s,
+            query_key = %s,
+            query_params_json = %s,
+            display_config_json = %s,
+            sort_order = %s,
+            is_active = %s,
+            updated_at = now()
+        WHERE id = %s
+        RETURNING id, section_id, widget_type, title, query_key, query_params_json,
+                  display_config_json, sort_order, is_active, created_at, updated_at
+    """, (
+        widget_type,
+        title,
+        query_key,
+        json.dumps(query_params or {}),
+        json.dumps(display_config or {}),
+        sort_order,
+        is_active,
+        widget_id,
+    ))
+
+
+def delete_dashboard_widget(widget_id):
+    _execute("DELETE FROM dashboard_widgets WHERE id = %s", (widget_id,))

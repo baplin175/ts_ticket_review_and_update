@@ -16,7 +16,12 @@ from dash_iconify import DashIconify
 import plotly.graph_objects as go
 import yaml
 
-import data
+try:
+    from . import data
+    from . import query_catalog
+except ImportError:  # pragma: no cover - supports direct script-style imports
+    import data
+    import query_catalog
 
 # ── Config loading (auto-reloads on file change) ────────────────────
 
@@ -67,17 +72,53 @@ def get_custom_layout(route):
 
 def render_page(page_def):
     """Render a YAML-driven page definition into Dash components."""
+    return render_dashboard(_legacy_page_to_dashboard(page_def))
+
+
+def render_dashboard(definition):
+    """Render a canonical dashboard definition into Dash components."""
     children = []
 
-    if page_def.get("title"):
-        children.append(dmc.Title(page_def["title"], order=2))
+    title = definition.get("title")
+    description = definition.get("description")
+    sections = definition.get("sections", [])
 
-    if "tabs" in page_def:
-        children.append(_render_tabs(page_def["tabs"]))
-    elif "components" in page_def:
-        children.extend(_render_components(page_def["components"]))
+    if title:
+        children.append(dmc.Title(title, order=2))
+    if description:
+        children.append(dmc.Text(description, c="dimmed", size="sm"))
+
+    for section in sections:
+        children.append(render_section(section))
 
     return dmc.Stack(children, gap="md")
+
+
+def render_section(section_def):
+    """Render one canonical dashboard section."""
+    try:
+        validate_section(section_def)
+    except ValueError as exc:
+        return _render_error(str(exc), title=section_def.get("title") or "Invalid section")
+
+    widgets = [render_widget(widget_def) for widget_def in section_def.get("widgets", [])]
+    stack_children = []
+    if section_def.get("title"):
+        stack_children.append(dmc.Text(section_def["title"], fw=600, size="lg"))
+    if section_def.get("description"):
+        stack_children.append(dmc.Text(section_def["description"], c="dimmed", size="sm"))
+    stack_children.extend(widgets)
+    return dmc.Stack(stack_children, gap="md")
+
+
+def render_widget(widget_def):
+    """Render one canonical widget with isolated validation/error handling."""
+    try:
+        validate_widget(widget_def)
+        return _render_widget_impl(widget_def)
+    except Exception as exc:
+        title = widget_def.get("title") or widget_def.get("type") or "Invalid widget"
+        return _render_error(str(exc), title=title)
 
 
 # ── Tabs ────────────────────────────────────────────────────────────
@@ -105,16 +146,21 @@ def _render_tabs(tabs_def):
 def _render_components(components):
     rendered = []
     for comp in components:
-        ctype = comp.get("type")
-        if ctype == "alert":
-            rendered.append(_render_alert(comp))
-        elif ctype == "grid":
-            rendered.append(_render_grid(comp))
-        elif ctype == "chart":
-            rendered.append(_render_chart(comp))
-        elif ctype == "stat_row":
-            rendered.append(_render_stat_row(comp))
+        rendered.append(render_widget(_legacy_component_to_widget(comp)))
     return rendered
+
+
+def _render_widget_impl(widget_def):
+    ctype = widget_def.get("type")
+    if ctype == "alert":
+        return _render_alert(widget_def)
+    if ctype == "grid":
+        return _render_grid(widget_def)
+    if ctype == "chart":
+        return _render_chart(widget_def)
+    if ctype == "stat_row":
+        return _render_stat_row(widget_def)
+    raise ValueError(f"Unsupported widget type '{ctype}'.")
 
 
 # ── Alert ───────────────────────────────────────────────────────────
@@ -159,8 +205,9 @@ def _normalize_columns(col_defs):
 
 
 def _render_grid(comp):
-    rows = _run_query(comp["query"])
-    columns = _normalize_columns(comp.get("columns", []))
+    rows = _run_query(comp["query"], "grid")
+    raw_columns = comp.get("columns", [])
+    columns = _normalize_columns(raw_columns) if raw_columns else _infer_columns(rows)
 
     grid_id = comp.get("id", f"yaml-grid-{comp['query']}")
     height = comp.get("height", "calc(100vh - 280px)")
@@ -191,6 +238,21 @@ def _render_grid(comp):
     return grid_with_export(grid, grid_id)
 
 
+def _infer_columns(rows):
+    """Infer AG Grid columns from the first row when none are configured."""
+    if not rows:
+        return []
+    result = []
+    for field in rows[0].keys():
+        result.append(
+            {
+                "field": field,
+                "headerName": field.replace("_", " ").title(),
+            }
+        )
+    return result
+
+
 def grid_with_export(grid_component, grid_id):
     """Wrap an AG Grid with a CSV export button."""
     btn_id = f"{grid_id}-csv-btn"
@@ -218,7 +280,7 @@ def grid_with_export(grid_component, grid_id):
 # ── Charts ──────────────────────────────────────────────────────────
 
 def _render_chart(comp):
-    rows = _run_query(comp["query"])
+    rows = _run_query(comp["query"], "chart")
 
     if not rows:
         return dmc.Text(
@@ -295,7 +357,7 @@ def _render_stat_row(comp):
     query_name = comp.get("query")
     row = {}
     if query_name:
-        row = _run_query_one(query_name) or {}
+        row = _run_query_one(query_name, "stat_row") or {}
 
     cards = []
     for item in comp.get("items", []):
@@ -348,15 +410,111 @@ def _stat_card(title, value, icon, color):
 
 # ── Query execution ────────────────────────────────────────────────
 
-def _run_query(query_name):
-    q = get_queries().get(query_name)
+def _run_query(query_name, widget_type=None):
+    return _execute_query(query_name, widget_type)
+
+
+def _run_query_one(query_name, widget_type=None):
+    return _execute_query(query_name, widget_type, expect_one=True)
+
+
+def _execute_query(query_ref, widget_type, expect_one=False):
+    if isinstance(query_ref, dict):
+        query_key = query_ref.get("key")
+        params = query_ref.get("params", {})
+        result = query_catalog.run_query(query_key, widget_type, params)
+        return result
+
+    catalog_query = query_catalog.QUERY_CATALOG.get(query_ref)
+    if catalog_query and widget_type:
+        return query_catalog.run_query(query_ref, widget_type, {})
+
+    q = get_queries().get(query_ref)
     if not q:
-        return []
+        return None if expect_one else []
+    if expect_one:
+        return data.query_one(q["sql"], tuple(q.get("params", [])))
     return data.query(q["sql"], tuple(q.get("params", [])))
 
 
-def _run_query_one(query_name):
-    q = get_queries().get(query_name)
-    if not q:
-        return None
-    return data.query_one(q["sql"], tuple(q.get("params", [])))
+def validate_section(section_def):
+    widgets = section_def.get("widgets")
+    if widgets is None:
+        raise ValueError("Section is missing 'widgets'.")
+    if not isinstance(widgets, list):
+        raise ValueError("Section 'widgets' must be a list.")
+
+
+def validate_widget(widget_def):
+    ctype = widget_def.get("type")
+    if ctype not in {"alert", "grid", "chart", "stat_row"}:
+        raise ValueError(f"Unsupported widget type '{ctype}'.")
+    if ctype == "alert":
+        return
+
+    query_ref = widget_def.get("query")
+    if not query_ref:
+        raise ValueError("Widget is missing 'query'.")
+
+    if ctype == "chart":
+        if not widget_def.get("x"):
+            raise ValueError("Chart widget is missing 'x'.")
+        if not widget_def.get("y"):
+            raise ValueError("Chart widget is missing 'y'.")
+
+    if ctype == "stat_row":
+        items = widget_def.get("items", [])
+        if not items:
+            raise ValueError("Stat row widget requires at least one item.")
+
+    if isinstance(query_ref, dict):
+        query_catalog.validate_widget_query(
+            query_ref.get("key"),
+            ctype,
+            query_ref.get("params", {}),
+        )
+    elif query_ref in query_catalog.QUERY_CATALOG:
+        query_catalog.validate_widget_query(query_ref, ctype, {})
+    elif query_ref not in get_queries():
+        raise ValueError(f"Unknown widget query '{query_ref}'.")
+
+
+def _legacy_page_to_dashboard(page_def):
+    sections = []
+    if "tabs" in page_def:
+        for idx, tab in enumerate(page_def["tabs"]):
+            sections.append(
+                {
+                    "id": tab.get("value", f"tab-{idx}"),
+                    "title": tab.get("label"),
+                    "widgets": [_legacy_component_to_widget(comp) for comp in tab.get("components", [])],
+                }
+            )
+    elif "components" in page_def:
+        sections.append(
+            {
+                "id": page_def.get("route", "main"),
+                "widgets": [_legacy_component_to_widget(comp) for comp in page_def.get("components", [])],
+            }
+        )
+
+    return {
+        "title": page_def.get("title"),
+        "description": page_def.get("description"),
+        "sections": sections,
+    }
+
+
+def _legacy_component_to_widget(comp):
+    return dict(comp)
+
+
+def _render_error(message, title="Widget Error"):
+    return dmc.Alert(
+        message,
+        title=title,
+        color="red",
+        variant="light",
+        radius="md",
+        icon=DashIconify(icon="tabler:alert-triangle", width=20),
+    )
