@@ -868,7 +868,8 @@ def fetch_ticket_numbers_by_status(status: str, *, exclude_closed: bool = False)
             """SELECT t.ticket_number
                  FROM tickets t
                  JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
-                WHERE COALESCE(t.status, '') NOT IN ('Closed', 'Closed with Survey')
+                WHERE COALESCE(t.status, '') NOT IN ('Closed', 'Closed with Survey', 'Open')
+                  AND COALESCE(t.assignee, '') != 'Marketing'
                   AND r.thread_hash IS NOT NULL
                 ORDER BY t.ticket_number;""",
         )
@@ -878,7 +879,8 @@ def fetch_ticket_numbers_by_status(status: str, *, exclude_closed: bool = False)
                  FROM tickets t
                  JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
                 WHERE t.closed_at IS NULL
-                  AND COALESCE(t.status, '') NOT IN ('Closed', 'Closed with Survey')
+                  AND COALESCE(t.status, '') NOT IN ('Closed', 'Closed with Survey', 'Open')
+                  AND COALESCE(t.assignee, '') != 'Marketing'
                   AND r.thread_hash IS NOT NULL
                 ORDER BY t.ticket_number;""",
         )
@@ -887,7 +889,9 @@ def fetch_ticket_numbers_by_status(status: str, *, exclude_closed: bool = False)
             """SELECT t.ticket_number
                  FROM tickets t
                  JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
-                WHERE t.status = %s AND r.thread_hash IS NOT NULL
+                WHERE t.status = %s AND t.status != 'Open'
+                  AND COALESCE(t.assignee, '') != 'Marketing'
+                  AND r.thread_hash IS NOT NULL
                 ORDER BY t.ticket_number;""",
             (status,),
         )
@@ -895,9 +899,12 @@ def fetch_ticket_numbers_by_status(status: str, *, exclude_closed: bool = False)
 
 
 def get_open_ticket_ids() -> list[int]:
-    """Return ticket_ids for all tickets the DB considers still open (closed_at IS NULL)."""
+    """Return ticket_ids for all tickets the DB considers still open (closed_at IS NULL).
+
+    Excludes status='Open' tickets which are user test tickets.
+    """
     rows = fetch_all(
-        "SELECT ticket_id FROM tickets WHERE closed_at IS NULL ORDER BY ticket_id;"
+        "SELECT ticket_id FROM tickets WHERE closed_at IS NULL AND COALESCE(status, '') != 'Open' AND COALESCE(assignee, '') != 'Marketing' ORDER BY ticket_id;"
     )
     return [r[0] for r in rows]
 

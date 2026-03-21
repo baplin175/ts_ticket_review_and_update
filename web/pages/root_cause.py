@@ -5,7 +5,7 @@ from collections import OrderedDict
 
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
-from dash import dcc, html, callback, Input, Output, no_update
+from dash import dcc, html, callback, Input, Output, State, no_update
 from dash_iconify import DashIconify
 import plotly.graph_objects as go
 
@@ -96,6 +96,32 @@ _INTERVENTION_COLORS = {
     "customer_training": "#d6336c",
     "other": "#868e96",
 }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# ── Fixes drill-down column defs ─────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+
+_FIXES_DRILLDOWN_COLS = [
+    {"field": "ticket_number", "headerName": "Ticket #", "width": 110, "pinned": "left"},
+    {"field": "ticket_name", "headerName": "Name", "minWidth": 200, "flex": 1,
+     "tooltipField": "ticket_name"},
+    {"field": "status", "headerName": "Status", "width": 120},
+    {"field": "severity", "headerName": "Severity", "width": 140},
+    {"field": "product_name", "headerName": "Product", "width": 140},
+    {"field": "customer", "headerName": "Customer", "width": 140},
+    {"field": "mechanism_class", "headerName": "Mechanism", "width": 160},
+    {"field": "intervention_type", "headerName": "Intervention", "width": 150},
+    {"field": "intervention_action", "headerName": "Action", "minWidth": 200, "flex": 1,
+     "tooltipField": "intervention_action"},
+    {"field": "days_opened", "headerName": "Age (d)", "width": 90, "type": "numericColumn",
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
+    {"field": "priority", "headerName": "Priority", "width": 95, "type": "numericColumn"},
+    {"field": "overall_complexity", "headerName": "Complexity", "width": 110, "type": "numericColumn"},
+    {"field": "date_modified", "headerName": "Last Modified", "width": 130,
+     "valueFormatter": {"function": "params.value ? new Date(params.value).toLocaleDateString() : ''"},
+     "sort": "desc"},
+]
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -200,6 +226,7 @@ def _build_dashboard_tab():
             rowData=top_fixes,
             columnDefs=[
                 {"field": "mechanism_class", "headerName": "Mechanism Class", "width": 200,
+                 "checkboxSelection": True, "headerCheckboxSelection": True,
                  "valueFormatter": {"function": "params.value ? params.value.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase()) : ''"}},
                 {"field": "intervention_type", "headerName": "Intervention Type", "width": 180,
                  "valueFormatter": {"function": "params.value ? params.value.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase()) : ''"}},
@@ -210,16 +237,72 @@ def _build_dashboard_tab():
             ],
             defaultColDef={"sortable": True, "filter": True, "resizable": True},
             dashGridOptions={"pagination": True, "paginationPageSize": 10,
-                             "animateRows": True},
+                             "animateRows": True,
+                             "rowSelection": "multiple",
+                             "suppressRowClickSelection": True},
             style={"height": "400px"},
             className="ag-theme-alpine",
         )
         children.append(
             dmc.Paper([
-                dmc.Text("Top Engineering Fixes (ROI-ranked)", fw=600, mb="xs"),
+                dmc.Group(
+                    [
+                        dmc.Text("Top Engineering Fixes (ROI-ranked)", fw=600),
+                        dmc.Button(
+                            "View Tickets",
+                            id="rc-fixes-drilldown-btn",
+                            leftSection=DashIconify(icon="tabler:list-search", width=16),
+                            variant="light",
+                            size="compact-sm",
+                            disabled=True,
+                        ),
+                    ],
+                    justify="space-between",
+                    mb="xs",
+                ),
                 grid_with_export(fix_grid, "rc-fixes-grid"),
             ], withBorder=True, p="md", radius="md", shadow="sm")
         )
+    else:
+        # Placeholder components so callbacks don't error
+        children.append(html.Div([
+            html.Div(id="rc-fixes-drilldown-btn"),
+        ], style={"display": "none"}))
+
+    # Drill-down modal for engineering fixes
+    children.append(
+        dmc.Modal(
+            id="rc-fixes-drilldown-modal",
+            title="Engineering Fix — Tickets",
+            size="90%",
+            centered=True,
+            children=[
+                dmc.Text(id="rc-fixes-drilldown-subtitle", size="sm", c="dimmed", mb="sm"),
+                grid_with_export(
+                    dag.AgGrid(
+                        id="rc-fixes-drilldown-grid",
+                        rowData=[],
+                        columnDefs=_FIXES_DRILLDOWN_COLS,
+                        defaultColDef={
+                            "sortable": True, "filter": True,
+                            "resizable": True, "floatingFilter": True,
+                            "filterParams": {"caseSensitive": False},
+                        },
+                        dashGridOptions={
+                            "rowSelection": "single",
+                            "pagination": True,
+                            "paginationPageSize": 25,
+                            "animateRows": True,
+                            "enableCellTextSelection": True,
+                        },
+                        style={"height": "60vh", "cursor": "pointer"},
+                        className="ag-theme-quartz",
+                    ),
+                    "rc-fixes-drilldown-grid",
+                ),
+            ],
+        )
+    )
 
     return dmc.Stack(children, gap="md")
 
@@ -798,3 +881,37 @@ def register_callbacks(app):
             ),
             thread_section,
         ], gap="md")
+
+    # ── Fixes drill-down callbacks ───────────────────────────────────
+
+    @app.callback(
+        Output("rc-fixes-drilldown-btn", "disabled"),
+        Output("rc-fixes-drilldown-btn", "children"),
+        Input("rc-fixes-grid", "selectedRows"),
+    )
+    def toggle_fixes_btn(selected):
+        if not selected:
+            return True, "View Tickets"
+        n = len(selected)
+        total = sum(r.get("ticket_count", 0) for r in selected)
+        return False, f"View Tickets ({n} fix{'es' if n != 1 else ''}, ~{total} tickets)"
+
+    @app.callback(
+        Output("rc-fixes-drilldown-modal", "opened"),
+        Output("rc-fixes-drilldown-grid", "rowData"),
+        Output("rc-fixes-drilldown-subtitle", "children"),
+        Input("rc-fixes-drilldown-btn", "n_clicks"),
+        State("rc-fixes-grid", "selectedRows"),
+        prevent_initial_call=True,
+    )
+    def open_fixes_drilldown(n_clicks, selected):
+        if not n_clicks or not selected:
+            return no_update, no_update, no_update
+        fix_keys = [
+            (r["mechanism_class"], r["intervention_type"])
+            for r in selected
+        ]
+        tickets = data.get_tickets_by_fixes(fix_keys)
+        labels = [f"{r['mechanism_class']} / {r['intervention_type']}" for r in selected]
+        subtitle = f"{len(tickets)} ticket{'s' if len(tickets) != 1 else ''} matching: {', '.join(labels)}"
+        return True, tickets, subtitle

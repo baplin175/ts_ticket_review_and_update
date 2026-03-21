@@ -644,7 +644,9 @@ def snapshot_tickets_daily(
          date_created, date_modified, source_updated_at,
          priority, complexity) = r
 
-        is_open = status is not None and status.lower() not in ("closed", "resolved")
+        is_open = (status is not None
+                  and status.lower() not in ("closed", "resolved", "open")
+                  and (assignee or "") != "Marketing")
         age_days = None
         if date_created:
             age_days = (datetime.now(timezone.utc) - date_created).days
@@ -699,13 +701,16 @@ def rebuild_customer_ticket_health(as_of_date: date | None = None) -> int:
     rows = db.fetch_all("""
         SELECT
             t.customer,
-            COUNT(*) FILTER (WHERE t.status NOT IN ('Closed','Resolved')
+            COUNT(*) FILTER (WHERE t.status NOT IN ('Closed','Resolved','Open')
+                             AND COALESCE(t.assignee, '') != 'Marketing'
                              OR t.closed_at IS NULL)                              AS open_ct,
             COUNT(*) FILTER (WHERE p.priority IS NOT NULL AND p.priority <= 3
-                             AND (t.status NOT IN ('Closed','Resolved')
+                             AND (t.status NOT IN ('Closed','Resolved','Open')
+                                  AND COALESCE(t.assignee, '') != 'Marketing'
                                   OR t.closed_at IS NULL))                         AS hp_ct,
             COUNT(*) FILTER (WHERE c.overall_complexity >= 4
-                             AND (t.status NOT IN ('Closed','Resolved')
+                             AND (t.status NOT IN ('Closed','Resolved','Open')
+                                  AND COALESCE(t.assignee, '') != 'Marketing'
                                   OR t.closed_at IS NULL))                         AS hc_ct,
             ROUND(AVG(c.overall_complexity), 2),
             ROUND(AVG(c.elapsed_drag), 2),
@@ -972,10 +977,11 @@ def rebuild_daily_open_counts(
                   -- Ticket has a closed_at date: open if closed_at is after this date
                   (t.closed_at IS NOT NULL AND t.closed_at::date > %s)
                   OR
-                  -- Ticket has no closed_at: open only if status is not Closed/Resolved
+                  -- Ticket has no closed_at: open only if status is not Closed/Resolved/Open
                   (t.closed_at IS NULL
-                   AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved'))
+                   AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved', 'Open'))
               )
+              AND COALESCE(t.assignee, '') != 'Marketing'
             GROUP BY
                 COALESCE(t.product_name, ''),
                 COALESCE(t.status, ''),

@@ -2,7 +2,7 @@
 
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
-from dash import dcc, html
+from dash import callback, dcc, html, Input, Output, State, no_update
 from dash_iconify import DashIconify
 import plotly.graph_objects as go
 
@@ -14,9 +14,22 @@ AGE_BUCKET_ORDER = ["0-6", "7-13", "14-29", "30-59", "60-89", "90+"]
 AGE_BUCKET_COLORS = ["#1c7ed6", "#339af0", "#74c0fc", "#f59f00", "#e8590c", "#e03131"]
 
 
+# ── Multi-select filter config ───────────────────────────────────────
+
+_FILTER_FIELDS = [
+    {"field": "status",       "label": "Status"},
+    {"field": "severity",     "label": "Severity"},
+    {"field": "product_name", "label": "Product"},
+    {"field": "assignee",     "label": "Assignee"},
+    {"field": "customer",     "label": "Customer"},
+    {"field": "frustrated",   "label": "Frustrated"},
+]
+
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
-def _stat_card(title, value, icon, color, card_id=None):
+def _stat_card(title, value, icon, color, card_id=None, value_id=None):
+    value_el = dmc.Title(str(value), order=3, id=value_id) if value_id else dmc.Title(str(value), order=3)
     paper = dmc.Paper(
         [
             dmc.Group(
@@ -24,7 +37,7 @@ def _stat_card(title, value, icon, color, card_id=None):
                     dmc.Stack(
                         [
                             dmc.Text(title, size="xs", c="dimmed", tt="uppercase", fw=700),
-                            dmc.Title(str(value), order=3),
+                            value_el,
                         ],
                         gap=0,
                     ),
@@ -255,6 +268,104 @@ def _product_chart(rows):
                      style={"cursor": "pointer"})
 
 
+# ── Filter bar helpers ───────────────────────────────────────────────
+
+def _distinct_values(rows, field):
+    """Return sorted distinct non-null values for a field."""
+    return sorted({str(r.get(field)) for r in rows if r.get(field) is not None and str(r.get(field)).strip()})
+
+
+def _build_filter_bar(rows):
+    """Build a row of MultiSelect dropdowns for categorical ticket fields."""
+    selects = []
+    for f in _FILTER_FIELDS:
+        options = _distinct_values(rows, f["field"])
+        selects.append(
+            dmc.MultiSelect(
+                id={"type": "overview-filter-select", "field": f["field"]},
+                label=f["label"],
+                data=options,
+                placeholder="All",
+                searchable=True,
+                clearable=True,
+                size="xs",
+                style={"minWidth": 150, "flex": "1 1 150px"},
+            )
+        )
+    return dmc.Paper(
+        dmc.Group(selects, gap="xs", grow=True, align="flex-end"),
+        p="sm",
+        withBorder=True,
+        radius="md",
+    )
+
+
+def _compute_stats(rows):
+    """Compute KPI stats from a list of open ticket dicts."""
+    total = len(rows)
+    high_pri = sum(1 for r in rows if r.get("priority") is not None and r["priority"] <= 3)
+    high_cx = sum(1 for r in rows if r.get("overall_complexity") is not None and r["overall_complexity"] >= 4)
+    frustrated = sum(1 for r in rows if r.get("frustrated") == "Yes")
+    return {"total_open": total, "high_priority": high_pri, "high_complexity": high_cx, "frustrated": frustrated}
+
+
+def _build_aging_from_tickets(rows):
+    """Compute aging distribution from ticket-level days_opened."""
+    buckets = {b: 0 for b in AGE_BUCKET_ORDER}
+    for r in rows:
+        d = r.get("days_opened")
+        if d is None:
+            continue
+        d = float(d)
+        if d < 7:
+            buckets["0-6"] += 1
+        elif d < 14:
+            buckets["7-13"] += 1
+        elif d < 30:
+            buckets["14-29"] += 1
+        elif d < 60:
+            buckets["30-59"] += 1
+        elif d < 90:
+            buckets["60-89"] += 1
+        else:
+            buckets["90+"] += 1
+    return [{"age_bucket": b, "ticket_count": buckets[b]} for b in AGE_BUCKET_ORDER if buckets[b] > 0]
+
+
+def _severity_tier(severity_text):
+    """Map severity string to tier, matching the DB view logic."""
+    s = (severity_text or "").lower()
+    if s.startswith("1") or "high" in s:
+        return "High"
+    if s.startswith("3") or "low" in s:
+        return "Low"
+    return "Medium"
+
+
+def _consolidate_product(name):
+    """Consolidate PM/Power* variants into 'PowerMan', matching the DB view."""
+    p = (name or "").strip()
+    pl = p.lower()
+    if pl.startswith("pm") or "power" in pl:
+        return "PowerMan"
+    return p if p else "Unknown"
+
+
+def _build_product_from_tickets(rows):
+    """Compute product × severity distribution from ticket-level data."""
+    from collections import defaultdict
+    product_sev = defaultdict(lambda: defaultdict(int))
+    for r in rows:
+        p = _consolidate_product(r.get("product_name"))
+        tier = _severity_tier(r.get("severity"))
+        product_sev[p][tier] += 1
+    result = []
+    for p, tiers in product_sev.items():
+        for tier, count in tiers.items():
+            result.append({"product_name": p, "severity_tier": tier, "ticket_count": count})
+    return result
+
+
 # ── Layout ───────────────────────────────────────────────────────────
 
 def overview_layout():
@@ -264,43 +375,61 @@ def overview_layout():
     aging = data.get_backlog_aging()
     aging_by_product = data.get_aging_by_product()
     products = data.get_open_by_product()
+    # Fetch open tickets for filter dropdowns
+    all_tickets = data.get_ticket_list()
+    open_tickets = [r for r in all_tickets if (r.get("status") or "").lower() != "closed"]
 
     return dmc.Stack(
         [
             dmc.Title("Overview", order=2),
 
-            # KPI row
-            dmc.SimpleGrid(
-                cols={"base": 1, "sm": 2, "lg": 4},
-                children=[
-                    _stat_card("Open Tickets", stats["total_open"],
-                               "tabler:ticket", "blue", card_id="kpi-total-open"),
-                    _stat_card("High Priority", stats["high_priority"],
-                               "tabler:alert-triangle", "red", card_id="kpi-high-priority"),
-                    _stat_card("High Complexity", stats["high_complexity"],
-                               "tabler:brain", "orange", card_id="kpi-high-complexity"),
-                    _stat_card("Frustrated", stats["frustrated"],
-                               "tabler:mood-sad", "pink", card_id="kpi-frustrated"),
-                ],
+            # Multi-select filter bar
+            _build_filter_bar(open_tickets),
+            # Hidden store for open ticket data (used by filter callback)
+            dcc.Store(id="overview-ticket-store", data=open_tickets),
+
+            # KPI row (dynamic — updated by filter callback)
+            html.Div(
+                dmc.SimpleGrid(
+                    cols={"base": 1, "sm": 2, "lg": 4},
+                    children=[
+                        _stat_card("Open Tickets", stats["total_open"],
+                                   "tabler:ticket", "blue", card_id="kpi-total-open",
+                                   value_id="kpi-val-total-open"),
+                        _stat_card("High Priority", stats["high_priority"],
+                                   "tabler:alert-triangle", "red", card_id="kpi-high-priority",
+                                   value_id="kpi-val-high-priority"),
+                        _stat_card("High Complexity", stats["high_complexity"],
+                                   "tabler:brain", "orange", card_id="kpi-high-complexity",
+                                   value_id="kpi-val-high-complexity"),
+                        _stat_card("Frustrated", stats["frustrated"],
+                                   "tabler:mood-sad", "pink", card_id="kpi-frustrated",
+                                   value_id="kpi-val-frustrated"),
+                    ],
+                ),
+                id="overview-kpi-row",
             ),
 
             # Backlog trend
             dmc.Paper(
                 [
                     dmc.Text("Open Backlog Trend", fw=600, mb="xs"),
-                    _backlog_chart(backlog, backlog_by_severity),
+                    html.Div(_backlog_chart(backlog, backlog_by_severity), id="overview-backlog-chart"),
                 ],
                 withBorder=True, p="md", radius="md", shadow="sm",
             ),
 
-            # Two-column row
+            # Filter status indicator (hidden when no filters active)
+            html.Div(id="overview-filter-indicator"),
+
+            # Two-column row (dynamic — updated by filter callback)
             dmc.SimpleGrid(
                 cols={"base": 1, "md": 2},
                 children=[
                     dmc.Paper(
                         [
                             dmc.Text("Aging Distribution (days)", fw=600, mb="xs"),
-                            _aging_chart(aging),
+                            html.Div(_aging_chart(aging), id="overview-aging-chart"),
                             dmc.Button(
                                 "Show per-product breakdown",
                                 id="aging-toggle-btn",
@@ -318,7 +447,7 @@ def overview_layout():
                     dmc.Paper(
                         [
                             dmc.Text("Open by Product", fw=600, mb="xs"),
-                            _product_chart(products),
+                            html.Div(_product_chart(products), id="overview-product-chart"),
                         ],
                         withBorder=True, p="md", radius="md", shadow="sm",
                     ),
@@ -340,6 +469,7 @@ def overview_layout():
 
             # Drill-down modal (hidden until a chart bar is clicked)
             dcc.Store(id="drilldown-store", data=None),
+            dcc.Store(id="overview-active-filters", data={}),
             dmc.Modal(
                 id="drilldown-modal",
                 title="Drill-down: Tickets",
@@ -374,3 +504,111 @@ def overview_layout():
         ],
         gap="md",
     )
+
+
+# ── Multi-select filter callback ────────────────────────────────────
+
+def register_overview_callbacks(app):
+    """Register overview filter callbacks. Called from app.py."""
+
+    @app.callback(
+        Output("kpi-val-total-open", "children"),
+        Output("kpi-val-high-priority", "children"),
+        Output("kpi-val-high-complexity", "children"),
+        Output("kpi-val-frustrated", "children"),
+        Output("overview-backlog-chart", "children"),
+        Output("overview-aging-chart", "children"),
+        Output("overview-product-chart", "children"),
+        Output("overview-filter-indicator", "children"),
+        Output("overview-active-filters", "data"),
+        *[Input({"type": "overview-filter-select", "field": f["field"]}, "value")
+          for f in _FILTER_FIELDS],
+        State("overview-ticket-store", "data"),
+        prevent_initial_call=True,
+    )
+    def apply_overview_filters(*args):
+        """Recompute KPIs, backlog trend, aging, and product charts from filtered data."""
+        all_rows = args[-1]
+        filter_values = args[:-1]
+
+        if not all_rows:
+            return (no_update,) * 9
+
+        # Check if any filters are actually active
+        any_active = any(v for v in filter_values if v)
+        if not any_active:
+            # No filters — revert to original DB-view data
+            stats = data.get_open_ticket_stats()
+            backlog = data.get_backlog_daily()
+            backlog_sev = data.get_backlog_daily_by_severity()
+            return (
+                str(stats["total_open"]),
+                str(stats["high_priority"]),
+                str(stats["high_complexity"]),
+                str(stats["frustrated"]),
+                _backlog_chart(backlog, backlog_sev),
+                _aging_chart(data.get_backlog_aging()),
+                _product_chart(data.get_open_by_product()),
+                None,
+                {},
+            )
+
+        # Build filter dict for DB query and drill-down
+        filter_dict = {}
+        for i, f in enumerate(_FILTER_FIELDS):
+            if filter_values[i]:
+                filter_dict[f["field"]] = filter_values[i]
+
+        # Apply multi-select filters to ticket store for KPIs/aging/product
+        filtered = all_rows
+        active_filters = []
+        for i, f in enumerate(_FILTER_FIELDS):
+            selected = filter_values[i]
+            if selected:
+                field = f["field"]
+                selected_set = set(selected)
+                filtered = [r for r in filtered if str(r.get(field, "")) in selected_set]
+                active_filters.append(f"{f['label']}: {', '.join(selected)}")
+
+        # Only include open tickets (exclude Closed)
+        filtered = [r for r in filtered if (r.get("status") or "").lower() != "closed"]
+
+        # Recompute KPIs
+        stats = _compute_stats(filtered)
+
+        # Recompute backlog trend from DB with filters
+        backlog_rows, backlog_sev_rows = data.get_filtered_backlog_daily(filter_dict)
+        backlog_chart = _backlog_chart(backlog_rows, backlog_sev_rows)
+
+        # Recompute aging
+        aging_rows = _build_aging_from_tickets(filtered)
+        aging_chart = _aging_chart(aging_rows) if aging_rows else dmc.Text(
+            "No tickets match the current filters.", c="dimmed", ta="center", py="xl")
+
+        # Recompute product breakdown
+        product_rows = _build_product_from_tickets(filtered)
+        product_chart = _product_chart(product_rows) if product_rows else dmc.Text(
+            "No tickets match the current filters.", c="dimmed", ta="center", py="xl")
+
+        # Filter indicator
+        indicator = dmc.Alert(
+            f"Showing {len(filtered)} of {len(all_rows)} open tickets",
+            title="Filters active",
+            color="blue",
+            variant="light",
+            icon=DashIconify(icon="tabler:filter", width=20),
+            radius="md",
+            withCloseButton=False,
+        ) if active_filters else None
+
+        return (
+            str(stats["total_open"]),
+            str(stats["high_priority"]),
+            str(stats["high_complexity"]),
+            str(stats["frustrated"]),
+            backlog_chart,
+            aging_chart,
+            product_chart,
+            indicator,
+            filter_dict,
+        )

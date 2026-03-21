@@ -43,12 +43,12 @@ migrations/            — Numbered SQL migration files applied by db.py
 web/app.py             — Dash + Mantine web dashboard entry point (read-only, live Postgres queries)
 web/dashboard.yaml     — YAML-driven dashboard configuration (pages, nav, queries, grids, charts, stat cards)
 web/renderer.py        — YAML config renderer: parses dashboard.yaml, builds Dash layouts for YAML-driven pages, imports custom page modules
-web/data.py            — Data access layer for the web dashboard (SELECT-only for analytics, plus dashboard-local CRUD for saved reports; no TS writes); includes root cause analytics queries (mechanism class/intervention type distributions, component/operation aggregations, Sankey flow data, pipeline funnel, per-product breakdown, top engineering fixes from vw_intervention_roi)
-web/pages/overview.py  — Overview page: KPI stat cards, backlog trend chart, aging distribution, open-by-product, chart drill-down (custom)
-web/pages/tickets.py   — Ticket explorer: AG Grid with filters, sorting, row-click navigation to detail, saved filter reports, background sync via subprocess with live log panel and auto-dismiss; tabbed view with Open (default, excludes Closed) and All Tickets tabs; rowSelection uses string format "single" for compatibility (custom)
+web/data.py            — Data access layer for the web dashboard (SELECT-only for analytics, plus dashboard-local CRUD for saved reports; no TS writes); includes root cause analytics queries (mechanism class/intervention type distributions, component/operation aggregations, Sankey flow data, pipeline funnel, per-product breakdown, top engineering fixes from vw_intervention_roi); get_filtered_backlog_daily() reconstructs daily backlog trend from tickets table with dynamic WHERE clauses for overview filters; get_tickets_by_customers() returns open tickets for a list of customer names (health drill-down); get_tickets_by_fixes() returns tickets matching (mechanism_class, intervention_type) pairs (engineering fixes drill-down)
+web/pages/overview.py  — Overview page: KPI stat cards, backlog trend chart, aging distribution, open-by-product, chart drill-down; multi-select filter bar (status, severity, product, assignee, customer, frustrated) — empty = all open tickets (original DB views), selected values = include only those; all visualizations update including backlog trend (reconstructed from tickets table with filter-matching SQL); clearing filters reverts to original DB-view data; filters update KPI values in-place (no card recreation to avoid drill-down trigger); drill-downs use ticket store when filters active for consistent counts (custom)
+web/pages/tickets.py   — Ticket explorer: AG Grid with filters, sorting, row-click navigation to detail, saved filter reports, background sync via subprocess with live log panel and auto-dismiss; tabbed view with Open (default, excludes Closed) and All Tickets tabs; rowSelection uses string format "single" for compatibility; filter persistence via browser sessionStorage — AG Grid filterModel and active tab are saved to a session-scoped dcc.Store on every change and restored automatically when navigating back from ticket detail, so filters survive page transitions until the user clicks Clear Filters; sync-progress-panel hidden via display:none when empty to avoid blank gap in stack layout (custom)
 web/pages/ticket_detail.py — Ticket detail: metadata header, thread timeline (newest-first), score cards, wait profile chart, issue summary, refresh button (re-syncs single ticket from TeamSupport via run_ingest.py --ticket-id, then re-renders page) (custom)
-web/pages/health.py    — Health dashboards: Customer and Product health AG Grid tables (kept for reference; now YAML-driven)
-web/pages/root_cause.py — Root Cause Analytics dashboard: tabbed layout (Dashboard + Detail + Glossary). Dashboard tab: KPI stat cards (tickets analyzed, mechanisms found, interventions mapped, pipeline completion %, top mechanism), pipeline completion funnel chart, mechanism class distribution (horizontal bar), intervention type breakdown (donut), component treemap, operation verb frequency bar chart, Sankey flow diagram (Component → Mechanism Class → Intervention Type), root cause by product (stacked bar), top engineering fixes AG Grid (ROI-ranked from vw_intervention_roi). Detail tab: original AG Grid of pass-processed tickets with CSV export, row-click expands Pass 1/3/4 cards + cleaned thread text. Glossary tab: reference guide for pipeline passes, canonical failure grammar fields, all 14 mechanism classes, all 8 intervention types, and dashboard metrics (custom)
+web/pages/health.py    — Health dashboards: Customer and Product health AG Grid tables; Customer Health tab supports multi-row checkbox selection with "View Tickets" drill-down button that opens a modal showing all open tickets for selected customers (custom)
+web/pages/root_cause.py — Root Cause Analytics dashboard: tabbed layout (Dashboard + Detail + Glossary). Dashboard tab: KPI stat cards (tickets analyzed, mechanisms found, interventions mapped, pipeline completion %, top mechanism), pipeline completion funnel chart, mechanism class distribution (horizontal bar), intervention type breakdown (donut), component treemap, operation verb frequency bar chart, Sankey flow diagram (Component → Mechanism Class → Intervention Type), root cause by product (stacked bar), top engineering fixes AG Grid (ROI-ranked from vw_intervention_roi) with multi-row checkbox selection and "View Tickets" drill-down modal. Detail tab: original AG Grid of pass-processed tickets with CSV export, row-click expands Pass 1/3/4 cards + cleaned thread text. Glossary tab: reference guide for pipeline passes, canonical failure grammar fields, all 14 mechanism classes, all 8 intervention types, and dashboard metrics (custom)
 web/pages/config_view.py — Pipeline config editor (editable settings with Save button writes to config.py + live reload; MATCHA_RESPONSE_LLM model override, toggles, text fields, sync status; custom)
 web_requirements.txt   — Python dependencies for the web dashboard (dash, dash-mantine-components, dash-ag-grid, PyYAML, etc.)
 pipeline/__init__.py   — Standalone CSV pipeline package (no DB dependency, self-contained)
@@ -104,7 +104,7 @@ All database objects live in the `tickets_ai` schema. Every table that reference
 | `vw_latest_ticket_priority` | Latest priority row per ticket |
 | `vw_latest_ticket_complexity` | Latest complexity row per ticket |
 | `vw_latest_ticket_issue_summary` | Latest issue summary per ticket |
-| `vw_ticket_analytics_core` | Master join: tickets + metrics + rollups + 4 latest views |
+| `vw_ticket_analytics_core` | Master join: tickets + metrics + rollups + 4 latest views; excludes status='Open' test tickets |
 | `vw_ticket_complexity_breakdown` | Detailed complexity dimension breakdown |
 | `vw_ticket_wait_profile` | Per-ticket wait-time aggregation by wait type |
 | `vw_customer_support_risk` | 90-day customer risk rollup |
@@ -1594,3 +1594,64 @@ All 4 passes were rerun with `--force` against 30 tickets from `root_c_extractio
 - **Pass 3 evidence grounding** works well: 22/30 mechanisms are `from_thread`, with thread-specific details (e.g., "missing GEO code API key", "Impresa and GP databases must reside on same SQL server/instance").
 - **Pass 3 non-defect categorization** is functioning: 1 ticket correctly classified as `user_training` (mechanism: `user_knowledge_gap`), 4 as `configuration`.
 - **Pass 4 divergence from CSV** is expected: the new v2 mechanisms differ from v1, producing different (often more specific) mechanism_class and intervention_type assignments. The CSV baseline was generated from v1 mechanisms.
+
+## Exclude status='Open' Test Tickets (Migration 019)
+
+Tickets with `status='Open'` are user test tickets and must be excluded from all analytics, views, backlog calculations, and exports.
+
+### Migration 019 — `019_exclude_open_status.sql`
+
+Rebuilds the following views with `status != 'Open'` filters:
+
+- **`vw_ticket_analytics_core`** — added `WHERE COALESCE(t.status, '') != 'Open'`
+- **`vw_backlog_aging_current`** — added `'Open'` to the `NOT IN` list
+- **`vw_backlog_daily_by_severity`** — added `AND COALESCE(t.status, '') != 'Open'` to the join condition
+- **`vw_backlog_product_severity_powman`** — added `AND COALESCE(t.status, '') != 'Open'`
+
+### Python Code Changes
+
+| File | Function/Location | Change |
+|------|-------------------|--------|
+| `db.py` | `fetch_ticket_numbers_by_status()` | Added `'Open'` to all three `NOT IN` branches |
+| `db.py` | `get_open_ticket_ids()` | Added `AND COALESCE(status, '') != 'Open'` |
+| `run_rollups.py` | `is_open` check (snapshot daily) | Added `"open"` to the `not in` tuple |
+| `run_rollups.py` | Customer health query | Added `'Open'` to all `NOT IN` lists |
+| `run_rollups.py` | `daily_open_counts` query | Added `'Open'` to `NOT IN` list |
+| `web/data.py` | `get_open_by_status()` | Added `AND COALESCE(status, '') != 'Open'` |
+| `web/data.py` | `get_drilldown_tickets()` | Added `'Open'` to `NOT IN` list |
+| `web/data.py` | `get_root_cause_tickets()` | Added `AND COALESCE(t.status, '') != 'Open'` |
+| `web/data.py` | `get_root_cause_stats()` | Added `AND COALESCE(t.status, '') != 'Open'` |
+| `export_1000_no_rc.py` | SQL query | Added `AND COALESCE(t.status, '') != 'Open'` |
+| `run_export_pipeline_input.py` | SQL query | Added `AND COALESCE(t.status, '') != 'Open'` |
+
+**Design decision:** Ingestion (`run_ingest.py` / `ts_client.py`) still stores status='Open' tickets in the DB to keep a complete mirror of TeamSupport. Exclusion happens at the query/view layer.
+
+## Exclude assignee='Marketing' Tickets (Migration 020)
+
+Tickets assigned to "Marketing" are not real support tickets and must be excluded from all analytics, views, backlog calculations, and exports — same treatment as status='Open' test tickets.
+
+### Migration 020 — `020_exclude_marketing_assignee.sql`
+
+Rebuilds the same four views from migration 019 with an additional `AND COALESCE(t.assignee, '') != 'Marketing'` filter:
+
+- **`vw_ticket_analytics_core`**, **`vw_backlog_aging_current`**, **`vw_backlog_daily_by_severity`**, **`vw_backlog_product_severity_powman`**
+
+### Python Code Changes
+
+All locations updated in migration 019 received an additional `assignee != 'Marketing'` condition:
+
+| File | Function/Location | Change |
+|------|-------------------|--------|
+| `db.py` | `fetch_ticket_numbers_by_status()` | Added `AND COALESCE(t.assignee, '') != 'Marketing'` to all branches |
+| `db.py` | `get_open_ticket_ids()` | Added `AND COALESCE(assignee, '') != 'Marketing'` |
+| `run_rollups.py` | `is_open` check (snapshot daily) | Added `assignee != "Marketing"` to condition |
+| `run_rollups.py` | Customer health query | Added `AND COALESCE(t.assignee, '') != 'Marketing'` to FILTER clauses |
+| `run_rollups.py` | `daily_open_counts` query | Added `AND COALESCE(t.assignee, '') != 'Marketing'` |
+| `web/data.py` | `get_open_by_status()` | Added `AND COALESCE(assignee, '') != 'Marketing'` |
+| `web/data.py` | `get_drilldown_tickets()` | Added `COALESCE(t.assignee, '') != 'Marketing'` to conditions |
+| `web/data.py` | `get_root_cause_tickets()` | Added `AND COALESCE(t.assignee, '') != 'Marketing'` |
+| `web/data.py` | `get_root_cause_stats()` | Added `AND COALESCE(t.assignee, '') != 'Marketing'` |
+| `export_1000_no_rc.py` | SQL query | Added `AND COALESCE(t.assignee, '') != 'Marketing'` |
+| `run_export_pipeline_input.py` | SQL query | Added `AND COALESCE(t.assignee, '') != 'Marketing'` |
+
+After applying: force-rebuilt all `daily_open_counts` dates to purge Marketing tickets from historical snapshots.

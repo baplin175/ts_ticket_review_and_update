@@ -85,6 +85,79 @@ def get_backlog_daily_by_severity():
     )
 
 
+def get_filtered_backlog_daily(filters):
+    """Reconstruct daily backlog from tickets table with optional filters.
+
+    filters: dict of field -> list-of-values, e.g. {"assignee": ["Ben Aplin"]}.
+    Supported fields: status, severity, product_name, assignee, customer.
+    """
+    extra_conditions = []
+    params = []
+    _FIELD_MAP = {
+        "status": "t.status",
+        "severity": "t.severity",
+        "product_name": "t.product_name",
+        "assignee": "t.assignee",
+        "customer": "t.customer",
+    }
+    for field, values in (filters or {}).items():
+        col = _FIELD_MAP.get(field)
+        if col and values:
+            placeholders = ",".join(["%s"] * len(values))
+            extra_conditions.append(f"{col} IN ({placeholders})")
+            params.extend(values)
+
+    extra_where = (" AND " + " AND ".join(extra_conditions)) if extra_conditions else ""
+
+    # Total open per day
+    daily_rows = query(f"""
+        SELECT d.snapshot_date, COUNT(*) AS open_backlog
+        FROM (SELECT DISTINCT snapshot_date FROM daily_open_counts) d
+        JOIN tickets t
+          ON t.date_created IS NOT NULL
+         AND t.date_created::date <= d.snapshot_date
+         AND COALESCE(t.status, '') != 'Open'
+         AND COALESCE(t.assignee, '') != 'Marketing'
+         AND (
+             (t.closed_at IS NOT NULL AND t.closed_at::date > d.snapshot_date)
+             OR
+             (t.closed_at IS NULL AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved'))
+         ){extra_where}
+        WHERE d.snapshot_date >= '2024-07-01'
+        GROUP BY d.snapshot_date
+        ORDER BY d.snapshot_date
+    """, tuple(params))
+
+    # Severity breakdown per day (same filter)
+    severity_rows = query(f"""
+        SELECT d.snapshot_date,
+            CASE
+                WHEN t.severity LIKE '1%%' OR LOWER(t.severity) LIKE '%%high%%'
+                THEN 'High'
+                WHEN t.severity LIKE '3%%' OR LOWER(t.severity) LIKE '%%low%%'
+                THEN 'Low'
+                ELSE 'Medium'
+            END AS severity_tier,
+            COUNT(*) AS ticket_count
+        FROM (SELECT DISTINCT snapshot_date FROM daily_open_counts) d
+        JOIN tickets t
+          ON t.date_created IS NOT NULL
+         AND t.date_created::date <= d.snapshot_date
+         AND COALESCE(t.status, '') != 'Open'
+         AND COALESCE(t.assignee, '') != 'Marketing'
+         AND (
+             (t.closed_at IS NOT NULL AND t.closed_at::date > d.snapshot_date)
+             OR
+             (t.closed_at IS NULL AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved'))
+         ){extra_where}
+        WHERE d.snapshot_date >= '2024-07-01'
+        GROUP BY d.snapshot_date, 2
+        ORDER BY d.snapshot_date, severity_tier
+    """, tuple(params))
+
+    return daily_rows, severity_rows
+
+
 def get_backlog_aging():
     return query("SELECT * FROM vw_backlog_aging_current")
 
@@ -141,6 +214,8 @@ def get_open_by_status():
         SELECT COALESCE(status, 'Unknown') AS status, COUNT(*) AS count
         FROM tickets
         WHERE closed_at IS NULL
+          AND COALESCE(status, '') != 'Open'
+          AND COALESCE(assignee, '') != 'Marketing'
         GROUP BY status
         ORDER BY count DESC
     """)
@@ -204,6 +279,24 @@ def get_product_health():
     """)
 
 
+def get_tickets_by_customers(customer_names):
+    """Return open tickets for one or more customer names."""
+    if not customer_names:
+        return []
+    placeholders = ",".join(["%s"] * len(customer_names))
+    return query(f"""
+        SELECT v.ticket_id, v.ticket_number, v.ticket_name, v.status, v.severity,
+               v.product_name, v.assignee, v.customer, v.days_opened, v.priority,
+               v.overall_complexity, v.frustrated, v.date_modified
+        FROM tickets t
+        JOIN vw_ticket_analytics_core v ON v.ticket_id = t.ticket_id
+        WHERE t.customer IN ({placeholders})
+          AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved', 'Open')
+          AND COALESCE(t.assignee, '') != 'Marketing'
+        ORDER BY v.date_modified DESC NULLS LAST
+    """, tuple(customer_names))
+
+
 # ── Drill-down ───────────────────────────────────────────────────────
 
 AGE_BUCKET_RANGES = {
@@ -232,7 +325,8 @@ def get_drilldown_tickets(product=None, severity_tier=None, age_bucket=None,
     """Return open tickets matching chart drill-down filters."""
     conditions = [
         "t.closed_at IS NULL",
-        "COALESCE(t.status, '') NOT IN ('Closed', 'Resolved')",
+        "COALESCE(t.status, '') NOT IN ('Closed', 'Resolved', 'Open')",
+        "COALESCE(t.assignee, '') != 'Marketing'",
     ]
     params = []
 
@@ -353,6 +447,8 @@ def get_root_cause_tickets():
             LIMIT 1
         ) p4 ON TRUE
         WHERE p1.status = 'success'
+          AND COALESCE(t.status, '') != 'Open'
+          AND COALESCE(t.assignee, '') != 'Marketing'
         ORDER BY COALESCE(p4.completed_at, p3.completed_at, p1.completed_at) DESC NULLS LAST
     """)
 
@@ -416,7 +512,9 @@ def get_root_cause_stats():
             ORDER BY CASE WHEN lp.status='success' THEN 0 ELSE 1 END, lp.updated_at DESC
             LIMIT 1
         ) p4 ON TRUE
-        WHERE p1.status IS NOT NULL OR p3.status IS NOT NULL OR p4.status IS NOT NULL
+        WHERE (p1.status IS NOT NULL OR p3.status IS NOT NULL OR p4.status IS NOT NULL)
+          AND COALESCE(t.status, '') != 'Open'
+          AND COALESCE(t.assignee, '') != 'Marketing'
     """) or {
         "pass1_success": 0, "pass3_success": 0, "pass4_success": 0,
         "distinct_mechanism_classes": 0, "distinct_components": 0,
@@ -480,6 +578,31 @@ def get_top_engineering_fixes(limit=25):
         ORDER BY ticket_count DESC
         LIMIT %s
     """, (limit,))
+
+
+def get_tickets_by_fixes(fix_keys):
+    """Return tickets matching a list of (mechanism_class, intervention_type) pairs."""
+    if not fix_keys:
+        return []
+    # Build OR conditions for each pair
+    conditions = []
+    params = []
+    for mc, it in fix_keys:
+        conditions.append("(p4.mechanism_class = %s AND p4.intervention_type = %s)")
+        params.extend([mc, it])
+    where = " OR ".join(conditions)
+    return query(f"""
+        SELECT DISTINCT v.ticket_id, v.ticket_number, v.ticket_name, v.status, v.severity,
+               v.product_name, v.assignee, v.customer, v.days_opened, v.priority,
+               v.overall_complexity, v.frustrated, v.date_modified,
+               p4.mechanism_class, p4.intervention_type, p4.intervention_action
+        FROM ticket_llm_pass_results p4
+        JOIN vw_ticket_analytics_core v ON v.ticket_id = p4.ticket_id
+        WHERE p4.pass_name = 'pass4_intervention'
+          AND p4.status = 'success'
+          AND ({where})
+        ORDER BY v.date_modified DESC NULLS LAST
+    """, tuple(params))
 
 
 def get_root_cause_by_product(limit=10):

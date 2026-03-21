@@ -289,8 +289,10 @@ def tickets_layout():
             # Hidden stores
             dcc.Store(id="report-filter-store", data={}),
             dcc.Store(id="saved-reports-store", data={str(r["id"]): r["filter_model"] for r in reports}),
+            # One-shot trigger to restore persisted filters after mount
+            dcc.Interval(id="filter-restore-trigger", interval=200, max_intervals=1),
             # Sync progress panel (above the grid so it's visible)
-            html.Div(id="sync-progress-panel"),
+            html.Div(id="sync-progress-panel", style={"display": "none"}),
             dcc.Interval(id="sync-poll-interval", interval=800, disabled=True),
             dcc.Interval(id="sync-dismiss-interval", interval=5000, disabled=True),
             dmc.Tabs(
@@ -331,6 +333,7 @@ def tickets_layout():
 
 @callback(
     Output("sync-progress-panel", "children"),
+    Output("sync-progress-panel", "style"),
     Output("sync-poll-interval", "disabled"),
     Output("sync-dismiss-interval", "disabled"),
     Output("refresh-tickets-btn", "disabled"),
@@ -348,7 +351,7 @@ def handle_sync(_n_clicks, _n_intervals):
     if trigger == "refresh-tickets-btn":
         with _sync_lock:
             if _sync_state["running"]:
-                return no_update, no_update, no_update, no_update, no_update, no_update
+                return no_update, no_update, no_update, no_update, no_update, no_update, no_update
 
         thread = threading.Thread(target=_run_sync_in_background, daemon=True)
         thread.start()
@@ -374,7 +377,7 @@ def handle_sync(_n_clicks, _n_intervals):
             p="sm",
             withBorder=True,
         )
-        return initial_panel, False, True, True, no_update, no_update
+        return initial_panel, {}, False, True, True, no_update, no_update
 
     # ── Interval tick: poll for progress ─────────────────────────────
     with _sync_lock:
@@ -407,7 +410,7 @@ def handle_sync(_n_clicks, _n_intervals):
             withBorder=True,
         )
         # Sync still running — don't touch grid data
-        return panel, False, True, True, no_update, no_update
+        return panel, {}, False, True, True, no_update, no_update
     # Treat as success if exit code is 0 OR the log shows completion markers
     # (Python 3.13 can produce a non-zero exit on stdout pipe flush)
     log_has_done = any("] Done" in ln for ln in lines)
@@ -440,11 +443,12 @@ def handle_sync(_n_clicks, _n_intervals):
 
     rows = data.get_ticket_list()
     # Stop polling, enable dismiss timer, re-enable button, refresh grid
-    return panel, True, False, False, rows, f"{len(rows)} tickets"
+    return panel, {}, True, False, False, rows, f"{len(rows)} tickets"
 
 
 @callback(
     Output("sync-progress-panel", "children", allow_duplicate=True),
+    Output("sync-progress-panel", "style", allow_duplicate=True),
     Output("ticket-grid", "rowData", allow_duplicate=True),
     Output("ticket-count-badge", "children", allow_duplicate=True),
     Output("sync-dismiss-interval", "disabled", allow_duplicate=True),
@@ -454,7 +458,7 @@ def handle_sync(_n_clicks, _n_intervals):
 def auto_dismiss_sync_panel(_n):
     """Auto-clear the sync panel after 5 seconds and refresh grid."""
     rows = data.get_ticket_list()
-    return None, rows, f"{len(rows)} tickets", True
+    return None, {"display": "none"}, rows, f"{len(rows)} tickets", True
 
 
 @callback(
@@ -462,12 +466,21 @@ def auto_dismiss_sync_panel(_n):
     Output("ticket-count-badge", "children", allow_duplicate=True),
     Input("ticket-view-tabs", "value"),
     State("ticket-grid", "rowData"),
+    State("ticket-grid", "filterModel"),
     prevent_initial_call=True,
 )
-def switch_tab(tab_value, all_rows):
-    """Apply open filter on initial load and when switching tabs."""
+def switch_tab(tab_value, all_rows, current_filter):
+    """Apply open filter on initial load and when switching tabs.
+
+    Merges the status filter into (or removes it from) the existing
+    filterModel so that user-applied column filters are preserved.
+    """
+    merged = dict(current_filter) if current_filter else {}
     if tab_value == "open":
+        merged["status"] = _OPEN_FILTER_MODEL["status"]
         count = sum(1 for r in (all_rows or []) if (r.get("status") or "").lower() != "closed")
-        return _OPEN_FILTER_MODEL, f"{count} open tickets"
+        return merged, f"{count} open tickets"
+    # "all" tab — remove the status filter but keep everything else
+    merged.pop("status", None)
     count = len(all_rows or [])
-    return {}, f"{count} tickets"
+    return merged, f"{count} tickets"

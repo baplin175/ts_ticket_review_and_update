@@ -26,6 +26,8 @@ import renderer                                                    # noqa: E402
 import data                                                        # noqa: E402
 from pages.ticket_detail import ticket_detail_layout, register_callbacks as td_callbacks  # noqa: E402
 from pages.root_cause import register_callbacks as rc_callbacks    # noqa: E402
+from pages.overview import register_overview_callbacks as ov_callbacks  # noqa: E402
+from pages.health import register_health_callbacks as health_callbacks  # noqa: E402
 
 # Import custom page modules declared in dashboard.yaml
 renderer.import_custom_layouts()
@@ -46,6 +48,8 @@ server = app.server  # for gunicorn: gunicorn web.app:server
 # Register page-specific callbacks
 rc_callbacks(app)
 td_callbacks(app)
+ov_callbacks(app)
+health_callbacks(app)
 
 # ── Navigation items (from dashboard.yaml) ───────────────────────────
 
@@ -65,6 +69,7 @@ app.layout = dmc.MantineProvider(
     },
     children=[
         dcc.Location(id="url", refresh=False),
+        dcc.Store(id="ticket-filter-session", storage_type="session"),
         dmc.AppShell(
             [
                 dmc.AppShellHeader(
@@ -248,22 +253,117 @@ def chart_click_to_store(aging_click, product_click, aging_product_clicks, *kpi_
     Output("drilldown-subtitle", "children"),
     Output("drilldown-grid", "rowData"),
     Input("drilldown-store", "data"),
+    State("overview-active-filters", "data"),
+    State("overview-ticket-store", "data"),
     prevent_initial_call=True,
 )
-def open_drilldown_modal(filter_data):
+def open_drilldown_modal(filter_data, active_filters, ticket_store):
     """Fetch matching tickets and open the drill-down modal."""
     if not filter_data:
         return False, no_update, no_update, no_update
 
-    rows = data.get_drilldown_tickets(
-        product=filter_data.get("product"),
-        severity_tier=filter_data.get("severity_tier"),
-        age_bucket=filter_data.get("age_bucket"),
-        kpi_filter=filter_data.get("kpi_filter"),
-    )
+    # When overview filters are active, use the ticket store (same data as charts)
+    if active_filters and ticket_store:
+        rows = _drilldown_from_store(filter_data, active_filters, ticket_store)
+    else:
+        rows = data.get_drilldown_tickets(
+            product=filter_data.get("product"),
+            severity_tier=filter_data.get("severity_tier"),
+            age_bucket=filter_data.get("age_bucket"),
+            kpi_filter=filter_data.get("kpi_filter"),
+        )
+
     label = filter_data.get("label", "Tickets")
     subtitle = f"{len(rows)} ticket{'s' if len(rows) != 1 else ''} found"
     return True, f"Drill-down: {label}", subtitle, rows
+
+
+# ── Age bucket ranges matching _build_aging_from_tickets in overview.py ──
+
+_AGE_BUCKET_RANGES = {
+    "0-6":   (0, 7),
+    "7-13":  (7, 14),
+    "14-29": (14, 30),
+    "30-59": (30, 60),
+    "60-89": (60, 90),
+    "90+":   (90, None),
+}
+
+
+def _ticket_age_bucket(days):
+    """Return age bucket string for a given days_opened value."""
+    if days is None:
+        return None
+    d = float(days)
+    if d < 7:
+        return "0-6"
+    if d < 14:
+        return "7-13"
+    if d < 30:
+        return "14-29"
+    if d < 60:
+        return "30-59"
+    if d < 90:
+        return "60-89"
+    return "90+"
+
+
+def _consolidate_product(name):
+    """Consolidate PM/Power* variants into 'PowerMan'."""
+    p = (name or "").strip().lower()
+    if p.startswith("pm") or "power" in p:
+        return "PowerMan"
+    return (name or "").strip() or "Unknown"
+
+
+def _severity_tier(severity_text):
+    """Map severity string to tier."""
+    s = (severity_text or "").lower()
+    if s.startswith("1") or "high" in s:
+        return "High"
+    if s.startswith("3") or "low" in s:
+        return "Low"
+    return "Medium"
+
+
+def _drilldown_from_store(filter_data, active_filters, ticket_store):
+    """Filter ticket store data to match drill-down + overview filters."""
+    # Start with open tickets only
+    rows = [r for r in ticket_store if (r.get("status") or "").lower() != "closed"]
+
+    # Apply overview multi-select filters
+    for field, values in active_filters.items():
+        if values:
+            val_set = set(values)
+            rows = [r for r in rows if str(r.get(field, "")) in val_set]
+
+    # Apply drill-down chart filter
+    kpi_filter = filter_data.get("kpi_filter")
+    if kpi_filter == "total_open":
+        pass  # already filtered to open
+    elif kpi_filter == "high_priority":
+        rows = [r for r in rows if r.get("priority") is not None and r["priority"] <= 3]
+    elif kpi_filter == "high_complexity":
+        rows = [r for r in rows if r.get("overall_complexity") is not None and r["overall_complexity"] >= 4]
+    elif kpi_filter == "frustrated":
+        rows = [r for r in rows if r.get("frustrated") == "Yes"]
+
+    product = filter_data.get("product")
+    if product:
+        if product == "PowerMan":
+            rows = [r for r in rows if _consolidate_product(r.get("product_name")) == "PowerMan"]
+        else:
+            rows = [r for r in rows if r.get("product_name") == product]
+
+    sev = filter_data.get("severity_tier")
+    if sev:
+        rows = [r for r in rows if _severity_tier(r.get("severity")) == sev]
+
+    age_bucket = filter_data.get("age_bucket")
+    if age_bucket:
+        rows = [r for r in rows if _ticket_age_bucket(r.get("days_opened")) == age_bucket]
+
+    return rows
 
 
 @callback(
@@ -359,12 +459,50 @@ app.clientside_callback(
 
 app.clientside_callback(
     """function(n) {
-        if (!n) { return window.dash_clientside.no_update; }
+        if (!n) { return [window.dash_clientside.no_update, {}]; }
         window.location.href = '/tickets';
-        return window.dash_clientside.no_update;
+        return [window.dash_clientside.no_update, {}];
     }""",
     Output("clear-filters-btn", "loading"),
+    Output("ticket-filter-session", "data"),
     Input("clear-filters-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+
+
+# ── Persist ticket filters to session store ──────────────────────────
+
+app.clientside_callback(
+    """function(filterModel, tabValue) {
+        if (!filterModel && !tabValue) {
+            return window.dash_clientside.no_update;
+        }
+        return {filterModel: filterModel || {}, tab: tabValue || 'open'};
+    }""",
+    Output("ticket-filter-session", "data", allow_duplicate=True),
+    Input("ticket-grid", "filterModel"),
+    Input("ticket-view-tabs", "value"),
+    prevent_initial_call=True,
+)
+
+
+# ── Restore ticket filters from session store on page load ───────────
+
+app.clientside_callback(
+    """function(n, sessionData) {
+        var nu = window.dash_clientside.no_update;
+        if (!sessionData || Object.keys(sessionData).length === 0) {
+            // No saved state — apply the default "open" filter
+            return [{status: {filterType: 'text', type: 'notEqual', filter: 'Closed'}}, 'open'];
+        }
+        var fm = sessionData.filterModel || {};
+        var tab = sessionData.tab || 'open';
+        return [fm, tab];
+    }""",
+    Output("ticket-grid", "filterModel", allow_duplicate=True),
+    Output("ticket-view-tabs", "value", allow_duplicate=True),
+    Input("filter-restore-trigger", "n_intervals"),
+    State("ticket-filter-session", "data"),
     prevent_initial_call=True,
 )
 

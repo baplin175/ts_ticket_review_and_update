@@ -19,6 +19,8 @@ WHERE (
   AND t.date_created >= now() - INTERVAL '18 months'
   AND r.full_thread_text IS NOT NULL
   AND r.full_thread_text <> ''
+  AND COALESCE(t.status, '') != 'Open'
+  AND COALESCE(t.assignee, '') != 'Marketing'
   AND NOT EXISTS (
       SELECT 1
       FROM ticket_llm_pass_results lp
