@@ -1,10 +1,13 @@
 """
-Pass 3 — Failure mechanism inference from Pass 2 canonical failure.
+Pass 3 — Intervention mapping from Pass 2 mechanism.
 
-Reads the canonical_failure from a successful Pass 2 result, sends it to
-Matcha with the Pass 3 prompt, parses the JSON response into a structured
-mechanism field, and stores both the raw response and parsed output in
-ticket_llm_pass_results.
+Reads the mechanism from a successful Pass 2 result, sends it to
+Matcha with the intervention prompt, parses the JSON response into
+mechanism_class / intervention_type / intervention_action, and stores
+both the raw response and parsed output in ticket_llm_pass_results.
+
+After all tickets are classified, computes engineering ROI aggregation
+metrics and writes output artifacts.
 
 Requires DATABASE_URL to be set (Postgres mode).
 
@@ -14,173 +17,25 @@ Usage:
     python run_ticket_pass3.py --ticket-id 99784,98154,100289
     python run_ticket_pass3.py --failed-only
     python run_ticket_pass3.py --force
+    python run_ticket_pass3.py --aggregate-only
 """
 
 import argparse
 import os
 import sys
 import time
-from datetime import datetime, timezone
 
-from config import MATCHA_MISSION_ID
-from matcha_client import call_matcha
-from pass3_parser import parse_pass3_response, validate_mechanism, Pass3ParseError
+from config import OUTPUT_DIR
+from pass4.intervention_aggregator import aggregate_from_db, write_artifacts
+from pass4.intervention_mapper import MODEL_NAME, PASS_NAME, PROMPT_VERSION, _load_prompt_template, process_ticket
 
-PROMPT_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "prompts", "pass3_mechanism.txt"
-)
-
-PASS_NAME = "pass3_mechanism"
-PROMPT_VERSION = "3"
-MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
-
-# Upstream dependency — source canonical_failure from Pass 1 v2
-PASS2_PASS_NAME = "pass1_phenomenon"
-PASS2_PROMPT_VERSION = "2"
+PASS2_PASS_NAME = "pass2_mechanism"
+PASS2_PROMPT_VERSION = "3"
 
 
 def _log(msg: str) -> None:
     print(msg, flush=True)
 
-
-def _load_prompt_template() -> str:
-    with open(PROMPT_PATH, "r", encoding="utf-8") as f:
-        return f.read()
-
-
-def _build_prompt(template: str, canonical_failure: str, thread_context: str = "") -> str:
-    """Replace {{input_text}} and {{thread_context}} placeholders in the prompt template."""
-    prompt = template.replace("{{input_text}}", canonical_failure)
-    # Cap thread context at 3000 chars to stay within token limits
-    trimmed_context = thread_context[:3000] if thread_context else "(no thread context available)"
-    prompt = prompt.replace("{{thread_context}}", trimmed_context)
-    return prompt
-
-
-def process_ticket(
-    ticket_id: int,
-    canonical_failure: str,
-    prompt_template: str,
-    *,
-    thread_context: str = "",
-    force: bool = False,
-) -> dict:
-    """Process a single ticket through Pass 3.
-
-    Returns a result dict with status, parsed fields, timing, etc.
-    """
-    import db
-
-    result = {
-        "ticket_id": ticket_id,
-        "status": "pending",
-        "mechanism": None,
-        "error": None,
-        "elapsed_s": 0.0,
-    }
-
-    started_at = datetime.now(timezone.utc)
-    start_time = time.monotonic()
-
-    # Clean up prior rows
-    if force:
-        db.delete_prior_failed_pass(ticket_id, PASS_NAME, PROMPT_VERSION)
-        # Also remove prior success so the unique index allows a new one
-        conn = db.get_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    DELETE FROM ticket_llm_pass_results
-                     WHERE ticket_id = %s
-                       AND pass_name = %s
-                       AND prompt_version = %s
-                       AND status = 'success';
-                """, (ticket_id, PASS_NAME, PROMPT_VERSION))
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            db.put_conn(conn)
-    else:
-        db.delete_prior_failed_pass(ticket_id, PASS_NAME, PROMPT_VERSION)
-
-    # Build prompt
-    full_prompt = _build_prompt(prompt_template, canonical_failure, thread_context)
-
-    # Insert pending row
-    row_id = db.insert_pass_result(
-        ticket_id,
-        pass_name=PASS_NAME,
-        prompt_version=PROMPT_VERSION,
-        model_name=MODEL_NAME,
-        input_text=canonical_failure,
-        status="pending",
-        started_at=started_at,
-    )
-
-    raw_response = None
-    try:
-        # Call Matcha
-        raw_response = call_matcha(full_prompt)
-
-        # Parse + validate JSON structure
-        parsed_json, mechanism = parse_pass3_response(raw_response)
-
-        # Validate mechanism content (restatement / admin text checks)
-        validate_mechanism(mechanism, canonical_failure)
-
-        completed_at = datetime.now(timezone.utc)
-        elapsed = time.monotonic() - start_time
-
-        # Update row to success
-        db.update_pass_result(
-            row_id,
-            status="success",
-            raw_response_text=raw_response,
-            parsed_json=parsed_json,
-            mechanism=mechanism,
-            completed_at=completed_at,
-        )
-
-        result["status"] = "success"
-        result["mechanism"] = mechanism
-        result["elapsed_s"] = round(elapsed, 2)
-
-    except Pass3ParseError as exc:
-        completed_at = datetime.now(timezone.utc)
-        elapsed = time.monotonic() - start_time
-
-        # Store the malformed raw response for inspection
-        db.update_pass_result(
-            row_id,
-            status="failed",
-            raw_response_text=raw_response,
-            error_message=str(exc),
-            completed_at=completed_at,
-        )
-
-        result["status"] = "failed"
-        result["error"] = str(exc)
-        result["elapsed_s"] = round(elapsed, 2)
-
-    except Exception as exc:
-        completed_at = datetime.now(timezone.utc)
-        elapsed = time.monotonic() - start_time
-
-        db.update_pass_result(
-            row_id,
-            status="failed",
-            raw_response_text=raw_response,
-            error_message=str(exc),
-            completed_at=completed_at,
-        )
-
-        result["status"] = "failed"
-        result["error"] = str(exc)
-        result["elapsed_s"] = round(elapsed, 2)
-
-    return result
 
 
 def main(
@@ -189,29 +44,37 @@ def main(
     limit: int = 0,
     force: bool = False,
     failed_only: bool = False,
+    aggregate_only: bool = False,
 ) -> list[dict]:
-    """Run Pass 3 for eligible tickets.
-
-    Returns a list of result dicts (one per ticket processed).
-    """
+    """Run Pass 3 for eligible tickets."""
     import db
 
     if not db._is_enabled():
         _log("[pass3] DATABASE_URL is not set. Pass 3 requires a Postgres DB.")
         sys.exit(1)
 
-    # Run migrations to ensure table/columns exist
     applied = db.migrate()
     if applied:
         from run_rollups import run_full_rollups
         run_full_rollups()
 
+    if aggregate_only:
+        _log("[pass3] Aggregate-only mode — computing ROI metrics from DB.")
+        aggregation = aggregate_from_db()
+        output_dir = os.path.join(OUTPUT_DIR, "pass3")
+        written = write_artifacts(aggregation, output_dir)
+        for path in written:
+            _log(f"[pass3] Wrote: {path}")
+        _log(f"[pass3] Mechanism classes: {len(aggregation['mechanism_class_counts'])}")
+        _log(f"[pass3] Intervention types: {len(aggregation['intervention_type_counts'])}")
+        _log(f"[pass3] Top fixes: {len(aggregation['top_engineering_fixes'])}")
+        return []
+
     prompt_template = _load_prompt_template()
-    _log(f"[pass3] Loaded prompt from {PROMPT_PATH}")
+    _log(f"[pass3] Loaded prompt from pass4_intervention.txt")
     _log(f"[pass3] Pass: {PASS_NAME}  Prompt version: {PROMPT_VERSION}  Model: {MODEL_NAME}")
     _log(f"[pass3] Requires Pass 2: {PASS2_PASS_NAME} v{PASS2_PROMPT_VERSION}")
 
-    # Fetch eligible tickets (those with successful Pass 2 canonical_failure)
     rows = db.fetch_pending_pass3_tickets(
         PROMPT_VERSION,
         pass2_pass_name=PASS2_PASS_NAME,
@@ -221,6 +84,20 @@ def main(
         failed_only=failed_only,
         force=force,
     )
+
+    if ticket_ids:
+        eligible_ids = {row[0] for row in rows}
+        missing_p2 = [tid for tid in ticket_ids if tid not in eligible_ids]
+        if missing_p2:
+            invalidated = db.invalidate_stale_pass3(
+                missing_p2,
+                pass2_pass_name=PASS2_PASS_NAME,
+                pass2_prompt_version=PASS2_PROMPT_VERSION,
+            )
+            if invalidated:
+                _log(f"[pass3] Invalidated {invalidated} stale P3 result(s) for {len(missing_p2)} ticket(s) missing P2 v{PASS2_PROMPT_VERSION}.")
+            else:
+                _log(f"[pass3] {len(missing_p2)} ticket(s) skipped (no P2 v{PASS2_PROMPT_VERSION} mechanism).")
 
     total = len(rows)
     if total == 0:
@@ -236,22 +113,17 @@ def main(
     skipped = 0
     total_start = time.monotonic()
 
-    for idx, (ticket_id, canonical_failure, thread_context) in enumerate(rows, 1):
+    for idx, (ticket_id, mechanism) in enumerate(rows, 1):
         _log(f"\n[pass3] [{idx}/{total}] Ticket {ticket_id}")
-        _log(f"[pass3]   canonical_failure: {canonical_failure[:80]}{'…' if len(canonical_failure) > 80 else ''}")
+        _log(f"[pass3]   mechanism: {mechanism[:80]}{'…' if len(mechanism) > 80 else ''}")
 
-        r = process_ticket(
-            ticket_id,
-            canonical_failure,
-            prompt_template,
-            thread_context=thread_context,
-            force=force,
-        )
+        r = process_ticket(ticket_id, mechanism, prompt_template, force=force)
         results.append(r)
 
         if r["status"] == "success":
             succeeded += 1
-            _log(f"[pass3]   ✓ {r['mechanism']}")
+            _log(f"[pass3]   ✓ {r['mechanism_class']} / {r['intervention_type']}")
+            _log(f"[pass3]     {r['intervention_action']}")
         elif r["status"] == "failed":
             failed += 1
             _log(f"[pass3]   ✗ error: {r['error']}")
@@ -261,8 +133,24 @@ def main(
         _log(f"[pass3]   elapsed: {r['elapsed_s']}s")
 
     total_elapsed = time.monotonic() - total_start
+    _log("\n[pass3] Computing aggregation metrics...")
+    aggregation = aggregate_from_db()
 
-    # Summary
+    interventions = []
+    for r in results:
+        if r["status"] == "success":
+            interventions.append({
+                "ticket_id": str(r["ticket_id"]),
+                "mechanism_class": r["mechanism_class"],
+                "intervention_type": r["intervention_type"],
+                "intervention_action": r["intervention_action"],
+            })
+
+    output_dir = os.path.join(OUTPUT_DIR, "pass3")
+    written = write_artifacts(aggregation, output_dir, interventions=interventions)
+    for path in written:
+        _log(f"[pass3] Wrote: {path}")
+
     _log(f"\n{'=' * 60}")
     _log("[pass3] Run complete.")
     _log(f"[pass3]   Total:     {total}")
@@ -270,48 +158,23 @@ def main(
     _log(f"[pass3]   Failed:    {failed}")
     _log(f"[pass3]   Skipped:   {skipped}")
     _log(f"[pass3]   Elapsed:   {total_elapsed:.1f}s")
+    _log(f"[pass3]   Mechanism classes found: {len(aggregation['mechanism_class_counts'])}")
+    _log(f"[pass3]   Top engineering fixes:   {len(aggregation['top_engineering_fixes'])}")
     _log("=" * 60)
-
     return results
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Pass 3 — Failure mechanism inference from Pass 2 canonical failure."
-    )
-    parser.add_argument(
-        "--ticket-id",
-        type=str,
-        default=None,
-        help="Comma-separated ticket_id(s) to process.",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=0,
-        help="Maximum number of tickets to process (0 = unlimited).",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force rerun even for tickets with existing successful results.",
-    )
-    parser.add_argument(
-        "--failed-only",
-        action="store_true",
-        help="Only rerun tickets that previously failed.",
-    )
+    parser = argparse.ArgumentParser(description="Pass 3 — Intervention mapping from Pass 2 mechanism.")
+    parser.add_argument("--ticket-id", type=str, default=None, help="Comma-separated ticket_id(s) to process.")
+    parser.add_argument("--limit", type=int, default=0, help="Maximum number of tickets to process (0 = unlimited).")
+    parser.add_argument("--force", action="store_true", help="Force rerun even for tickets with existing successful results.")
+    parser.add_argument("--failed-only", action="store_true", help="Only rerun tickets that previously failed.")
+    parser.add_argument("--aggregate-only", action="store_true", help="Skip LLM processing; compute and export ROI metrics from existing DB results.")
 
     args = parser.parse_args()
-
-    # Parse ticket IDs
     ticket_ids = None
     if args.ticket_id:
-        ticket_ids = [int(tid.strip()) for tid in args.ticket_id.split(",") if tid.strip()]
+        ticket_ids = [int(t.strip()) for t in args.ticket_id.split(",") if t.strip()]
 
-    main(
-        ticket_ids=ticket_ids,
-        limit=args.limit,
-        force=args.force,
-        failed_only=args.failed_only,
-    )
+    main(ticket_ids=ticket_ids, limit=args.limit, force=args.force, failed_only=args.failed_only, aggregate_only=args.aggregate_only)

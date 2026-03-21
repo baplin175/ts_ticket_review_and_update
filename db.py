@@ -1184,8 +1184,8 @@ def update_pass_result(
     """Update an existing pass result row (e.g. pending → success/failed).
 
     Pass 1 callers use *phenomenon*; Pass 2 callers use *component*,
-    *operation*, *unexpected_state*, *canonical_failure*; Pass 3 callers
-    use *mechanism*; Pass 4 callers use *mechanism_class*,
+    *operation*, *unexpected_state*, *canonical_failure*; Pass 2 callers
+    use *mechanism*; Pass 3 callers use *mechanism_class*,
     *intervention_type*, *intervention_action*.
     Unused kwargs default to None and are written as NULL.
     """
@@ -1366,7 +1366,7 @@ def fetch_pending_pass1_tickets(
     return fetch_all(sql, tuple(params))
 
 
-def fetch_pending_pass2_tickets(
+def fetch_pending_legacy_pass2_grammar_tickets(
     pass2_prompt_version: str,
     *,
     pass1_pass_name: str = "pass1_phenomenon",
@@ -1376,17 +1376,7 @@ def fetch_pending_pass2_tickets(
     failed_only: bool = False,
     force: bool = False,
 ) -> List[Tuple]:
-    """Return (ticket_id, phenomenon) rows eligible for Pass 2.
-
-    Selection logic:
-      - ticket has a successful Pass 1 result with non-null phenomenon
-      - no successful pass2_grammar result for current prompt_version
-        (unless *force* is True)
-      - optionally filtered to specific ticket_ids
-      - optionally limited to failed-only reruns
-
-    Returns list of (ticket_id, phenomenon) tuples.
-    """
+    """Return (ticket_id, phenomenon) rows for the legacy standalone grammar pass."""
     conditions = [
         "p1.pass_name = %s",
         "p1.prompt_version = %s",
@@ -1440,33 +1430,90 @@ def fetch_pending_pass2_tickets(
     return fetch_all(sql, tuple(params))
 
 
-def fetch_pending_pass3_tickets(
-    pass3_prompt_version: str,
+def fetch_pending_pass2_tickets(
+    pass2_prompt_version: str,
     *,
-    pass2_pass_name: str = "pass1_phenomenon",
-    pass2_prompt_version: str = "2",
+    pass1_pass_name: str = "pass1_phenomenon",
+    pass1_prompt_version: str = "2",
     limit: int = 0,
     ticket_ids: Optional[List[int]] = None,
     failed_only: bool = False,
     force: bool = False,
 ) -> List[Tuple]:
-    """Return (ticket_id, canonical_failure, full_thread_text) rows eligible for Pass 3.
+    """Return (ticket_id, canonical_failure, full_thread_text) rows eligible for Pass 2."""
+    conditions = [
+        "p1.pass_name = %s",
+        "p1.prompt_version = %s",
+        "p1.status = 'success'",
+        "p1.canonical_failure IS NOT NULL",
+        "p1.canonical_failure != ''",
+        "t.closed_at IS NOT NULL",
+    ]
+    params: list = [pass1_pass_name, pass1_prompt_version]
 
-    Selection logic:
-      - ticket has a successful Pass 2 result with non-null canonical_failure
-      - no successful pass3_mechanism result for current prompt_version
-        (unless *force* is True)
-      - optionally filtered to specific ticket_ids
-      - optionally limited to failed-only reruns
+    if ticket_ids:
+        placeholders = ",".join(["%s"] * len(ticket_ids))
+        conditions.append(f"t.ticket_id IN ({placeholders})")
+        params.extend(ticket_ids)
 
-    Returns list of (ticket_id, canonical_failure, full_thread_text) tuples.
-    """
+    if not force:
+        conditions.append("""
+            NOT EXISTS (
+                SELECT 1 FROM ticket_llm_pass_results lp
+                 WHERE lp.ticket_id = t.ticket_id
+                   AND lp.pass_name = 'pass2_mechanism'
+                   AND lp.prompt_version = %s
+                   AND lp.status = 'success'
+            )
+        """)
+        params.append(pass2_prompt_version)
+
+    if failed_only:
+        conditions.append("""
+            EXISTS (
+                SELECT 1 FROM ticket_llm_pass_results lp
+                 WHERE lp.ticket_id = t.ticket_id
+                   AND lp.pass_name = 'pass2_mechanism'
+                   AND lp.prompt_version = %s
+                   AND lp.status = 'failed'
+            )
+        """)
+        params.append(pass2_prompt_version)
+
+    where_clause = " AND ".join(conditions)
+    sql = (
+        f"SELECT t.ticket_id, p1.canonical_failure, "
+        f"COALESCE(r.full_thread_text, '') "
+        f"FROM tickets t "
+        f"JOIN ticket_llm_pass_results p1 ON p1.ticket_id = t.ticket_id "
+        f"LEFT JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id "
+        f"WHERE {where_clause} "
+        f"ORDER BY t.ticket_id"
+    )
+    if limit > 0:
+        sql += f" LIMIT {limit}"
+    sql += ";"
+
+    return fetch_all(sql, tuple(params))
+
+
+def fetch_pending_pass3_tickets(
+    pass3_prompt_version: str,
+    *,
+    pass2_pass_name: str = "pass2_mechanism",
+    pass2_prompt_version: str = "3",
+    limit: int = 0,
+    ticket_ids: Optional[List[int]] = None,
+    failed_only: bool = False,
+    force: bool = False,
+) -> List[Tuple]:
+    """Return (ticket_id, mechanism) rows eligible for Pass 3."""
     conditions = [
         "p2.pass_name = %s",
         "p2.prompt_version = %s",
         "p2.status = 'success'",
-        "p2.canonical_failure IS NOT NULL",
-        "p2.canonical_failure != ''",
+        "p2.mechanism IS NOT NULL",
+        "p2.mechanism != ''",
         "t.closed_at IS NOT NULL",
     ]
     params: list = [pass2_pass_name, pass2_prompt_version]
@@ -1481,7 +1528,7 @@ def fetch_pending_pass3_tickets(
             NOT EXISTS (
                 SELECT 1 FROM ticket_llm_pass_results lp
                  WHERE lp.ticket_id = t.ticket_id
-                   AND lp.pass_name = 'pass3_mechanism'
+                   AND lp.pass_name = 'pass3_intervention'
                    AND lp.prompt_version = %s
                    AND lp.status = 'success'
             )
@@ -1493,7 +1540,7 @@ def fetch_pending_pass3_tickets(
             EXISTS (
                 SELECT 1 FROM ticket_llm_pass_results lp
                  WHERE lp.ticket_id = t.ticket_id
-                   AND lp.pass_name = 'pass3_mechanism'
+                   AND lp.pass_name = 'pass3_intervention'
                    AND lp.prompt_version = %s
                    AND lp.status = 'failed'
             )
@@ -1502,11 +1549,9 @@ def fetch_pending_pass3_tickets(
 
     where_clause = " AND ".join(conditions)
     sql = (
-        f"SELECT t.ticket_id, p2.canonical_failure, "
-        f"COALESCE(r.full_thread_text, '') "
+        f"SELECT t.ticket_id, p2.mechanism "
         f"FROM tickets t "
         f"JOIN ticket_llm_pass_results p2 ON p2.ticket_id = t.ticket_id "
-        f"LEFT JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id "
         f"WHERE {where_clause} "
         f"ORDER BY t.ticket_id"
     )
@@ -1517,119 +1562,36 @@ def fetch_pending_pass3_tickets(
     return fetch_all(sql, tuple(params))
 
 
-def fetch_pending_pass4_tickets(
-    pass4_prompt_version: str,
-    *,
-    pass3_pass_name: str = "pass3_mechanism",
-    pass3_prompt_version: str = "1",
-    limit: int = 0,
-    ticket_ids: Optional[List[int]] = None,
-    failed_only: bool = False,
-    force: bool = False,
-) -> List[Tuple]:
-    """Return (ticket_id, mechanism) rows eligible for Pass 4.
-
-    Selection logic:
-      - ticket has a successful Pass 3 result with non-null mechanism
-      - no successful pass4_intervention result for current prompt_version
-        (unless *force* is True)
-      - optionally filtered to specific ticket_ids
-      - optionally limited to failed-only reruns
-
-    Returns list of (ticket_id, mechanism) tuples.
-    """
-    conditions = [
-        "p3.pass_name = %s",
-        "p3.prompt_version = %s",
-        "p3.status = 'success'",
-        "p3.mechanism IS NOT NULL",
-        "p3.mechanism != ''",
-        "t.closed_at IS NOT NULL",
-    ]
-    params: list = [pass3_pass_name, pass3_prompt_version]
-
-    if ticket_ids:
-        placeholders = ",".join(["%s"] * len(ticket_ids))
-        conditions.append(f"t.ticket_id IN ({placeholders})")
-        params.extend(ticket_ids)
-
-    if not force:
-        conditions.append("""
-            NOT EXISTS (
-                SELECT 1 FROM ticket_llm_pass_results lp
-                 WHERE lp.ticket_id = t.ticket_id
-                   AND lp.pass_name = 'pass4_intervention'
-                   AND lp.prompt_version = %s
-                   AND lp.status = 'success'
-            )
-        """)
-        params.append(pass4_prompt_version)
-
-    if failed_only:
-        conditions.append("""
-            EXISTS (
-                SELECT 1 FROM ticket_llm_pass_results lp
-                 WHERE lp.ticket_id = t.ticket_id
-                   AND lp.pass_name = 'pass4_intervention'
-                   AND lp.prompt_version = %s
-                   AND lp.status = 'failed'
-            )
-        """)
-        params.append(pass4_prompt_version)
-
-    where_clause = " AND ".join(conditions)
-    sql = (
-        f"SELECT t.ticket_id, p3.mechanism "
-        f"FROM tickets t "
-        f"JOIN ticket_llm_pass_results p3 ON p3.ticket_id = t.ticket_id "
-        f"WHERE {where_clause} "
-        f"ORDER BY t.ticket_id"
-    )
-    if limit > 0:
-        sql += f" LIMIT {limit}"
-    sql += ";"
-
-    return fetch_all(sql, tuple(params))
-
-
-def invalidate_stale_pass4(
+def invalidate_stale_pass3(
     ticket_ids: List[int],
-    pass3_pass_name: str = "pass3_mechanism",
-    pass3_prompt_version: str = "1",
+    pass2_pass_name: str = "pass2_mechanism",
+    pass2_prompt_version: str = "3",
 ) -> int:
-    """Mark existing P4 results as 'skipped' for tickets that lack a valid P3 result.
-
-    When upstream P3 results change (e.g. a ticket is now correctly skipped at P3),
-    stale P4 results from prior runs remain in the DB.  This function finds tickets
-    in *ticket_ids* that have NO successful P3 row for the given version and sets
-    any existing pass4_intervention rows to status='skipped'.
-
-    Returns the number of rows updated.
-    """
+    """Mark existing P3 results as skipped when upstream P2 mechanism is missing."""
     if not ticket_ids:
         return 0
     placeholders = ",".join(["%s"] * len(ticket_ids))
     sql = f"""
         UPDATE ticket_llm_pass_results
            SET status = 'skipped',
-               error_message = 'upstream P3 mechanism missing for required version'
-         WHERE pass_name = 'pass4_intervention'
+               error_message = 'upstream P2 mechanism missing for required version'
+         WHERE pass_name = 'pass3_intervention'
            AND ticket_id IN ({placeholders})
            AND NOT EXISTS (
-               SELECT 1 FROM ticket_llm_pass_results p3
-                WHERE p3.ticket_id = ticket_llm_pass_results.ticket_id
-                  AND p3.pass_name = %s
-                  AND p3.prompt_version = %s
-                  AND p3.status = 'success'
-                  AND p3.mechanism IS NOT NULL
-                  AND p3.mechanism != ''
+               SELECT 1 FROM ticket_llm_pass_results p2
+                WHERE p2.ticket_id = ticket_llm_pass_results.ticket_id
+                  AND p2.pass_name = %s
+                  AND p2.prompt_version = %s
+                  AND p2.status = 'success'
+                  AND p2.mechanism IS NOT NULL
+                  AND p2.mechanism != ''
            );
     """
-    params = list(ticket_ids) + [pass3_pass_name, pass3_prompt_version]
+    params = tuple(ticket_ids) + (pass2_pass_name, pass2_prompt_version)
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute(sql, tuple(params))
+            cur.execute(sql, params)
             updated = cur.rowcount
         conn.commit()
         return updated
@@ -1640,16 +1602,36 @@ def invalidate_stale_pass4(
         put_conn(conn)
 
 
-# ── CLI entry point ──────────────────────────────────────────────────
+def fetch_pending_pass4_tickets(
+    pass4_prompt_version: str,
+    *,
+    pass3_pass_name: str = "pass2_mechanism",
+    pass3_prompt_version: str = "3",
+    limit: int = 0,
+    ticket_ids: Optional[List[int]] = None,
+    failed_only: bool = False,
+    force: bool = False,
+) -> List[Tuple]:
+    """Legacy alias for the old Pass 4 selector name."""
+    return fetch_pending_pass3_tickets(
+        pass4_prompt_version,
+        pass2_pass_name=pass3_pass_name,
+        pass2_prompt_version=pass3_prompt_version,
+        limit=limit,
+        ticket_ids=ticket_ids,
+        failed_only=failed_only,
+        force=force,
+    )
 
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "migrate":
-        applied = migrate()
-        if applied:
-            print(f"[db] Done — applied {len(applied)} migration(s): {', '.join(applied)}")
-        else:
-            print("[db] Nothing to apply.")
-    else:
-        print("Usage: python db.py migrate")
-        print("  Applies any unapplied SQL files from migrations/ in order.")
+
+def invalidate_stale_pass4(
+    ticket_ids: List[int],
+    pass3_pass_name: str = "pass2_mechanism",
+    pass3_prompt_version: str = "3",
+) -> int:
+    """Legacy alias for the old Pass 4 invalidation helper name."""
+    return invalidate_stale_pass3(
+        ticket_ids,
+        pass2_pass_name=pass3_pass_name,
+        pass2_prompt_version=pass3_prompt_version,
+    )

@@ -1,5 +1,5 @@
 """
-CSV-only pipeline runner — Pass 1 → Pass 3 → Pass 4.
+CSV-only pipeline runner — Pass 1 → Pass 2 → Pass 3.
 
 Pure CSV orchestration with no database dependency.
 Reuses matcha_client.call_matcha and existing parsers/validators.
@@ -133,12 +133,12 @@ def run_pass1_csv(
 
 # ── Pass 3 ───────────────────────────────────────────────────────────
 
-PASS3_COLUMNS = [
+PASS2_COLUMNS = [
     "ticket_id", "mechanism", "evidence", "category", "status", "error",
 ]
 
 
-def run_pass3_csv(
+def run_pass2_csv(
     pass1_csv: str,
     input_csv: str,
     output_csv: str,
@@ -146,7 +146,7 @@ def run_pass3_csv(
     inference_server: Optional[int] = None,
     log_cb: Optional[Callable] = None,
 ) -> int:
-    """Run Pass 3 on rows from *pass1_csv*, joining thread text from *input_csv*.
+    """Run Pass 2 on rows from *pass1_csv*, joining thread text from *input_csv*.
 
     Skips rows with LOW confidence or missing canonical_failure.
     Returns the number of rows processed.
@@ -158,7 +158,7 @@ def run_pass3_csv(
     total = len(pass1_rows)
 
     with open(output_csv, "w", newline="", encoding="utf-8") as fout:
-        writer = csv.DictWriter(fout, fieldnames=PASS3_COLUMNS)
+        writer = csv.DictWriter(fout, fieldnames=PASS2_COLUMNS)
         writer.writeheader()
 
         for idx, p1 in enumerate(pass1_rows, 1):
@@ -180,7 +180,7 @@ def run_pass3_csv(
                 result["status"] = "skipped"
                 writer.writerow(result)
                 if progress_cb:
-                    progress_cb(3, idx, total)
+                    progress_cb(2, idx, total)
                 continue
 
             try:
@@ -202,48 +202,48 @@ def run_pass3_csv(
                 result["status"] = "failed"
                 result["error"] = str(exc)
                 if log_cb:
-                    log_cb(f"Pass3 ticket {ticket_id} FAILED: {exc}")
+                    log_cb(f"Pass2 ticket {ticket_id} FAILED: {exc}")
 
             writer.writerow(result)
             if progress_cb:
-                progress_cb(3, idx, total)
+                progress_cb(2, idx, total)
 
     return total
 
 
-# ── Pass 4 ───────────────────────────────────────────────────────────
+# ── Pass 2 ───────────────────────────────────────────────────────────
 
-PASS4_COLUMNS = [
+PASS3_COLUMNS = [
     "ticket_id", "mechanism_class", "intervention_type", "intervention_action",
     "proposed_class", "proposed_type", "status", "error",
 ]
 
 
-def run_pass4_csv(
-    pass3_csv: str,
+def run_pass3_csv(
+    pass2_csv: str,
     output_csv: str,
     progress_cb: Optional[Callable] = None,
     inference_server: Optional[int] = None,
     log_cb: Optional[Callable] = None,
 ) -> int:
-    """Run Pass 4 on successful rows from *pass3_csv*.
+    """Run Pass 3 on successful rows from *pass2_csv*.
 
-    Skips rows that did not succeed in Pass 3.
+    Skips rows that did not succeed in Pass 2.
     Returns the number of rows processed.
     """
     template = _load_prompt("pass4_intervention.txt")
 
-    pass3_rows = _read_csv(pass3_csv)
-    total = len(pass3_rows)
+    pass2_rows = _read_csv(pass2_csv)
+    total = len(pass2_rows)
 
     with open(output_csv, "w", newline="", encoding="utf-8") as fout:
-        writer = csv.DictWriter(fout, fieldnames=PASS4_COLUMNS)
+        writer = csv.DictWriter(fout, fieldnames=PASS3_COLUMNS)
         writer.writeheader()
 
-        for idx, p3 in enumerate(pass3_rows, 1):
-            ticket_id = p3["ticket_id"]
-            mechanism = p3.get("mechanism") or ""
-            p3_status = p3.get("status", "")
+        for idx, p2 in enumerate(pass2_rows, 1):
+            ticket_id = p2["ticket_id"]
+            mechanism = p2.get("mechanism") or ""
+            p2_status = p2.get("status", "")
 
             result = {
                 "ticket_id": ticket_id,
@@ -256,11 +256,11 @@ def run_pass4_csv(
                 "error": None,
             }
 
-            if p3_status != "success" or not mechanism.strip():
+            if p2_status != "success" or not mechanism.strip():
                 result["status"] = "skipped"
                 writer.writerow(result)
                 if progress_cb:
-                    progress_cb(4, idx, total)
+                    progress_cb(3, idx, total)
                 continue
 
             try:
@@ -280,11 +280,11 @@ def run_pass4_csv(
                 result["status"] = "failed"
                 result["error"] = str(exc)
                 if log_cb:
-                    log_cb(f"Pass4 ticket {ticket_id} FAILED: {exc}")
+                    log_cb(f"Pass3 ticket {ticket_id} FAILED: {exc}")
 
             writer.writerow(result)
             if progress_cb:
-                progress_cb(4, idx, total)
+                progress_cb(3, idx, total)
 
     return total
 
@@ -299,7 +299,7 @@ def run_full_pipeline(
     job_id: Optional[str] = None,
     log_cb: Optional[Callable] = None,
 ) -> dict:
-    """Orchestrate Pass 1 → 3 → 4, writing CSVs to *output_dir*.
+    """Orchestrate Pass 1 → 2 → 3, writing CSVs to *output_dir*.
 
     *progress_cb(pass_num, processed, total)* is called after each row.
     If *job_id* is provided, output CSVs are uploaded to blob storage
@@ -310,22 +310,22 @@ def run_full_pipeline(
     os.makedirs(output_dir, exist_ok=True)
 
     p1_csv = os.path.join(output_dir, "pass1_results.csv")
+    p2_csv = os.path.join(output_dir, "pass2_results.csv")
     p3_csv = os.path.join(output_dir, "pass3_results.csv")
-    p4_csv = os.path.join(output_dir, "pass4_results.csv")
 
     run_pass1_csv(input_csv, p1_csv, progress_cb, inference_server, log_cb=log_cb)
     if job_id:
         blob_upload_file(job_id, "pass1_results.csv", p1_csv)
 
-    run_pass3_csv(p1_csv, input_csv, p3_csv, progress_cb, inference_server, log_cb=log_cb)
+    run_pass2_csv(p1_csv, input_csv, p2_csv, progress_cb, inference_server, log_cb=log_cb)
+    if job_id:
+        blob_upload_file(job_id, "pass2_results.csv", p2_csv)
+
+    run_pass3_csv(p2_csv, p3_csv, progress_cb, inference_server, log_cb=log_cb)
     if job_id:
         blob_upload_file(job_id, "pass3_results.csv", p3_csv)
 
-    run_pass4_csv(p3_csv, p4_csv, progress_cb, inference_server, log_cb=log_cb)
-    if job_id:
-        blob_upload_file(job_id, "pass4_results.csv", p4_csv)
-
-    return {"pass1": p1_csv, "pass3": p3_csv, "pass4": p4_csv}
+    return {"pass1": p1_csv, "pass2": p2_csv, "pass3": p3_csv}
 
 
 # ── CSV helper ───────────────────────────────────────────────────────

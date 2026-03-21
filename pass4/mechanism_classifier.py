@@ -1,5 +1,5 @@
 """
-Pass 4 response parser — strict validation of Matcha JSON output.
+Pass 3 response parser — strict validation of Matcha JSON output.
 
 Expected shape:
     {
@@ -20,14 +20,14 @@ from pass4.intervention_types import INTERVENTION_TYPES
 
 
 class Pass4ParseError(Exception):
-    """Raised when the Matcha response cannot be parsed into a valid Pass 4 result."""
+    """Raised when the Matcha response cannot be parsed into a valid Pass 3 result."""
 
 
 _REQUIRED_KEYS = ("mechanism_class", "intervention_type", "intervention_action")
 
 
 def parse_pass4_response(raw_text: str) -> Tuple[dict, str, str, str]:
-    """Parse and validate a Pass 4 Matcha response.
+    """Parse and validate a Pass 3 Matcha response.
 
     Returns:
         (parsed_json_dict, mechanism_class, intervention_type, intervention_action)

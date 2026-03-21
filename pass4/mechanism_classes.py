@@ -1,5 +1,5 @@
 """
-Pass 4 — Normalized mechanism class taxonomy.
+Pass 3 — Normalized mechanism class taxonomy.
 
 A fixed set of mechanism classes used to categorize failure mechanisms.
 Every mechanism must map to one of these.  When none of the named classes

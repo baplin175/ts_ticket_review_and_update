@@ -8,7 +8,7 @@ This system is a support-ticket analytics pipeline built for inHANCE, a Harris C
 
 The pipeline ingests raw tickets and their activity histories from the TeamSupport API (or CSV export) into a Postgres database (`tickets_ai` schema). Each ticket's conversation thread is cleaned (HTML→text, signature/boilerplate removal, mojibake repair), classified by action type (technical work, customer problem, scheduling, noise, etc.), and rolled up into structured thread summaries.
 
-Multiple LLM enrichment passes then extract structured failure descriptions: Pass 1 extracts the observable phenomenon, Pass 2 decomposes it into a canonical failure grammar (Component + Operation + Unexpected State), and Pass 3 infers the underlying system mechanism. Separately, LLM scoring assigns sentiment (customer frustration), operational priority (1–10 triage scale), and complexity ratings (intrinsic difficulty vs. elapsed drag).
+Multiple LLM enrichment passes then extract structured failure descriptions: Pass 1 extracts the observable phenomenon, Pass 2 decomposes it into a canonical failure grammar (Component + Operation + Unexpected State), and Pass 2 infers the underlying system mechanism. Separately, LLM scoring assigns sentiment (customer frustration), operational priority (1–10 triage scale), and complexity ratings (intrinsic difficulty vs. elapsed drag).
 
 The schema further supports embedding generation, clustering of similar failures, a cluster catalog with suggested interventions, and daily backlog snapshots with customer/product health scoring. A Flask-based web dashboard provides operational visibility into backlog trends, aging distributions, root cause analysis, ticket drill-downs, and health metrics.
 
@@ -44,7 +44,7 @@ A ticket enters the system from the TeamSupport API or a CSV export, passes thro
 | 9. Complexity | `tickets`, `ticket_actions` (full history) | `ticket_complexity_scores` | LLM (Matcha) scores intrinsic complexity, coordination load, elapsed drag, and overall complexity (1–5 each). Separates true technical difficulty from thread noise and customer delays. Hash-based skip on `technical_core_hash`. | `run_complexity.py`, `prompts/complexity.md` |
 | 10. Pass 1 — Phenomenon | `ticket_thread_rollups.full_thread_text` | `ticket_llm_pass_results` (pass_name=`pass1_phenomenon`) | LLM extracts a single normalized sentence describing the observable system behavior (the phenomenon). Ignores support workflow, project updates, administrative notes. Returns null if no system behavior is described. | `run_ticket_pass1.py`, `pass1_parser.py`, `prompts/pass1_phenomenon.txt` |
 | 11. Pass 2 — Grammar | `ticket_llm_pass_results.phenomenon` (from Pass 1) | `ticket_llm_pass_results` (pass_name=`pass2_grammar`) | LLM decomposes the phenomenon into canonical failure grammar: Component + Operation + Unexpected State → Canonical Failure. Operations are normalized to a fixed 12-verb vocabulary. | `run_ticket_pass2.py`, `pass2_parser.py`, `prompts/pass2_grammar.txt` |
-| 12. Pass 3 — Mechanism | `ticket_llm_pass_results.canonical_failure` (from Pass 2) | `ticket_llm_pass_results` (pass_name=`pass3_mechanism`) | LLM infers the most plausible internal system mechanism that would produce the canonical failure. Focuses on technical system behaviors (validation failures, logic errors, integration errors). | `run_ticket_pass3.py`, `pass3_parser.py`, `prompts/pass3_mechanism.txt` |
+| 12. Pass 2 — Mechanism | `ticket_llm_pass_results.canonical_failure` (from Pass 2) | `ticket_llm_pass_results` (pass_name=`pass2_mechanism`) | LLM infers the most plausible internal system mechanism that would produce the canonical failure. Focuses on technical system behaviors (validation failures, logic errors, integration errors). | `run_ticket_pass2.py`, `pass3_parser.py`, `prompts/pass2_mechanism.txt` |
 | 13. Embeddings | `ticket_thread_rollups.summary_for_embedding` | `ticket_embeddings` | Generate vector embeddings for clustering. Schema is prepared (JSONB vectors with type, source hash, model name) but embedding generation code is not yet present in the repository. | Schema: `003_analytics.sql` |
 | 14. Clustering | `ticket_embeddings` | `cluster_runs`, `ticket_clusters`, `cluster_catalog` | Group tickets by failure similarity. Schema supports method/scope/params tracking, cluster assignment with confidence, and a catalog with labels, descriptions, representative tickets, and suggested intervention types. Clustering execution code is not yet present in the repository. | Schema: `003_analytics.sql` |
 | 15. Interventions | `cluster_catalog`, `ticket_clusters` | `ticket_interventions` | Map clusters to actionable interventions. The `ticket_interventions` table is referenced in migration 004 (ticket_number column added) and the `cluster_catalog` table includes `suggested_intervention_type`. Full intervention logic is not yet implemented. | Schema: `003_analytics.sql`, `004_add_ticket_number.sql` |
@@ -101,10 +101,10 @@ A ticket enters the system from the TeamSupport API or a CSV export, passes thro
 | Attribute | Value |
 |-----------|-------|
 | **Purpose** | Generalized storage for all LLM pipeline pass results (Pass 1, 2, 3). Each row represents one LLM invocation for one ticket. |
-| **Population Method** | Inserted by `run_ticket_pass1.py`, `run_ticket_pass2.py`, `run_ticket_pass3.py`. Starts as `pending`, updated to `success` or `failed`. |
+| **Population Method** | Inserted by `run_ticket_pass1.py`, `run_ticket_pass2.py`, `run_ticket_pass2.py`. Starts as `pending`, updated to `success` or `failed`. |
 | **Type** | LLM-derived |
-| **Key Columns** | `ticket_id`, `pass_name` (pass1_phenomenon / pass2_grammar / pass3_mechanism), `prompt_version`, `model_name`, `input_text` (what was sent to LLM), `raw_response_text`, `parsed_json`, `phenomenon` (Pass 1 output), `component` / `operation` / `unexpected_state` / `canonical_failure` (Pass 2 outputs), `mechanism` (Pass 3 output), `status` (pending/success/failed), `error_message`, `started_at` / `completed_at` |
-| **Downstream Consumers** | Pass 2 reads Pass 1's `phenomenon`; Pass 3 reads Pass 2's `canonical_failure`; web dashboard root cause views; clustering (future); `vw_ticket_pass_pipeline` view |
+| **Key Columns** | `ticket_id`, `pass_name` (pass1_phenomenon / pass2_grammar / pass2_mechanism), `prompt_version`, `model_name`, `input_text` (what was sent to LLM), `raw_response_text`, `parsed_json`, `phenomenon` (Pass 1 output), `component` / `operation` / `unexpected_state` / `canonical_failure` (Pass 2 outputs), `mechanism` (Pass 2 output), `status` (pending/success/failed), `error_message`, `started_at` / `completed_at` |
+| **Downstream Consumers** | Pass 2 reads Pass 1's `phenomenon`; Pass 2 reads Pass 2's `canonical_failure`; web dashboard root cause views; clustering (future); `vw_ticket_pass_pipeline` view |
 
 ### `ticket_embeddings`
 
@@ -225,17 +225,17 @@ All LLM calls use **Matcha**, a Harris Computer internal LLM API (`matcha.harris
 | **How Results Are Stored** | Inserted into `ticket_llm_pass_results` with `pass_name = 'pass2_grammar'`. |
 | **Parser** | `pass2_parser.py` — validates JSON, normalizes operation through synonym map (e.g. upload→import, display→load, save→update), reconstructs canonical_failure from parsed fields. |
 
-### Pass 3 — Mechanism Inference
+### Pass 2 — Mechanism Inference
 
 | Attribute | Value |
 |-----------|-------|
-| **Pass Name** | `pass3_mechanism` |
+| **Pass Name** | `pass2_mechanism` |
 | **Purpose** | Infer the most plausible internal system mechanism that would produce the observed failure. |
 | **Input Text Source** | `canonical_failure` from a successful Pass 2 result |
 | **Output Fields** | `mechanism` (single sentence describing internal system behavior — validation failure, config mismatch, integration error, etc.) |
-| **Prompt Location** | `prompts/pass3_mechanism.txt` |
+| **Prompt Location** | `prompts/pass2_mechanism.txt` |
 | **Model Used** | Matcha |
-| **How Results Are Stored** | Inserted into `ticket_llm_pass_results` with `pass_name = 'pass3_mechanism'`. |
+| **How Results Are Stored** | Inserted into `ticket_llm_pass_results` with `pass_name = 'pass2_mechanism'`. |
 | **Parser** | `pass3_parser.py` — validates JSON, rejects exact restatements of canonical failure, rejects administrative/support-workflow language (words like "ticket", "customer", "agent", "troubleshoot", "escalat*"). |
 
 ### Sentiment Scoring
@@ -347,10 +347,10 @@ Example: *"Billing calculation logic applies service charge rule twice during bi
 full_thread_text
     → [Pass 1] phenomenon
         → [Pass 2] Component + Operation + Unexpected State = Canonical Failure
-            → [Pass 3] Mechanism
+            → [Pass 2] Mechanism
 ```
 
-The passes are strictly sequential and dependency-chained. Pass 2 requires a successful Pass 1 phenomenon. Pass 3 requires a successful Pass 2 canonical_failure.
+The passes are strictly sequential and dependency-chained. Pass 2 requires a successful Pass 1 phenomenon. Pass 2 requires a successful Pass 2 canonical_failure.
 
 ### Ontology Hierarchy (from concrete to abstract)
 
@@ -488,7 +488,7 @@ Based on the schema field `suggested_intervention_type` and the domain context (
 
 7. **Matcha mission configuration.** The system uses a single `MATCHA_MISSION_ID` for all LLM calls. Does the mission define the base model, system prompt, temperature, and other parameters? Are different missions used for different pass types in production?
 
-8. **Pass dependency failure handling.** If Pass 1 returns `null` (no phenomenon), the ticket is excluded from Pass 2 and Pass 3. But there is no retry escalation or fallback for tickets where the LLM fails to extract a phenomenon from a technically substantive thread. How are these gaps monitored?
+8. **Pass dependency failure handling.** If Pass 1 returns `null` (no phenomenon), the ticket is excluded from Pass 2 and Pass 2. But there is no retry escalation or fallback for tickets where the LLM fails to extract a phenomenon from a technically substantive thread. How are these gaps monitored?
 
 9. **Operation verb vocabulary constraints.** Pass 2 normalizes operations to exactly 12 verbs. Some semantic overloading exists (e.g., `load` covers display, validate, test, open, render). Would expanding the vocabulary improve clustering fidelity?
 

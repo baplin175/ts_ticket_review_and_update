@@ -28,7 +28,7 @@ MATCHA_COMPLETIONS_URL = os.getenv(
 )  # Matcha AI API endpoint URL
 MATCHA_TIMEOUT = _env_int("MATCHA_TIMEOUT", 600)  # HTTP timeout in seconds for Matcha requests
 MATCHA_MISSION_ID = os.getenv("MATCHA_MISSION_ID", os.getenv("MATCHA_MISSION", "12848"))  # Matcha mission/model identifier
-MATCHA_API_KEY = os.getenv("MATCHA_API_KEY", "72a39e765c4a42eb99836cc2b617d4e5")  # API key for Matcha authentication
+MATCHA_API_KEY = os.getenv("MATCHA_API_KEY", "")  # API key for Matcha authentication
 
 TS_INPUT_MODE = os.getenv("TS_INPUT_MODE", "csv").strip().lower()  # Input source: "csv" or "api"
 TS_CSV_PATH = os.getenv("TS_CSV_PATH", "").strip()  # Path to CSV file when using CSV input mode
@@ -138,7 +138,7 @@ def extract_llm_struct(result: Dict[str, Any]) -> Dict[str, Any]:
 
 # ====== TeamSupport ENV ======
 TS_BASE = os.getenv("TS_BASE", "https://app.na2.teamsupport.com/api/json")
-TS_KEY = os.getenv("TS_KEY", "9980809a-174b-49a8-9469-bd5c14a657a2")  # Your API key
+TS_KEY = os.getenv("TS_KEY", "")  # Your API key
 TS_USER_ID = os.getenv("TS_USER_ID", "1189708")
 
 if not all([TS_BASE, TS_KEY, TS_USER_ID]):

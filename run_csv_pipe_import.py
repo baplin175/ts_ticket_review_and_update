@@ -1,9 +1,9 @@
 """
-Import CSV pipeline results (pass1 / pass3 / pass4) into the database.
+Import CSV pipeline results (pass1 / pass2 / pass3) into the database.
 
 Reads CSVs produced by the standalone CSV pipeline and inserts them into
 ticket_llm_pass_results, matching the same schema used by the DB-backed
-pass runners (run_ticket_pass1.py, run_ticket_pass3.py, run_pass4.py).
+pass runners (run_ticket_pass1.py, run_ticket_pass2.py, run_ticket_pass3.py).
 
 Only rows with status='success' are imported.  Rows whose ticket_id does
 not exist in the tickets table are skipped with a warning.
@@ -11,7 +11,7 @@ not exist in the tickets table are skipped with a warning.
 Usage:
     python run_csv_pipe_import.py --dir csv_pipe_runs
     python run_csv_pipe_import.py --dir csv_pipe_runs --pass1 pass1_results.csv
-    python run_csv_pipe_import.py --dir csv_pipe_runs --pass1 p1.csv --pass3 p3.csv --pass4 p4.csv
+    python run_csv_pipe_import.py --dir csv_pipe_runs --pass1 p1.csv --pass2 p2.csv --pass3 p3.csv
     python run_csv_pipe_import.py --dir csv_pipe_runs --force   # overwrite existing success rows
 """
 
@@ -27,11 +27,11 @@ csv.field_size_limit(sys.maxsize)
 PASS1_PASS_NAME = "pass1_phenomenon"
 PASS1_PROMPT_VERSION = "2"
 
-PASS3_PASS_NAME = "pass3_mechanism"
-PASS3_PROMPT_VERSION = "3"
+PASS2_PASS_NAME = "pass2_mechanism"
+PASS2_PROMPT_VERSION = "3"
 
-PASS4_PASS_NAME = "pass4_intervention"
-PASS4_PROMPT_VERSION = "2"
+PASS3_PASS_NAME = "pass3_intervention"
+PASS3_PROMPT_VERSION = "2"
 
 MODEL_NAME = "csv-pipeline-import"
 
@@ -141,6 +141,80 @@ def import_pass1(csv_path: str, known_ids: set[int], force: bool = False) -> tup
     return imported, skipped_no_ticket, skipped_status
 
 
+def import_pass2(csv_path: str, known_ids: set[int], force: bool = False) -> tuple[int, int, int]:
+    """Import Pass 2 results.  Returns (imported, skipped_no_ticket, skipped_not_success)."""
+    import db
+
+    rows = _read_csv(csv_path)
+    imported = 0
+    skipped_no_ticket = 0
+    skipped_status = 0
+    now = datetime.now(timezone.utc)
+
+    for row in rows:
+        ticket_id = int(row["ticket_id"])
+        status = row.get("status", "")
+
+        if status != "success":
+            skipped_status += 1
+            continue
+
+        if ticket_id not in known_ids:
+            _log(f"  [pass2] SKIP ticket_id={ticket_id} — not in tickets table")
+            skipped_no_ticket += 1
+            continue
+
+        mechanism = row.get("mechanism") or None
+        evidence = row.get("evidence") or None
+        category = row.get("category") or None
+
+        parsed_json = {
+            "mechanism": mechanism,
+            "evidence": evidence,
+            "category": category,
+        }
+
+        if force:
+            db.delete_prior_failed_pass(ticket_id, PASS2_PASS_NAME, PASS2_PROMPT_VERSION)
+            conn = db.get_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        DELETE FROM ticket_llm_pass_results
+                         WHERE ticket_id = %s AND pass_name = %s
+                           AND prompt_version = %s AND status = 'success';
+                    """, (ticket_id, PASS2_PASS_NAME, PASS2_PROMPT_VERSION))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                db.put_conn(conn)
+        else:
+            existing = db.get_latest_pass_result(ticket_id, PASS2_PASS_NAME, PASS2_PROMPT_VERSION)
+            if existing and existing.get("status") == "success":
+                continue
+
+        row_id = db.insert_pass_result(
+            ticket_id,
+            pass_name=PASS2_PASS_NAME,
+            prompt_version=PASS2_PROMPT_VERSION,
+            model_name=MODEL_NAME,
+            status="pending",
+            started_at=now,
+        )
+        db.update_pass_result(
+            row_id,
+            status="success",
+            parsed_json=parsed_json,
+            mechanism=mechanism,
+            completed_at=now,
+        )
+        imported += 1
+
+    return imported, skipped_no_ticket, skipped_status
+
+
 def import_pass3(csv_path: str, known_ids: set[int], force: bool = False) -> tuple[int, int, int]:
     """Import Pass 3 results.  Returns (imported, skipped_no_ticket, skipped_not_success)."""
     import db
@@ -164,15 +238,21 @@ def import_pass3(csv_path: str, known_ids: set[int], force: bool = False) -> tup
             skipped_no_ticket += 1
             continue
 
-        mechanism = row.get("mechanism") or None
-        evidence = row.get("evidence") or None
-        category = row.get("category") or None
+        mechanism_class = (row.get("mechanism_class") or "").strip().lower() or None
+        intervention_type = (row.get("intervention_type") or "").strip().lower() or None
+        intervention_action = (row.get("intervention_action") or "").strip() or None
+        proposed_class = (row.get("proposed_class") or "").strip().lower() or None
+        proposed_type = (row.get("proposed_type") or "").strip().lower() or None
 
         parsed_json = {
-            "mechanism": mechanism,
-            "evidence": evidence,
-            "category": category,
+            "mechanism_class": mechanism_class,
+            "intervention_type": intervention_type,
+            "intervention_action": intervention_action,
         }
+        if proposed_class:
+            parsed_json["proposed_class"] = proposed_class
+        if proposed_type:
+            parsed_json["proposed_type"] = proposed_type
 
         if force:
             db.delete_prior_failed_pass(ticket_id, PASS3_PASS_NAME, PASS3_PROMPT_VERSION)
@@ -207,86 +287,6 @@ def import_pass3(csv_path: str, known_ids: set[int], force: bool = False) -> tup
             row_id,
             status="success",
             parsed_json=parsed_json,
-            mechanism=mechanism,
-            completed_at=now,
-        )
-        imported += 1
-
-    return imported, skipped_no_ticket, skipped_status
-
-
-def import_pass4(csv_path: str, known_ids: set[int], force: bool = False) -> tuple[int, int, int]:
-    """Import Pass 4 results.  Returns (imported, skipped_no_ticket, skipped_not_success)."""
-    import db
-
-    rows = _read_csv(csv_path)
-    imported = 0
-    skipped_no_ticket = 0
-    skipped_status = 0
-    now = datetime.now(timezone.utc)
-
-    for row in rows:
-        ticket_id = int(row["ticket_id"])
-        status = row.get("status", "")
-
-        if status != "success":
-            skipped_status += 1
-            continue
-
-        if ticket_id not in known_ids:
-            _log(f"  [pass4] SKIP ticket_id={ticket_id} — not in tickets table")
-            skipped_no_ticket += 1
-            continue
-
-        mechanism_class = (row.get("mechanism_class") or "").strip().lower() or None
-        intervention_type = (row.get("intervention_type") or "").strip().lower() or None
-        intervention_action = (row.get("intervention_action") or "").strip() or None
-        proposed_class = (row.get("proposed_class") or "").strip().lower() or None
-        proposed_type = (row.get("proposed_type") or "").strip().lower() or None
-
-        parsed_json = {
-            "mechanism_class": mechanism_class,
-            "intervention_type": intervention_type,
-            "intervention_action": intervention_action,
-        }
-        if proposed_class:
-            parsed_json["proposed_class"] = proposed_class
-        if proposed_type:
-            parsed_json["proposed_type"] = proposed_type
-
-        if force:
-            db.delete_prior_failed_pass(ticket_id, PASS4_PASS_NAME, PASS4_PROMPT_VERSION)
-            conn = db.get_conn()
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        DELETE FROM ticket_llm_pass_results
-                         WHERE ticket_id = %s AND pass_name = %s
-                           AND prompt_version = %s AND status = 'success';
-                    """, (ticket_id, PASS4_PASS_NAME, PASS4_PROMPT_VERSION))
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-            finally:
-                db.put_conn(conn)
-        else:
-            existing = db.get_latest_pass_result(ticket_id, PASS4_PASS_NAME, PASS4_PROMPT_VERSION)
-            if existing and existing.get("status") == "success":
-                continue
-
-        row_id = db.insert_pass_result(
-            ticket_id,
-            pass_name=PASS4_PASS_NAME,
-            prompt_version=PASS4_PROMPT_VERSION,
-            model_name=MODEL_NAME,
-            status="pending",
-            started_at=now,
-        )
-        db.update_pass_result(
-            row_id,
-            status="success",
-            parsed_json=parsed_json,
             mechanism_class=mechanism_class,
             intervention_type=intervention_type,
             intervention_action=intervention_action,
@@ -301,8 +301,8 @@ def main(
     csv_dir: str,
     *,
     pass1_file: str = "pass1_results.csv",
+    pass2_file: str = "pass2_results.csv",
     pass3_file: str = "pass3_results.csv",
-    pass4_file: str = "pass4_results.csv",
     force: bool = False,
 ) -> None:
     import db
@@ -334,6 +334,16 @@ def main(
     else:
         _log(f"[csv-import] Pass 1 file not found: {p1_path}")
 
+    # Pass 2
+    p2_path = os.path.join(csv_dir, pass2_file)
+    if os.path.isfile(p2_path):
+        _log(f"[csv-import] Importing Pass 2 from {pass2_file} …")
+        imp, skip_t, skip_s = import_pass2(p2_path, known_ids, force)
+        _log(f"[csv-import]   Pass 2: {imp} imported, {skip_s} skipped (non-success), {skip_t} skipped (no ticket)")
+        total_imported += imp
+    else:
+        _log(f"[csv-import] Pass 2 file not found: {p2_path}")
+
     # Pass 3
     p3_path = os.path.join(csv_dir, pass3_file)
     if os.path.isfile(p3_path):
@@ -343,16 +353,6 @@ def main(
         total_imported += imp
     else:
         _log(f"[csv-import] Pass 3 file not found: {p3_path}")
-
-    # Pass 4
-    p4_path = os.path.join(csv_dir, pass4_file)
-    if os.path.isfile(p4_path):
-        _log(f"[csv-import] Importing Pass 4 from {pass4_file} …")
-        imp, skip_t, skip_s = import_pass4(p4_path, known_ids, force)
-        _log(f"[csv-import]   Pass 4: {imp} imported, {skip_s} skipped (non-success), {skip_t} skipped (no ticket)")
-        total_imported += imp
-    else:
-        _log(f"[csv-import] Pass 4 file not found: {p4_path}")
 
     _log("=" * 60)
     _log(f"[csv-import] Done. Total rows imported: {total_imported}")
@@ -369,8 +369,8 @@ if __name__ == "__main__":
         help="Directory containing the CSV result files (default: csv_pipe_runs).",
     )
     parser.add_argument("--pass1", type=str, default="pass1_results.csv", help="Pass 1 CSV filename.")
+    parser.add_argument("--pass2", type=str, default="pass2_results.csv", help="Pass 2 CSV filename.")
     parser.add_argument("--pass3", type=str, default="pass3_results.csv", help="Pass 3 CSV filename.")
-    parser.add_argument("--pass4", type=str, default="pass4_results.csv", help="Pass 4 CSV filename.")
     parser.add_argument(
         "--force",
         action="store_true",
@@ -381,7 +381,7 @@ if __name__ == "__main__":
     main(
         args.dir,
         pass1_file=args.pass1,
+        pass2_file=args.pass2,
         pass3_file=args.pass3,
-        pass4_file=args.pass4,
         force=args.force,
     )

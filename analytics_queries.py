@@ -194,7 +194,7 @@ SELECT
     mechanism,
     COUNT(*) AS occurrence_count
 FROM   tickets_ai.ticket_llm_pass_results
-WHERE  pass_name = 'pass3_mechanism'
+WHERE  pass_name = 'pass2_mechanism'
   AND  mechanism IS NOT NULL
 GROUP  BY mechanism
 ORDER  BY occurrence_count DESC
@@ -296,7 +296,7 @@ def high_priority_by_cause(conn, *, as_df: bool = False):
 
 
 def top_failure_mechanisms(conn, *, as_df: bool = False):
-    """Top 20 failure mechanisms from Pass 3 results."""
+    """Top 20 failure mechanisms from Pass 2 results."""
     return run_query(conn, SQL_TOP_FAILURE_MECHANISMS, as_df=as_df)
 
 

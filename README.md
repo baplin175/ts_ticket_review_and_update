@@ -66,14 +66,14 @@ WHERE pass1_status = 'success';
 
 See [SOLUTION.md](SOLUTION.md) for full architecture docs, configuration, and operational notes.
 
-## Pass 2 — Canonical Failure Grammar
+## Pass 2 — Failure Mechanism Inference
 
-Pass 2 converts each Pass 1 phenomenon into the standardized form: `<Component> + <Operation> + <Unexpected State>`. Requires successful Pass 1 results.
+Pass 2 infers the most plausible internal system mechanism behind the Pass 1 canonical failure, using both the canonical failure string and the original ticket thread for evidence-grounded reasoning.
 
 **Requires** `DATABASE_URL` to be set.
 
 ```bash
-# Apply migrations (adds Pass 2 columns + views)
+# Apply migrations (adds Pass 2 / Pass 3 views and renumbered pipeline metadata)
 python db.py migrate
 
 # Run all pending tickets (with optional limit)
@@ -93,8 +93,40 @@ python run_ticket_pass2.py --force
 Results can be queried via the `vw_ticket_pass2_results` and `vw_ticket_pass_pipeline` views:
 
 ```sql
-SELECT ticket_id, phenomenon, component, operation, unexpected_state,
-       canonical_failure, pass2_status
+SELECT ticket_id, phenomenon, canonical_failure, mechanism, pass2_status
 FROM vw_ticket_pass2_results
 WHERE pass2_status = 'success';
+```
+
+## Pass 3 — Intervention Mapping
+
+Pass 3 maps each successful Pass 2 mechanism to a normalized mechanism class, intervention type, and intervention action for engineering follow-up.
+
+**Requires** `DATABASE_URL` to be set.
+
+```bash
+# Run all pending tickets (with optional limit)
+python run_ticket_pass3.py --limit 100
+
+# Run for specific ticket(s)
+python run_ticket_pass3.py --ticket-id 99784
+python run_ticket_pass3.py --ticket-id 99784,98154,100289
+
+# Rerun only previously failed tickets
+python run_ticket_pass3.py --failed-only
+
+# Force rerun (overwrite existing success results)
+python run_ticket_pass3.py --force
+
+# Compute / export aggregates only
+python run_ticket_pass3.py --aggregate-only
+```
+
+Results can be queried via the `vw_ticket_pass3_results` and `vw_ticket_pass_pipeline` views:
+
+```sql
+SELECT ticket_id, mechanism, mechanism_class, intervention_type,
+       intervention_action, pass3_status
+FROM vw_ticket_pass3_results
+WHERE pass3_status = 'success';
 ```
