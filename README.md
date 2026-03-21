@@ -2,29 +2,56 @@
 
 Ingestion + analytics pipeline for TeamSupport tickets: fetches ticket data, cleans activities, runs LLM-based enrichment (sentiment, priority, complexity), and writes results back to TeamSupport.
 
+## Supported Surfaces
+
+- Canonical production path: DB-backed ingestion + rollups + DB enrichment
+- Dashboard: Dash app in [`web/`](web/)
+- CSV pipeline app: standalone Flask app in [`pipeline/`](pipeline/)
+- Legacy compatibility path: JSON-only orchestration via `run_all.py`
+
 ## Quick Start
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# JSON-only mode (no database required)
-TARGET_TICKET=29696 python run_all.py
+# Install core dependencies
+pip install -e .
+pip install -e '.[dev]'
 
 # With Postgres (canonical DB mode)
 export DATABASE_URL="postgresql://user:pass@localhost:5432/Work"
 python db.py migrate
 python run_ingest.py sync --ticket 29696
-python run_rollups.py all --ticket 29696
+python run_enrich_db.py --limit 1 --status Open
 python run_export.py all --ticket 29696
+```
+
+`run_ingest.py sync` already rebuilds rollups and analytics for touched tickets. Use `run_rollups.py` for manual rebuilds or recovery operations.
+
+## Legacy Compatibility Path
+
+```bash
+# JSON-only mode (no database required)
+TARGET_TICKET=29696 python run_all.py
+```
+
+Use this only when you explicitly need the legacy JSON artifact flow or TeamSupport write-back compatibility.
+
+## Dashboard
+
+```bash
+pip install -e '.[web]'
+python3 -m web.app
 ```
 
 ## Running Tests
 
 ```bash
-pip install pytest
-python -m pytest tests/ -v
+python3 -m pytest tests/ -v
 ```
+
+## Dependency Notes
+
+- `pyproject.toml` is the primary dependency definition.
+- `requirements.txt` and `web_requirements.txt` remain as compatibility install lists.
 
 ## Pass 1 — Phenomenon Extraction
 

@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ts-ticket-review-and-update"
+version = "0.1.0"
+description = "TeamSupport ticket ingestion, enrichment, analytics, and dashboard tooling."
+requires-python = ">=3.11"
+dependencies = [
+    "PyYAML>=6.0,<7",
+    "psycopg2-binary>=2.9,<3",
+    "requests>=2.28,<3",
+]
+
+[project.optional-dependencies]
+web = [
+    "dash>=2.14",
+    "dash-ag-grid>=31.0",
+    "dash-iconify>=0.1.2",
+    "dash-mantine-components>=0.14",
+    "plotly>=5.18",
+]
+pipeline = [
+    "azure-storage-blob",
+    "flask",
+    "gunicorn",
+]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools]
+py-modules = [
+    "_check_yaml",
+    "_review_results",
+    "action_classifier",
+    "activity_cleaner",
+    "analytics_queries",
+    "config",
+    "db",
+    "get_models",
+    "glossary",
+    "matcha_client",
+    "pass1_parser",
+    "pass2_parser",
+    "pass3_parser",
+    "run_all",
+    "run_complexity",
+    "run_csv_import",
+    "run_csv_pipe_import",
+    "run_enrich_db",
+    "run_export",
+    "run_export_pipeline_input",
+    "run_ingest",
+    "run_pass4",
+    "run_priority",
+    "run_pull_activities",
+    "run_rollups",
+    "run_sentiment",
+    "run_ticket_pass1",
+    "run_ticket_pass2",
+    "run_ticket_pass3",
+    "test_getusers",
+    "test_matcha_llm_override",
+    "ts_client",
+]
+
+[tool.setuptools.packages.find]
+include = ["ingest*", "rollups*", "enrichment*", "pass4*", "pipeline*", "reuse_functions*", "web*"]

@@ -2,34 +2,26 @@
 TS Ticket Analytics — Dash + Mantine web dashboard.
 
 Entry point.  Run with:
-    python web/app.py
+    python -m web.app
 
 Reads from the existing Postgres database via db.py.
 Does NOT modify any existing project code or write to TeamSupport.
 """
 
-import sys
 import os
-
-# ── Path setup — allow imports of db, config from project root ───────
-_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.join(_DIR, "..")
-sys.path.insert(0, _PROJECT_ROOT)
-sys.path.insert(0, _DIR)
 
 from dash import Dash, html, callback, Input, Output, State, no_update, ALL  # noqa: E402
 import dash_mantine_components as dmc                              # noqa: E402
 from dash import dcc                                               # noqa: E402
 from dash_iconify import DashIconify                               # noqa: E402
 
-import renderer                                                    # noqa: E402
-import data                                                        # noqa: E402
-import dashboard_registry                                          # noqa: E402
-from pages.ticket_detail import ticket_detail_layout, register_callbacks as td_callbacks  # noqa: E402
-from pages.root_cause import register_callbacks as rc_callbacks    # noqa: E402
-from pages.overview import register_overview_callbacks as ov_callbacks  # noqa: E402
-from pages.health import register_health_callbacks as health_callbacks  # noqa: E402
-from pages.dashboard_editor import register_callbacks as dashboard_editor_callbacks  # noqa: E402
+from . import dashboard_registry                                   # noqa: E402
+from . import renderer                                             # noqa: E402
+from .pages.dashboard_editor import register_callbacks as dashboard_editor_callbacks  # noqa: E402
+from .pages.health import register_health_callbacks as health_callbacks  # noqa: E402
+from .pages.overview import register_overview_callbacks as ov_callbacks  # noqa: E402
+from .pages.root_cause import register_callbacks as rc_callbacks    # noqa: E402
+from .pages.ticket_detail import ticket_detail_layout, register_callbacks as td_callbacks  # noqa: E402
 
 # Import custom page modules declared in dashboard.yaml
 renderer.import_custom_layouts()

@@ -6,8 +6,8 @@ from dash import callback, dcc, html, Input, Output, State, no_update
 from dash_iconify import DashIconify
 import plotly.graph_objects as go
 
-import data
-from renderer import grid_with_export
+from .. import data
+from ..renderer import grid_with_export
 
 
 AGE_BUCKET_ORDER = ["0-6", "7-13", "14-29", "30-59", "60-89", "90+"]

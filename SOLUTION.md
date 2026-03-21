@@ -4,6 +4,13 @@
 
 Pull open-ticket activities from TeamSupport, cleanse the text, classify each activity by party (inHANCE team vs customer), write them to a timestamped JSON file, run sentiment analysis, AI priority scoring, and complexity analysis via Matcha LLM.
 
+## Supported Modes
+
+- Canonical path: Postgres-backed ingestion via `run_ingest.py`, derived rebuilds via automatic post-sync hooks, and DB-backed enrichment via `run_enrich_db.py`
+- Dashboard: `python -m web.app`
+- CSV pipeline app: standalone Flask service in `pipeline/`
+- Legacy compatibility path: `run_all.py` and the JSON-only orchestration flow
+
 ## Domain Model
 
 See [DOMAIN_MODEL.md](DOMAIN_MODEL.md) for the complete operational domain model, including system purpose, end-to-end data pipeline, table semantics, LLM pipeline design, failure ontology, clustering system, intervention model, and product/domain knowledge.
@@ -19,7 +26,7 @@ db.py                  — Postgres data-access layer (connection pool, migratio
 run_ingest.py          — DB-backed incremental ingestion CLI (watermark-based sync with automatic created-since merge for opened+closed tickets, single-ticket resync, replay mode, --sentiment flag for post-sync sentiment, --enrich flag for post-sync enrichment (sentiment + priority + complexity + health rollups), status; MAX_TICKETS-safe watermark: sorts tickets by DateModified ascending and advances only to min DateModified of processed tickets when set is truncated, ensuring incremental progress without skipping)
 action_classifier.py   — Deterministic rule-based action classification (no LLM; action_type='Description' → customer_problem_statement)
 run_rollups.py         — Rebuild action classification, thread rollups, metrics, and daily open counts from DB state; run_full_rollups() auto-triggers after any new migration; run_analytics_for_tickets() snapshots ALL tickets (not just touched ones) so aging/backlog views always have complete data for today
-run_all.py             — Orchestrator: runs all stages in sequence, merges fields, single API call per ticket (--force, --no-writeback)
+run_all.py             — Legacy compatibility orchestrator: runs the JSON-oriented stages in sequence, merges fields, single API call per ticket (--force, --no-writeback)
 run_enrich_db.py       — DB-only enrichment: score tickets from Postgres (priority + complexity + sentiment by default), no TS API calls
 run_csv_import.py      — Bulk-import Activities.csv into DB (synthetic action IDs, streaming, idempotent, derives closed_at from Days Closed)
 run_export.py          — Export canonical DB state to timestamped JSON artifacts
@@ -40,7 +47,7 @@ pass4/mechanism_classifier.py — Pass 4 response parser (strict JSON validation
 pass4/intervention_mapper.py  — Pass 4 per-ticket LLM orchestrator (prompt build, Matcha call, parse, DB persist)
 pass4/intervention_aggregator.py — ROI aggregation engine (mechanism class counts, intervention type counts, top engineering fixes, JSON artifact export)
 migrations/            — Numbered SQL migration files applied by db.py
-web/app.py             — Dash + Mantine web dashboard entry point (read-only, live Postgres queries)
+web/app.py             — Dash + Mantine web dashboard entry point (read-only, live Postgres queries; run with `python -m web.app`)
 web/dashboard.yaml     — YAML-driven dashboard configuration (pages, nav, queries, grids, charts, stat cards)
 web/renderer.py        — YAML config renderer: parses dashboard.yaml, builds Dash layouts for YAML-driven pages, imports custom page modules
 web/data.py            — Data access layer for the web dashboard (SELECT-only for analytics, plus dashboard-local CRUD for saved reports; no TS writes); includes root cause analytics queries (mechanism class/intervention type distributions, component/operation aggregations, Sankey flow data, pipeline funnel, per-product breakdown, top engineering fixes from vw_intervention_roi); get_filtered_backlog_daily() reconstructs daily backlog trend from tickets table with dynamic WHERE clauses for overview filters; get_tickets_by_customers() returns open tickets for a list of customer names (health drill-down); get_tickets_by_fixes() returns tickets matching (mechanism_class, intervention_type) pairs (engineering fixes drill-down)

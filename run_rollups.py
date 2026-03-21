@@ -38,6 +38,7 @@ import psycopg2.extras
 
 import db
 from action_classifier import classify_action, is_noise, is_technical_substance
+from rollups.orchestrator import run_analytics_pipeline, run_full_rollups_pipeline
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -64,24 +65,20 @@ def run_full_rollups(ticket_ids: list[int] | None = None) -> None:
     Callable programmatically — used as a post-migration hook so that
     derived tables stay consistent after schema changes.
     """
-    if not db._is_enabled():
-        return
-    tids = ticket_ids or _ticket_ids()
-    if not tids:
-        print("[rollups] No tickets to process.", flush=True)
-        return
-    print(f"[rollups] Running full rollups for {len(tids)} ticket(s) …", flush=True)
-    classify_actions(tids)
-    rebuild_rollups(tids)
-    rebuild_metrics(tids)
-    rebuild_ticket_participants(tids)
-    rebuild_ticket_handoffs(tids)
-    rebuild_ticket_wait_states(tids)
-    snapshot_tickets_daily(ticket_ids=tids)
-    rebuild_customer_ticket_health()
-    rebuild_product_ticket_health()
-    rebuild_daily_open_counts()
-    print("[rollups] Full rollups complete.", flush=True)
+    run_full_rollups_pipeline(
+        ticket_ids=lambda: ticket_ids or _ticket_ids(),
+        classify=classify_actions,
+        rollups=rebuild_rollups,
+        metrics=rebuild_metrics,
+        participants=rebuild_ticket_participants,
+        handoffs=rebuild_ticket_handoffs,
+        wait_states=rebuild_ticket_wait_states,
+        snapshot=snapshot_tickets_daily,
+        customer_health=rebuild_customer_ticket_health,
+        product_health=rebuild_product_ticket_health,
+        daily_open_counts=rebuild_daily_open_counts,
+        db_enabled=db._is_enabled,
+    )
 
 
 def _sha256(text: str) -> str:
@@ -1016,18 +1013,16 @@ def run_analytics_for_tickets(ticket_ids: list[int]) -> None:
     Steps: participants → handoffs → wait_states → snapshot → health → daily_open_counts.
     Called by run_ingest.py after a successful sync.
     """
-    if not ticket_ids:
-        return
-    print(f"[analytics] Rebuilding analytics for {len(ticket_ids)} ticket(s)…", flush=True)
-    rebuild_ticket_participants(ticket_ids)
-    rebuild_ticket_handoffs(ticket_ids)
-    rebuild_ticket_wait_states(ticket_ids)
-    # Snapshot ALL tickets so aging / backlog views are complete for today.
-    snapshot_tickets_daily()
-    rebuild_customer_ticket_health()
-    rebuild_product_ticket_health()
-    rebuild_daily_open_counts()  # today only; skips if already computed
-    print("[analytics] Done.", flush=True)
+    run_analytics_pipeline(
+        ticket_ids,
+        participants=rebuild_ticket_participants,
+        handoffs=rebuild_ticket_handoffs,
+        wait_states=rebuild_ticket_wait_states,
+        snapshot=snapshot_tickets_daily,
+        customer_health=rebuild_customer_ticket_health,
+        product_health=rebuild_product_ticket_health,
+        daily_open_counts=rebuild_daily_open_counts,
+    )
 
 
 # ── CLI ──────────────────────────────────────────────────────────────

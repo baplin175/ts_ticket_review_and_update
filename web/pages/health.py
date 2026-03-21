@@ -5,8 +5,8 @@ import dash_mantine_components as dmc
 from dash import callback, dcc, html, Input, Output, State, no_update
 from dash_iconify import DashIconify
 
-import data
-from renderer import grid_with_export
+from .. import data
+from ..renderer import grid_with_export
 
 
 # ── Customer health columns ──────────────────────────────────────────

@@ -9,18 +9,11 @@ from dash import Input, Output, State, dcc, html, no_update
 from dash_iconify import DashIconify
 import psycopg2
 
-try:
-    from .. import dashboard_registry
-    from .. import dashboard_templates
-    from .. import data
-    from .. import query_catalog
-    from .. import renderer
-except ImportError:  # pragma: no cover - supports direct script-style imports
-    import dashboard_registry
-    import dashboard_templates
-    import data
-    import query_catalog
-    import renderer
+from .. import dashboard_registry
+from .. import dashboard_templates
+from .. import data
+from .. import query_catalog
+from .. import renderer
 
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")

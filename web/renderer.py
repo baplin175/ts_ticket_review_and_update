@@ -16,12 +16,8 @@ from dash_iconify import DashIconify
 import plotly.graph_objects as go
 import yaml
 
-try:
-    from . import data
-    from . import query_catalog
-except ImportError:  # pragma: no cover - supports direct script-style imports
-    import data
-    import query_catalog
+from . import data
+from . import query_catalog
 
 # ── Config loading (auto-reloads on file change) ────────────────────
 

@@ -11,8 +11,8 @@ import dash_mantine_components as dmc
 from dash import callback, ctx, dcc, html, Input, Output, State, no_update
 from dash_iconify import DashIconify
 
-import data
-from renderer import grid_with_export
+from .. import data
+from ..renderer import grid_with_export
 
 # Path to run_ingest.py in the project root (web/pages/ → web/ → project root)
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

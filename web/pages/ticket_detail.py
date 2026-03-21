@@ -9,7 +9,7 @@ from dash import callback, dcc, html, Input, Output, State, no_update
 from dash_iconify import DashIconify
 import plotly.graph_objects as go
 
-import data
+from .. import data
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _INGEST_SCRIPT = os.path.join(_PROJECT_ROOT, "run_ingest.py")

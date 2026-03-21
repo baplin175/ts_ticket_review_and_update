@@ -7,14 +7,9 @@ The one exception is saved_reports (dashboard-local CRUD, never touches TS).
 """
 
 import json
-import sys
-import os
 import uuid as _uuid
 from datetime import datetime, date
 from decimal import Decimal
-
-# Allow imports of db / config from the project root
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import psycopg2.extras  # noqa: E402
 from psycopg2 import errors as psycopg2_errors  # noqa: E402

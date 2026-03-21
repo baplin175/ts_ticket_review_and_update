@@ -39,6 +39,9 @@ from datetime import datetime, timezone, timedelta
 
 import config
 import db
+from ingest.extractors import extract_action_row, extract_ticket_row, parse_ts_datetime
+from ingest.post_sync import enrich_tickets, rebuild_for_tickets
+from ingest.reconcile import reconcile_closed
 from ts_client import (
     fetch_open_tickets,
     fetch_tickets_created_since,
@@ -83,122 +86,6 @@ def _start_log_file():
     sys.stderr = _TeeWriter(sys.__stderr__, log_fh)
     print(f"[ingest] Logging to {log_path}", flush=True)
     return log_fh
-
-
-# ── Datetime parsing (duplicated from run_pull_activities to avoid coupling) ─
-
-def _parse_ts_datetime(value):
-    """Parse a TeamSupport datetime string into a timezone-aware datetime."""
-    if not value:
-        return None
-    v = str(value).strip()
-    if not v:
-        return None
-    try:
-        if v.endswith("Z"):
-            return datetime.fromisoformat(v.replace("Z", "+00:00"))
-        dt = datetime.fromisoformat(v)
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    except Exception:
-        pass
-    try:
-        return datetime.strptime(v, "%m/%d/%Y %I:%M %p").replace(tzinfo=timezone.utc)
-    except Exception:
-        return None
-
-
-# ── Ticket metadata extraction ───────────────────────────────────────
-
-def _extract_ticket_row(ticket_raw: dict, now: datetime) -> dict:
-    """Build a dict suitable for db.upsert_ticket from a raw TS ticket dict."""
-    tid = extract_ticket_id(ticket_raw)
-    ticket_number = str(ticket_raw.get("TicketNumber") or "").strip()
-    ticket_name = str(ticket_raw.get("Name") or ticket_raw.get("TicketName") or "").strip()
-
-    date_created_str = str(ticket_raw.get("DateCreated") or "").strip()
-    date_modified_str = str(ticket_raw.get("DateModified") or "").strip()
-    date_created = _parse_ts_datetime(date_created_str)
-    date_modified = _parse_ts_datetime(date_modified_str)
-
-    closed_at_str = str(ticket_raw.get("DateClosed") or "").strip()
-    closed_at = _parse_ts_datetime(closed_at_str)
-
-    days_opened_raw = ticket_raw.get("DaysOpened")
-    days_opened = None
-    if days_opened_raw is not None and str(days_opened_raw).strip():
-        try:
-            days_opened = float(str(days_opened_raw).strip())
-        except ValueError:
-            pass
-
-    days_since_modified = None
-    if date_modified:
-        days_since_modified = (now - date_modified).days
-
-    status = str(ticket_raw.get("Status") or "").strip() or None
-    severity = str(ticket_raw.get("Severity") or "").strip() or None
-    product_name = str(
-        ticket_raw.get("ProductName") or ticket_raw.get("Product") or ""
-    ).strip() or None
-    assignee = str(
-        ticket_raw.get("UserName")
-        or ticket_raw.get("AssignedTo")
-        or ticket_raw.get("AssignedToName")
-        or ticket_raw.get("Assignee")
-        or ticket_raw.get("AssigneeName")
-        or ticket_raw.get("OwnerName")
-        or ticket_raw.get("Owner")
-        or ticket_raw.get("AssignedToUserName")
-        or ""
-    ).strip() or None
-    customer = str(ticket_raw.get("PrimaryCustomer") or "").strip() or None
-
-    return {
-        "ticket_id": int(tid) if tid else None,
-        "ticket_number": ticket_number or None,
-        "ticket_name": ticket_name or None,
-        "status": status,
-        "severity": severity,
-        "product_name": product_name,
-        "assignee": assignee,
-        "customer": customer,
-        "date_created": date_created,
-        "date_modified": date_modified,
-        "closed_at": closed_at,
-        "days_opened": days_opened,
-        "days_since_modified": days_since_modified,
-        "source_updated_at": date_modified,
-        "source_payload": ticket_raw,
-    }
-
-
-def _extract_action_row(action_raw: dict, tid: int, cleaned: dict) -> dict:
-    """Build a dict suitable for db.upsert_action from raw + cleaned action dicts."""
-    action_id_str = cleaned.get("action_id") or ""
-    action_id = int(action_id_str) if action_id_str else None
-
-    created_at = _parse_ts_datetime(cleaned.get("created_at"))
-
-    raw_desc = action_raw.get("Description") or action_raw.get("Text") or ""
-    cleaned_desc = cleaned.get("description") or ""
-    is_empty = not cleaned_desc.strip()
-
-    return {
-        "action_id": action_id,
-        "ticket_id": tid,
-        "created_at": created_at,
-        "action_type": cleaned.get("action_type") or None,
-        "creator_id": cleaned.get("creator_id") or None,
-        "creator_name": cleaned.get("creator_name") or None,
-        "party": cleaned.get("party") or None,
-        "is_visible": cleaned.get("is_visible"),
-        "description": raw_desc or None,
-        "cleaned_description": cleaned_desc or None,
-        "action_class": None,  # reserved for future classification
-        "is_empty": is_empty,
-        "is_customer_visible": cleaned.get("is_visible"),
-        "source_payload": action_raw,
-    }
 
 
 # ── Core ingestion ───────────────────────────────────────────────────
@@ -342,7 +229,15 @@ def _sync(
             # Deduplicate by TicketID — upserts are idempotent, but this
             # avoids fetching actions twice for the same ticket.
             if effective_since:
-                created_tickets = fetch_tickets_created_since(effective_since)
+                try:
+                    created_tickets = fetch_tickets_created_since(effective_since)
+                except Exception as exc:
+                    print(
+                        "[ingest] WARNING: created-since fetch failed; continuing with open-ticket sync "
+                        f"only: {exc}",
+                        flush=True,
+                    )
+                    created_tickets = []
                 if created_tickets:
                     seen_ids = {str(t.get("TicketID") or "") for t in raw_tickets}
                     new_count = 0
@@ -370,8 +265,8 @@ def _sync(
             filter_label = "created" if new_only else "modified"
             raw_tickets = [
                 t for t in raw_tickets
-                if _parse_ts_datetime(str(t.get(filter_field) or "")) is not None
-                and _parse_ts_datetime(str(t.get(filter_field) or "")) >= effective_since
+                if parse_ts_datetime(str(t.get(filter_field) or "")) is not None
+                and parse_ts_datetime(str(t.get(filter_field) or "")) >= effective_since
             ]
             print(
                 f"[ingest] Filtered {before_count} → {len(raw_tickets)} ticket(s) "
@@ -383,7 +278,7 @@ def _sync(
         # truncates the list, we process the oldest-modified first and the
         # watermark advances incrementally without skipping tickets.
         raw_tickets.sort(
-            key=lambda t: _parse_ts_datetime(str(t.get("DateModified") or "")) or datetime.min.replace(tzinfo=timezone.utc)
+            key=lambda t: parse_ts_datetime(str(t.get("DateModified") or "")) or datetime.min.replace(tzinfo=timezone.utc)
         )
 
         # ── Apply max_tickets limit
@@ -410,11 +305,18 @@ def _sync(
                     continue
             if fetched_ids:
                 placeholders = ",".join(["%s"] * len(fetched_ids))
-                rows = db.fetch_all(
-                    f"SELECT ticket_id FROM tickets WHERE ticket_id IN ({placeholders});",
-                    tuple(fetched_ids),
-                )
-                existing_ticket_ids = {int(r[0]) for r in rows}
+                try:
+                    rows = db.fetch_all(
+                        f"SELECT ticket_id FROM tickets WHERE ticket_id IN ({placeholders});",
+                        tuple(fetched_ids),
+                    )
+                    existing_ticket_ids = {int(r[0]) for r in rows}
+                except Exception as exc:
+                    print(
+                        "[ingest] WARNING: existing-ticket precheck failed; treating touched tickets as "
+                        f"potentially new: {exc}",
+                        flush=True,
+                    )
 
         # ── Process each ticket
         for idx, ticket_raw in enumerate(raw_tickets, 1):
@@ -431,7 +333,7 @@ def _sync(
 
             try:
                 # ── Upsert ticket
-                ticket_row = _extract_ticket_row(ticket_raw, now)
+                ticket_row = extract_ticket_row(ticket_raw, now)
                 if verbose:
                     print(f"[ingest] [{idx}/{tickets_seen}] Ticket #{tnum} (id={tid})", flush=True)
 
@@ -446,7 +348,7 @@ def _sync(
                     if not aid_str:
                         continue
 
-                    action_row = _extract_action_row(action_raw, tid, cleaned)
+                    action_row = extract_action_row(action_raw, tid, cleaned)
                     action_row["ticket_number"] = tnum
                     if not dry_run:
                         action_rows.append(action_row)
@@ -516,7 +418,7 @@ def _sync(
         watermark_override = None
         if advance_watermark and was_truncated and raw_tickets:
             processed_dates = [
-                _parse_ts_datetime(str(t.get("DateModified") or ""))
+                parse_ts_datetime(str(t.get("DateModified") or ""))
                 for t in raw_tickets
             ]
             processed_dates = [d for d in processed_dates if d is not None]
@@ -561,60 +463,7 @@ def _reconcile_closed(upserted_ids: list[int], verbose: bool = False) -> list[in
 
     Returns the list of ticket_ids that were reconciled.
     """
-    db_open_ids = set(db.get_open_ticket_ids())
-    synced_ids = set(upserted_ids)
-    missing_ids = sorted(db_open_ids - synced_ids)
-
-    if not missing_ids:
-        print("[reconcile] All DB-open tickets were seen in sync — nothing to reconcile.", flush=True)
-        return []
-
-    print(
-        f"[reconcile] {len(missing_ids)} ticket(s) open in DB but not returned by TS — "
-        f"re-fetching to check if closed…",
-        flush=True,
-    )
-
-    now = datetime.now(timezone.utc)
-    reconciled = []
-
-    for tid in missing_ids:
-        try:
-            raw_tickets = fetch_ticket_by_id(str(tid))
-            if not raw_tickets:
-                if verbose:
-                    print(f"  [reconcile] ticket_id={tid}: not found in TS — skipping.", flush=True)
-                continue
-
-            ticket_raw = raw_tickets[0]
-            ticket_row = _extract_ticket_row(ticket_raw, now)
-            tnum = ticket_row.get("ticket_number") or "?"
-
-            # Fetch + clean actions
-            raw_actions = fetch_all_activities(str(tid))
-            action_rows = []
-            for action_raw in raw_actions:
-                cleaned = clean_activity_dict(action_raw)
-                if not cleaned.get("action_id"):
-                    continue
-                action_row = _extract_action_row(action_raw, tid, cleaned)
-                action_row["ticket_number"] = tnum
-                action_rows.append(action_row)
-
-            db.upsert_ticket_with_actions(ticket_row, action_rows, now=now)
-            reconciled.append(tid)
-
-            status = ticket_row.get("status") or "unknown"
-            closed = ticket_row.get("closed_at")
-            label = f"CLOSED ({closed})" if closed else f"status={status}"
-            if verbose:
-                print(f"  [reconcile] #{tnum} (id={tid}): {label}", flush=True)
-
-        except Exception as exc:
-            print(f"  [reconcile] ERROR ticket_id={tid}: {exc}", flush=True)
-
-    print(f"[reconcile] Reconciled {len(reconciled)} ticket(s).", flush=True)
-    return reconciled
+    return reconcile_closed(upserted_ids, verbose=verbose)
 
 
 # ── Status display ───────────────────────────────────────────────────
@@ -810,20 +659,7 @@ def main():
     # ── Post-sync: rebuild rollups + analytics for touched tickets ──
     if not args.dry_run and result["status"] == "completed":
         all_touched = result.get("upserted_ids", []) + reconciled_ids
-        if all_touched:
-            from run_rollups import (
-                classify_actions, rebuild_rollups, rebuild_metrics,
-                run_analytics_for_tickets,
-            )
-            print(
-                f"\n[ingest] Post-sync: rebuilding rollups + analytics "
-                f"for {len(all_touched)} ticket(s)\u2026",
-                flush=True,
-            )
-            classify_actions(all_touched)
-            rebuild_rollups(all_touched)
-            rebuild_metrics(all_touched)
-            run_analytics_for_tickets(all_touched)
+        rebuild_for_tickets(all_touched)
 
     # ── Post-sync: enrichment for touched tickets ──
     run_enrichment = (
@@ -834,65 +670,11 @@ def main():
             result.get("upserted_ids", []) + reconciled_ids
         )
         if enrich_ids:
-            num_map = db.ticket_numbers_for_ids(enrich_ids)
-            touched_numbers = [num_map[tid] for tid in enrich_ids if tid in num_map]
-
-            # Sentiment (runs for --sentiment or --enrich)
-            if touched_numbers and (args.sentiment or args.enrich or args.enrich_new):
-                from run_sentiment import main as sentiment_main
-                print(
-                    f"\n[ingest] Post-sync: running sentiment for "
-                    f"{len(touched_numbers)} ticket(s)\u2026",
-                    flush=True,
-                )
-                try:
-                    sentiment_main(force=False, ticket_numbers=touched_numbers)
-                except SystemExit:
-                    print("[ingest] Sentiment stage exited.", flush=True)
-                except Exception as exc:
-                    print(f"[ingest] Sentiment error: {exc}", flush=True)
-
-            # Full enrichment (only with --enrich / --enrich-new)
-            if (args.enrich or args.enrich_new) and touched_numbers:
-                # Priority
-                from run_priority import main as priority_main
-                print(
-                    f"\n[ingest] Post-sync: running priority for "
-                    f"{len(touched_numbers)} ticket(s)\u2026",
-                    flush=True,
-                )
-                try:
-                    priority_main(write_back=False, force=False, ticket_numbers=touched_numbers)
-                except SystemExit:
-                    print("[ingest] Priority stage exited.", flush=True)
-                except Exception as exc:
-                    print(f"[ingest] Priority error: {exc}", flush=True)
-
-                # Complexity
-                from run_complexity import main as complexity_main
-                print(
-                    f"\n[ingest] Post-sync: running complexity for "
-                    f"{len(touched_numbers)} ticket(s)\u2026",
-                    flush=True,
-                )
-                try:
-                    complexity_main(write_back=False, force=False, ticket_numbers=touched_numbers)
-                except SystemExit:
-                    print("[ingest] Complexity stage exited.", flush=True)
-                except Exception as exc:
-                    print(f"[ingest] Complexity error: {exc}", flush=True)
-
-                # Rebuild health rollups after enrichment is complete
-                from run_rollups import (
-                    rebuild_customer_ticket_health,
-                    rebuild_product_ticket_health,
-                )
-                print("\n[ingest] Post-enrich: rebuilding health rollups\u2026", flush=True)
-                try:
-                    rebuild_customer_ticket_health()
-                    rebuild_product_ticket_health()
-                except Exception as exc:
-                    print(f"[ingest] Health rollup error: {exc}", flush=True)
+            enrich_tickets(
+                enrich_ids,
+                sentiment=(args.sentiment or args.enrich or args.enrich_new),
+                full_enrichment=(args.enrich or args.enrich_new),
+            )
         elif args.enrich_new:
             print("\n[ingest] Post-sync: no newly added tickets to enrich.", flush=True)
 

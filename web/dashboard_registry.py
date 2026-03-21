@@ -1,9 +1,6 @@
 """Helpers for combining static pages and DB-backed dashboards."""
 
-try:
-    from . import data
-except ImportError:  # pragma: no cover - supports direct script-style imports
-    import data
+from . import data
 
 
 DASHBOARD_ROUTE_PREFIX = "/dashboards/"

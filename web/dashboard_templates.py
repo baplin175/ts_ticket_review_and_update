@@ -1,9 +1,6 @@
 """Opinionated starter templates for runtime dashboards."""
 
-try:
-    from . import data
-except ImportError:  # pragma: no cover - supports direct script-style imports
-    import data
+from . import data
 
 
 TEMPLATES = {

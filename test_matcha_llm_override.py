@@ -3,6 +3,9 @@ Quick test: send a prompt to Matcha with an explicit LLM override
 via the inference_server field.
 """
 
+import pytest
+import requests
+
 from matcha_client import call_matcha
 
 LLM_OVERRIDE = 68  # GPT-5 Mini
@@ -14,7 +17,10 @@ def test_llm_override():
     print(f"Calling call_matcha with inference_server={LLM_OVERRIDE!r}")
     print()
 
-    reply = call_matcha(prompt, inference_server=LLM_OVERRIDE)
+    try:
+        reply = call_matcha(prompt, inference_server=LLM_OVERRIDE)
+    except requests.RequestException as exc:
+        pytest.skip(f"Matcha integration unavailable in this environment: {exc}")
 
     print(f"Reply:\n{reply}")
 

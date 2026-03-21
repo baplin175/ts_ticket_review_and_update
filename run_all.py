@@ -1,5 +1,5 @@
 """
-Orchestrator — Run all pipeline stages in sequence.
+Legacy orchestrator — Run the JSON-oriented pipeline stages in sequence.
 
 Stages:
   1. Pull activities   (always runs — fetches from TS API + generates JSON)
@@ -10,6 +10,13 @@ Stages:
 
 When DATABASE_URL is set, enrichment scripts also persist to DB and use
 hash-based skipping.  Use --force to override hash checks.
+
+This script is retained as a compatibility path for JSON-only and direct
+write-back workflows. The canonical operational path is:
+  1. python db.py migrate
+  2. python run_ingest.py sync
+  3. python run_enrich_db.py
+  4. python run_export.py all
 
 Usage:
     python run_all.py
@@ -156,7 +163,9 @@ def main(*, force: bool = False, no_writeback: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the full pipeline.")
+    parser = argparse.ArgumentParser(
+        description="Run the legacy JSON-oriented pipeline compatibility flow."
+    )
     parser.add_argument("--force", action="store_true",
                         help="Force enrichment rerun even if content hashes are unchanged.")
     parser.add_argument("--no-writeback", action="store_true",

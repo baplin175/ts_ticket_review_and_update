@@ -47,14 +47,14 @@ pages:
     route: /
     icon: tabler:dashboard
     aliases: [/overview]
-    module: pages.overview
+    module: web.pages.overview
     layout_func: overview_layout
 
   - label: Tickets
     route: /tickets
     icon: tabler:ticket
     match_prefix: /ticket/
-    module: pages.tickets
+    module: web.pages.tickets
     layout_func: tickets_layout
 
   # ── YAML-driven pages ────────────────────────────────────────────
@@ -62,23 +62,23 @@ pages:
   - label: Health
     route: /health
     icon: tabler:heart-rate-monitor
-    module: pages.health
+    module: web.pages.health
     layout_func: health_layout
 
   - label: Root Cause
     route: /root-cause
     icon: tabler:search
-    module: pages.root_cause
+    module: web.pages.root_cause
     layout_func: root_cause_layout
 
   - label: Config
     route: /config
     icon: tabler:settings
-    module: pages.config_view
+    module: web.pages.config_view
     layout_func: config_layout
 
   - label: Dashboards
     route: /dashboards/manage
     icon: tabler:layout-dashboard
-    module: pages.dashboard_editor
+    module: web.pages.dashboard_editor
     layout_func: dashboard_editor_layout

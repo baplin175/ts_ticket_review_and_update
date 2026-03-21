@@ -10,7 +10,7 @@ from dash_iconify import DashIconify
 import requests
 
 import config
-import data
+from .. import data
 
 # Path to the config.py file on disk
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "config.py")

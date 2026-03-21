@@ -7,10 +7,7 @@ select a query key plus validated parameters, but may not run arbitrary SQL.
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-try:
-    from . import data
-except ImportError:  # pragma: no cover - supports direct script-style imports
-    import data
+from . import data
 
 
 ALLOWED_WIDGET_TYPES = {

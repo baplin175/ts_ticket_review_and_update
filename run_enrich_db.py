@@ -19,7 +19,8 @@ Usage:
 import argparse
 import sys
 import time
-from datetime import datetime, timezone
+
+from enrichment.orchestrator import elapsed_minutes, run_sentiment_stage, run_stage_batches
 
 
 def _log(msg: str) -> None:
@@ -84,33 +85,14 @@ def main() -> None:
     if run_priority:
         _log(f"\n[enrich] Stage 1: Priority scoring (batch size {args.batch_size})")
         from run_priority import main as priority_main
-        batch_size = args.batch_size
-        total_scored = 0
-        total_skipped = 0
-        total_errors = 0
-
-        for i in range(0, len(all_tickets), batch_size):
-            batch = all_tickets[i:i + batch_size]
-            batch_num = i // batch_size + 1
-            total_batches = (len(all_tickets) + batch_size - 1) // batch_size
-            _log(f"\n  [priority] Batch {batch_num}/{total_batches} ({len(batch)} tickets: {batch[0]}..{batch[-1]})")
-
-            try:
-                results = priority_main(
-                    write_back=False,
-                    force=force,
-                    ticket_numbers=batch,
-                )
-                scored = len(results)
-                skipped = len(batch) - scored
-                total_scored += scored
-                total_skipped += skipped
-            except SystemExit:
-                _log(f"  [priority] Batch {batch_num} failed (system exit). Continuing...")
-                total_errors += len(batch)
-            except Exception as e:
-                _log(f"  [priority] Batch {batch_num} error: {e}. Continuing...")
-                total_errors += len(batch)
+        total_scored, total_skipped, total_errors = run_stage_batches(
+            tickets=all_tickets,
+            batch_size=args.batch_size,
+            label="priority",
+            runner=priority_main,
+            force=force,
+            write_back=False,
+        )
 
         _log(f"\n[enrich] Priority complete: {total_scored} scored, {total_skipped} skipped (hash match), {total_errors} errors.")
 
@@ -118,33 +100,14 @@ def main() -> None:
     if run_complexity:
         _log(f"\n[enrich] Stage 2: Complexity scoring ({len(all_tickets)} tickets)")
         from run_complexity import main as complexity_main
-        # Complexity processes tickets one-by-one internally, but we still
-        # batch the ticket_numbers list to get periodic progress updates.
-        batch_size_c = 50  # progress reporting interval
-        total_scored = 0
-        total_skipped = 0
-        total_errors = 0
-
-        for i in range(0, len(all_tickets), batch_size_c):
-            batch = all_tickets[i:i + batch_size_c]
-            _log(f"\n  [complexity] Progress: {i}/{len(all_tickets)} — processing {len(batch)} tickets...")
-
-            try:
-                results = complexity_main(
-                    write_back=False,
-                    force=force,
-                    ticket_numbers=batch,
-                )
-                scored = len(results)
-                skipped = len(batch) - scored
-                total_scored += scored
-                total_skipped += skipped
-            except SystemExit:
-                _log(f"  [complexity] Batch at offset {i} failed (system exit). Continuing...")
-                total_errors += len(batch)
-            except Exception as e:
-                _log(f"  [complexity] Batch at offset {i} error: {e}. Continuing...")
-                total_errors += len(batch)
+        total_scored, total_skipped, total_errors = run_stage_batches(
+            tickets=all_tickets,
+            batch_size=50,
+            label="complexity",
+            runner=complexity_main,
+            force=force,
+            write_back=False,
+        )
 
         _log(f"\n[enrich] Complexity complete: {total_scored} scored, {total_skipped} skipped (hash match), {total_errors} errors.")
 
@@ -152,16 +115,9 @@ def main() -> None:
     if run_sentiment:
         _log(f"\n[enrich] Stage 3: Sentiment analysis ({len(all_tickets)} tickets)")
         from run_sentiment import main as sentiment_main
-        try:
-            sentiment_main(force=force, ticket_numbers=all_tickets)
-        except SystemExit:
-            _log("[enrich] Sentiment stage exited.")
-        except Exception as e:
-            _log(f"[enrich] Sentiment error: {e}")
-        _log("[enrich] Sentiment complete.")
+        run_sentiment_stage(tickets=all_tickets, force=force, runner=sentiment_main)
 
-    elapsed = time.time() - start_time
-    elapsed_m = elapsed / 60
+    elapsed_m = elapsed_minutes(start_time)
     _log(f"\n{'=' * 60}")
     _log(f"[enrich] All stages complete. {len(all_tickets)} ticket(s) processed in {elapsed_m:.1f} min.")
     _log("=" * 60)
