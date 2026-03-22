@@ -7,7 +7,7 @@ All functions are no-ops when DATABASE_URL is empty (JSON-only mode).
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -197,7 +197,7 @@ def upsert_ticket(ticket: Dict[str, Any], *, now: Optional[datetime] = None) -> 
             cur.execute("""
                 INSERT INTO tickets (
                     ticket_id, ticket_number, ticket_name,
-                    status, severity, product_name, assignee, customer,
+                    status, severity, product_name, assignee, group_name, customer,
                     date_created, date_modified, closed_at,
                     days_opened, days_since_modified,
                     source_updated_at, source_payload,
@@ -205,7 +205,7 @@ def upsert_ticket(ticket: Dict[str, Any], *, now: Optional[datetime] = None) -> 
                 ) VALUES (
                     %(ticket_id)s, %(ticket_number)s, %(ticket_name)s,
                     %(status)s, %(severity)s, %(product_name)s,
-                    %(assignee)s, %(customer)s,
+                    %(assignee)s, %(group_name)s, %(customer)s,
                     %(date_created)s, %(date_modified)s, %(closed_at)s,
                     %(days_opened)s, %(days_since_modified)s,
                     %(source_updated_at)s, %(source_payload)s,
@@ -218,6 +218,7 @@ def upsert_ticket(ticket: Dict[str, Any], *, now: Optional[datetime] = None) -> 
                     severity            = EXCLUDED.severity,
                     product_name        = EXCLUDED.product_name,
                     assignee            = EXCLUDED.assignee,
+                    group_name          = COALESCE(EXCLUDED.group_name, tickets.group_name),
                     customer            = EXCLUDED.customer,
                     date_created        = COALESCE(EXCLUDED.date_created, tickets.date_created),
                     date_modified       = EXCLUDED.date_modified,
@@ -236,6 +237,7 @@ def upsert_ticket(ticket: Dict[str, Any], *, now: Optional[datetime] = None) -> 
                 "severity": ticket.get("severity"),
                 "product_name": ticket.get("product_name"),
                 "assignee": ticket.get("assignee"),
+                "group_name": ticket.get("group_name"),
                 "customer": ticket.get("customer"),
                 "date_created": ticket.get("date_created"),
                 "date_modified": ticket.get("date_modified"),
@@ -346,7 +348,7 @@ def upsert_ticket_with_actions(
             cur.execute("""
                 INSERT INTO tickets (
                     ticket_id, ticket_number, ticket_name,
-                    status, severity, product_name, assignee, customer,
+                    status, severity, product_name, assignee, group_name, customer,
                     date_created, date_modified, closed_at,
                     days_opened, days_since_modified,
                     source_updated_at, source_payload,
@@ -354,7 +356,7 @@ def upsert_ticket_with_actions(
                 ) VALUES (
                     %(ticket_id)s, %(ticket_number)s, %(ticket_name)s,
                     %(status)s, %(severity)s, %(product_name)s,
-                    %(assignee)s, %(customer)s,
+                    %(assignee)s, %(group_name)s, %(customer)s,
                     %(date_created)s, %(date_modified)s, %(closed_at)s,
                     %(days_opened)s, %(days_since_modified)s,
                     %(source_updated_at)s, %(source_payload)s,
@@ -367,6 +369,7 @@ def upsert_ticket_with_actions(
                     severity            = EXCLUDED.severity,
                     product_name        = EXCLUDED.product_name,
                     assignee            = EXCLUDED.assignee,
+                    group_name          = COALESCE(EXCLUDED.group_name, tickets.group_name),
                     customer            = EXCLUDED.customer,
                     date_created        = COALESCE(EXCLUDED.date_created, tickets.date_created),
                     date_modified       = EXCLUDED.date_modified,
@@ -385,6 +388,7 @@ def upsert_ticket_with_actions(
                 "severity": ticket.get("severity"),
                 "product_name": ticket.get("product_name"),
                 "assignee": ticket.get("assignee"),
+                "group_name": ticket.get("group_name"),
                 "customer": ticket.get("customer"),
                 "date_created": ticket.get("date_created"),
                 "date_modified": ticket.get("date_modified"),
@@ -783,7 +787,7 @@ def load_ticket_with_actions(ticket_id: int) -> Optional[Dict[str, Any]]:
     """
     trow = fetch_one(
         "SELECT ticket_id, ticket_number, ticket_name, status, severity, "
-        "       product_name, assignee, customer, date_created, date_modified, "
+        "       product_name, assignee, group_name, customer, date_created, date_modified, "
         "       days_opened, days_since_modified "
         "FROM tickets WHERE ticket_id = %s;",
         (ticket_id,),
@@ -799,11 +803,12 @@ def load_ticket_with_actions(ticket_id: int) -> Optional[Dict[str, Any]]:
         "severity": trow[4] or "",
         "product_name": trow[5] or "",
         "assignee": trow[6] or "",
-        "customer": trow[7] or "",
-        "date_created": trow[8].isoformat() if trow[8] else "",
-        "date_modified": trow[9].isoformat() if trow[9] else "",
-        "days_opened": trow[10] if trow[10] is not None else "",
-        "days_since_modified": trow[11] if trow[11] is not None else "",
+        "group_name": trow[7] or "",
+        "customer": trow[8] or "",
+        "date_created": trow[9].isoformat() if trow[9] else "",
+        "date_modified": trow[10].isoformat() if trow[10] else "",
+        "days_opened": trow[11] if trow[11] is not None else "",
+        "days_since_modified": trow[12] if trow[12] is not None else "",
     }
 
     arows = fetch_all(
@@ -1007,21 +1012,31 @@ def upsert_customer_health(row: Dict[str, Any]) -> None:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO customer_ticket_health (
-                    as_of_date, customer,
+                    as_of_date, customer, group_name,
                     open_ticket_count, high_priority_count, high_complexity_count,
                     avg_complexity, avg_elapsed_drag,
                     reopen_count_90d, frustration_count_90d,
                     top_cluster_ids, top_products,
-                    ticket_load_pressure_score
+                    ticket_load_pressure_score,
+                    customer_health_score, customer_health_band,
+                    pressure_score, aging_score, friction_score,
+                    concentration_score, breadth_score,
+                    factor_summary_json, score_formula_version,
+                    updated_at
                 ) VALUES (
-                    %(as_of_date)s, %(customer)s,
+                    %(as_of_date)s, %(customer)s, %(group_name)s,
                     %(open_ticket_count)s, %(high_priority_count)s, %(high_complexity_count)s,
                     %(avg_complexity)s, %(avg_elapsed_drag)s,
                     %(reopen_count_90d)s, %(frustration_count_90d)s,
                     %(top_cluster_ids)s, %(top_products)s,
-                    %(ticket_load_pressure_score)s
+                    %(ticket_load_pressure_score)s,
+                    %(customer_health_score)s, %(customer_health_band)s,
+                    %(pressure_score)s, %(aging_score)s, %(friction_score)s,
+                    %(concentration_score)s, %(breadth_score)s,
+                    %(factor_summary_json)s, %(score_formula_version)s,
+                    now()
                 )
-                ON CONFLICT (as_of_date, customer) DO UPDATE SET
+                ON CONFLICT (as_of_date, customer, group_name) DO UPDATE SET
                     open_ticket_count   = EXCLUDED.open_ticket_count,
                     high_priority_count = EXCLUDED.high_priority_count,
                     high_complexity_count= EXCLUDED.high_complexity_count,
@@ -1031,9 +1046,102 @@ def upsert_customer_health(row: Dict[str, Any]) -> None:
                     frustration_count_90d= EXCLUDED.frustration_count_90d,
                     top_cluster_ids     = EXCLUDED.top_cluster_ids,
                     top_products        = EXCLUDED.top_products,
-                    ticket_load_pressure_score = EXCLUDED.ticket_load_pressure_score;
+                    ticket_load_pressure_score = EXCLUDED.ticket_load_pressure_score,
+                    customer_health_score = EXCLUDED.customer_health_score,
+                    customer_health_band = EXCLUDED.customer_health_band,
+                    pressure_score = EXCLUDED.pressure_score,
+                    aging_score = EXCLUDED.aging_score,
+                    friction_score = EXCLUDED.friction_score,
+                    concentration_score = EXCLUDED.concentration_score,
+                    breadth_score = EXCLUDED.breadth_score,
+                    factor_summary_json = EXCLUDED.factor_summary_json,
+                    score_formula_version = EXCLUDED.score_formula_version,
+                    updated_at = EXCLUDED.updated_at;
             """, row)
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def delete_customer_health_contributors(as_of_date: date) -> int:
+    """Delete contributor rows for one snapshot date."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM customer_health_ticket_contributors WHERE as_of_date = %s;",
+                (as_of_date,),
+            )
+            deleted = cur.rowcount
+        conn.commit()
+        return deleted
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def bulk_insert_customer_health_contributors(rows: list[dict[str, Any]]) -> int:
+    """Insert customer health contributor rows for a snapshot date."""
+    if not rows:
+        return 0
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            for row in rows:
+                cur.execute(
+                    """
+                    INSERT INTO customer_health_ticket_contributors (
+                        as_of_date, customer, ticket_id, ticket_number, ticket_name,
+                        group_name, product_name, status, severity, assignee,
+                        days_opened, date_modified, priority, overall_complexity,
+                        frustrated, cluster_id, mechanism_class, intervention_type,
+                        pressure_contribution, aging_contribution, friction_contribution,
+                        concentration_contribution, breadth_contribution,
+                        total_contribution, score_formula_version, created_at
+                    ) VALUES (
+                        %(as_of_date)s, %(customer)s, %(ticket_id)s, %(ticket_number)s, %(ticket_name)s,
+                        %(group_name)s,
+                        %(product_name)s, %(status)s, %(severity)s, %(assignee)s,
+                        %(days_opened)s, %(date_modified)s, %(priority)s, %(overall_complexity)s,
+                        %(frustrated)s, %(cluster_id)s, %(mechanism_class)s, %(intervention_type)s,
+                        %(pressure_contribution)s, %(aging_contribution)s, %(friction_contribution)s,
+                        %(concentration_contribution)s, %(breadth_contribution)s,
+                        %(total_contribution)s, %(score_formula_version)s, now()
+                    )
+                    ON CONFLICT (as_of_date, customer, group_name, ticket_id) DO UPDATE SET
+                        ticket_number = EXCLUDED.ticket_number,
+                        ticket_name = EXCLUDED.ticket_name,
+                        group_name = EXCLUDED.group_name,
+                        product_name = EXCLUDED.product_name,
+                        status = EXCLUDED.status,
+                        severity = EXCLUDED.severity,
+                        assignee = EXCLUDED.assignee,
+                        days_opened = EXCLUDED.days_opened,
+                        date_modified = EXCLUDED.date_modified,
+                        priority = EXCLUDED.priority,
+                        overall_complexity = EXCLUDED.overall_complexity,
+                        frustrated = EXCLUDED.frustrated,
+                        cluster_id = EXCLUDED.cluster_id,
+                        mechanism_class = EXCLUDED.mechanism_class,
+                        intervention_type = EXCLUDED.intervention_type,
+                        pressure_contribution = EXCLUDED.pressure_contribution,
+                        aging_contribution = EXCLUDED.aging_contribution,
+                        friction_contribution = EXCLUDED.friction_contribution,
+                        concentration_contribution = EXCLUDED.concentration_contribution,
+                        breadth_contribution = EXCLUDED.breadth_contribution,
+                        total_contribution = EXCLUDED.total_contribution,
+                        score_formula_version = EXCLUDED.score_formula_version,
+                        created_at = EXCLUDED.created_at;
+                    """,
+                    row,
+                )
+        conn.commit()
+        return len(rows)
     except Exception:
         conn.rollback()
         raise
@@ -1048,17 +1156,17 @@ def upsert_product_health(row: Dict[str, Any]) -> None:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO product_ticket_health (
-                    as_of_date, product_name,
+                    as_of_date, product_name, group_name,
                     ticket_volume, avg_complexity, avg_coordination_load,
                     avg_elapsed_drag, top_clusters, top_mechanisms,
                     dev_touched_rate, customer_wait_rate
                 ) VALUES (
-                    %(as_of_date)s, %(product_name)s,
+                    %(as_of_date)s, %(product_name)s, %(group_name)s,
                     %(ticket_volume)s, %(avg_complexity)s, %(avg_coordination_load)s,
                     %(avg_elapsed_drag)s, %(top_clusters)s, %(top_mechanisms)s,
                     %(dev_touched_rate)s, %(customer_wait_rate)s
                 )
-                ON CONFLICT (as_of_date, product_name) DO UPDATE SET
+                ON CONFLICT (as_of_date, product_name, group_name) DO UPDATE SET
                     ticket_volume       = EXCLUDED.ticket_volume,
                     avg_complexity      = EXCLUDED.avg_complexity,
                     avg_coordination_load= EXCLUDED.avg_coordination_load,

@@ -55,6 +55,22 @@ def query_one(sql, params=()):
         db.put_conn(conn)
 
 
+EXCLUDED_HEALTH_GROUPS = ("Marketing", "Sales (S)")
+
+
+def _group_filter_clause(group_names, *, column="group_name"):
+    groups = [str(g) for g in (group_names or []) if g is not None]
+    if not groups:
+        return "", []
+    placeholders = ",".join(["%s"] * len(groups))
+    return f" AND COALESCE({column}, '') IN ({placeholders})", groups
+
+
+def _default_group_exclusion_clause(*, column="group_name"):
+    placeholders = ",".join(["%s"] * len(EXCLUDED_HEALTH_GROUPS))
+    return f"COALESCE({column}, '') NOT IN ({placeholders})", list(EXCLUDED_HEALTH_GROUPS)
+
+
 # ── Overview ─────────────────────────────────────────────────────────
 
 def get_open_ticket_stats():
@@ -259,38 +275,337 @@ def get_ticket_wait_profile(ticket_id):
 
 # ── Health ───────────────────────────────────────────────────────────
 
+def get_group_names():
+    try:
+        return [
+            row["group_name"]
+            for row in query("""
+                SELECT DISTINCT COALESCE(group_name, '') AS group_name
+                FROM tickets
+                WHERE COALESCE(group_name, '') <> ''
+                  AND COALESCE(group_name, '') NOT IN %s
+                ORDER BY group_name
+            """, (EXCLUDED_HEALTH_GROUPS,))
+            if row.get("group_name")
+        ]
+    except (psycopg2_errors.UndefinedColumn, psycopg2_errors.UndefinedTable, psycopg2.OperationalError):
+        return []
+
+
 def get_customer_health():
-    return query("""
-        SELECT * FROM customer_ticket_health
-        WHERE as_of_date = (SELECT MAX(as_of_date) FROM customer_ticket_health)
-        ORDER BY ticket_load_pressure_score DESC NULLS LAST
-    """)
+    try:
+        exclusion_sql, exclusion_params = _default_group_exclusion_clause(column="group_name")
+        return query(f"""
+            WITH latest_date AS (
+                SELECT MAX(as_of_date) AS as_of_date
+                FROM customer_health_ticket_contributors
+                WHERE score_formula_version = %s
+            ),
+            filtered AS (
+                SELECT c.*
+                FROM customer_health_ticket_contributors c
+                JOIN latest_date d ON d.as_of_date = c.as_of_date
+                WHERE c.score_formula_version = %s
+                  AND {exclusion_sql}
+            )
+            SELECT
+                MAX(as_of_date) AS as_of_date,
+                customer,
+                COUNT(*) FILTER (WHERE pressure_contribution >= 1.0) AS open_ticket_count,
+                COUNT(*) FILTER (
+                    WHERE priority IS NOT NULL
+                      AND priority <= 3
+                      AND LOWER(COALESCE(status, '')) NOT IN ('closed', 'resolved', 'open')
+                ) AS high_priority_count,
+                COUNT(*) FILTER (
+                    WHERE overall_complexity IS NOT NULL
+                      AND overall_complexity >= 4
+                      AND LOWER(COALESCE(status, '')) NOT IN ('closed', 'resolved', 'open')
+                ) AS high_complexity_count,
+                ROUND(AVG(overall_complexity)::numeric, 2) AS avg_complexity,
+                NULL::numeric AS avg_elapsed_drag,
+                0 AS reopen_count_90d,
+                COUNT(*) FILTER (WHERE frustrated = 'Yes') AS frustration_count_90d,
+                jsonb_agg(DISTINCT cluster_id) FILTER (WHERE cluster_id IS NOT NULL) AS top_cluster_ids,
+                jsonb_agg(DISTINCT product_name) FILTER (WHERE product_name IS NOT NULL) AS top_products,
+                ROUND(SUM(pressure_contribution), 2) AS ticket_load_pressure_score,
+                ROUND(SUM(total_contribution), 2) AS customer_health_score,
+                CASE
+                    WHEN ROUND(SUM(total_contribution), 2) < 15 THEN 'healthy'
+                    WHEN ROUND(SUM(total_contribution), 2) < 30 THEN 'watch'
+                    WHEN ROUND(SUM(total_contribution), 2) < 50 THEN 'at_risk'
+                    ELSE 'critical'
+                END AS customer_health_band,
+                ROUND(SUM(pressure_contribution), 2) AS pressure_score,
+                ROUND(SUM(aging_contribution), 2) AS aging_score,
+                ROUND(SUM(friction_contribution), 2) AS friction_score,
+                ROUND(SUM(concentration_contribution), 2) AS concentration_score,
+                ROUND(SUM(breadth_contribution), 2) AS breadth_score,
+                NULL::jsonb AS factor_summary_json,
+                %s AS score_formula_version
+            FROM filtered
+            GROUP BY customer
+            ORDER BY customer_health_score DESC NULLS LAST, ticket_load_pressure_score DESC NULLS LAST
+        """, ("v1", "v1", *exclusion_params, "v1"))
+    except psycopg2_errors.UndefinedColumn:
+        return query("""
+            SELECT *
+            FROM customer_ticket_health
+            WHERE as_of_date = (SELECT MAX(as_of_date) FROM customer_ticket_health)
+            ORDER BY ticket_load_pressure_score DESC NULLS LAST
+        """)
+    except (psycopg2_errors.UndefinedTable, psycopg2.OperationalError):
+        return []
 
 
 def get_product_health():
-    return query("""
-        SELECT * FROM product_ticket_health
+    exclusion_sql, exclusion_params = _default_group_exclusion_clause(column="group_name")
+    return query(f"""
+        SELECT
+            MAX(as_of_date) AS as_of_date,
+            product_name,
+            SUM(ticket_volume) AS ticket_volume,
+            ROUND(
+                SUM(COALESCE(avg_complexity, 0) * ticket_volume)
+                / NULLIF(SUM(CASE WHEN avg_complexity IS NOT NULL THEN ticket_volume ELSE 0 END), 0),
+                2
+            ) AS avg_complexity,
+            ROUND(
+                SUM(COALESCE(avg_coordination_load, 0) * ticket_volume)
+                / NULLIF(SUM(CASE WHEN avg_coordination_load IS NOT NULL THEN ticket_volume ELSE 0 END), 0),
+                2
+            ) AS avg_coordination_load,
+            ROUND(
+                SUM(COALESCE(avg_elapsed_drag, 0) * ticket_volume)
+                / NULLIF(SUM(CASE WHEN avg_elapsed_drag IS NOT NULL THEN ticket_volume ELSE 0 END), 0),
+                2
+            ) AS avg_elapsed_drag,
+            NULL::jsonb AS top_clusters,
+            NULL::jsonb AS top_mechanisms,
+            ROUND(
+                SUM(COALESCE(dev_touched_rate, 0) * ticket_volume)
+                / NULLIF(SUM(CASE WHEN dev_touched_rate IS NOT NULL THEN ticket_volume ELSE 0 END), 0),
+                4
+            ) AS dev_touched_rate,
+            ROUND(
+                SUM(COALESCE(customer_wait_rate, 0) * ticket_volume)
+                / NULLIF(SUM(CASE WHEN customer_wait_rate IS NOT NULL THEN ticket_volume ELSE 0 END), 0),
+                4
+            ) AS customer_wait_rate
+        FROM product_ticket_health
         WHERE as_of_date = (SELECT MAX(as_of_date) FROM product_ticket_health)
+          AND {exclusion_sql}
+        GROUP BY product_name
         ORDER BY ticket_volume DESC NULLS LAST
-    """)
+    """, tuple(exclusion_params))
 
 
-def get_tickets_by_customers(customer_names):
-    """Return open tickets for one or more customer names."""
+def get_tickets_by_customers(customer_names, group_names=None):
+    """Return open tickets for one or more customers, optionally scoped to selected groups."""
     if not customer_names:
         return []
     placeholders = ",".join(["%s"] * len(customer_names))
+    params = list(customer_names)
+    group_extra = ""
+    if group_names is None:
+        exclusion_sql, exclusion_params = _default_group_exclusion_clause(column="t.group_name")
+        group_extra = f" AND {exclusion_sql}"
+        params.extend(exclusion_params)
+    else:
+        group_extra, group_params = _group_filter_clause(group_names, column="t.group_name")
+        params.extend(group_params)
     return query(f"""
         SELECT v.ticket_id, v.ticket_number, v.ticket_name, v.status, v.severity,
-               v.product_name, v.assignee, v.customer, v.days_opened, v.priority,
+               t.group_name, v.product_name, v.assignee, v.customer, v.days_opened, v.priority,
                v.overall_complexity, v.frustrated, v.date_modified
         FROM tickets t
         JOIN vw_ticket_analytics_core v ON v.ticket_id = t.ticket_id
         WHERE t.customer IN ({placeholders})
           AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved', 'Open')
           AND COALESCE(t.assignee, '') != 'Marketing'
+          {group_extra}
         ORDER BY v.date_modified DESC NULLS LAST
-    """, tuple(customer_names))
+    """, tuple(params))
+
+
+def get_customer_groups(customer):
+    try:
+        exclusion_sql, exclusion_params = _default_group_exclusion_clause(column="group_name")
+        return [
+            row["group_name"]
+            for row in query(f"""
+                SELECT DISTINCT COALESCE(group_name, '') AS group_name
+                FROM customer_health_ticket_contributors
+                WHERE customer = %s
+                  AND score_formula_version = %s
+                  AND {exclusion_sql}
+                ORDER BY group_name
+            """, (customer, "v1", *exclusion_params))
+            if row.get("group_name")
+        ]
+    except (psycopg2_errors.UndefinedColumn, psycopg2_errors.UndefinedTable, psycopg2.OperationalError):
+        return []
+
+
+def get_customer_health_history(customer, group_names=None, days=None):
+    """Return daily health snapshots for one customer aggregated across selected groups."""
+    try:
+        params = [customer, "v1"]
+        extra = ""
+        if days is not None:
+            extra = "AND as_of_date >= CURRENT_DATE - (%s::int - 1)"
+            params.append(days)
+        if group_names is None:
+            group_extra_sql, group_extra_params = _default_group_exclusion_clause(column="group_name")
+        else:
+            group_extra_sql, group_extra_params = _group_filter_clause(group_names, column="group_name")
+            if not group_extra_sql:
+                return []
+            group_extra_sql = group_extra_sql.lstrip(" AND")
+        params.extend(group_extra_params)
+        return query(f"""
+            WITH filtered AS (
+                SELECT *
+                FROM customer_health_ticket_contributors
+                WHERE customer = %s
+                  AND score_formula_version = %s
+                  AND {group_extra_sql}
+                  {extra}
+            )
+            SELECT
+                as_of_date,
+                customer,
+                ROUND(SUM(total_contribution), 2) AS customer_health_score,
+                CASE
+                    WHEN ROUND(SUM(total_contribution), 2) < 15 THEN 'healthy'
+                    WHEN ROUND(SUM(total_contribution), 2) < 30 THEN 'watch'
+                    WHEN ROUND(SUM(total_contribution), 2) < 50 THEN 'at_risk'
+                    ELSE 'critical'
+                END AS customer_health_band,
+                ROUND(SUM(pressure_contribution), 2) AS pressure_score,
+                ROUND(SUM(aging_contribution), 2) AS aging_score,
+                ROUND(SUM(friction_contribution), 2) AS friction_score,
+                ROUND(SUM(concentration_contribution), 2) AS concentration_score,
+                ROUND(SUM(breadth_contribution), 2) AS breadth_score,
+                ROUND(SUM(pressure_contribution), 2) AS ticket_load_pressure_score,
+                COUNT(*) FILTER (WHERE pressure_contribution >= 1.0) AS open_ticket_count,
+                COUNT(*) FILTER (
+                    WHERE priority IS NOT NULL
+                      AND priority <= 3
+                      AND LOWER(COALESCE(status, '')) NOT IN ('closed', 'resolved', 'open')
+                ) AS high_priority_count,
+                COUNT(*) FILTER (
+                    WHERE overall_complexity IS NOT NULL
+                      AND overall_complexity >= 4
+                      AND LOWER(COALESCE(status, '')) NOT IN ('closed', 'resolved', 'open')
+                ) AS high_complexity_count,
+                COUNT(*) FILTER (WHERE frustrated = 'Yes') AS frustration_count_90d,
+                jsonb_agg(DISTINCT cluster_id) FILTER (WHERE cluster_id IS NOT NULL) AS top_cluster_ids,
+                jsonb_agg(DISTINCT product_name) FILTER (WHERE product_name IS NOT NULL) AS top_products,
+                NULL::jsonb AS factor_summary_json
+            FROM filtered
+            GROUP BY as_of_date, customer
+            ORDER BY as_of_date
+        """, tuple(params))
+    except (psycopg2_errors.UndefinedColumn, psycopg2_errors.UndefinedTable, psycopg2.OperationalError):
+        return []
+
+
+def get_customer_health_contributors(customer, as_of_date, group_names=None):
+    """Return ticket-level drivers for one customer/day ordered by contribution."""
+    try:
+        params = [customer, as_of_date, "v1"]
+        if group_names is None:
+            group_extra_sql, group_extra_params = _default_group_exclusion_clause(column="group_name")
+        else:
+            group_extra_sql, group_extra_params = _group_filter_clause(group_names, column="group_name")
+            if not group_extra_sql:
+                return []
+            group_extra_sql = group_extra_sql.lstrip(" AND")
+        params.extend(group_extra_params)
+        return query(f"""
+            SELECT
+                as_of_date,
+                customer,
+                group_name,
+                ticket_id,
+                ticket_number,
+                ticket_name,
+                product_name,
+                status,
+                severity,
+                assignee,
+                days_opened,
+                date_modified,
+                priority,
+                overall_complexity,
+                frustrated,
+                cluster_id,
+                mechanism_class,
+                intervention_type,
+                pressure_contribution,
+                aging_contribution,
+                friction_contribution,
+                concentration_contribution,
+                breadth_contribution,
+                total_contribution,
+                score_formula_version
+            FROM customer_health_ticket_contributors
+            WHERE customer = %s
+              AND as_of_date = %s
+              AND score_formula_version = %s
+              AND {group_extra_sql}
+            ORDER BY total_contribution DESC, days_opened DESC NULLS LAST, date_modified DESC NULLS LAST, ticket_id
+        """, tuple(params))
+    except (psycopg2_errors.UndefinedColumn, psycopg2_errors.UndefinedTable, psycopg2.OperationalError):
+        return []
+
+
+def get_customer_health_explanations(customer):
+    try:
+        return query("""
+            SELECT id, customer, as_of_date, group_filter_json, group_filter_label,
+                   model_name, prompt_version, explanation_text, created_at
+            FROM customer_health_explanations
+            WHERE customer = %s
+            ORDER BY created_at DESC, id DESC
+        """, (customer,))
+    except (psycopg2_errors.UndefinedColumn, psycopg2_errors.UndefinedTable, psycopg2.OperationalError):
+        return []
+
+
+def save_customer_health_explanation(
+    *,
+    customer,
+    as_of_date,
+    group_filter_json,
+    group_filter_label,
+    model_name,
+    prompt_version,
+    explanation_text,
+    raw_context_json,
+    raw_response_text,
+):
+    return _execute_returning("""
+        INSERT INTO customer_health_explanations (
+            customer, as_of_date, group_filter_json, group_filter_label,
+            model_name, prompt_version, explanation_text, raw_context_json,
+            raw_response_text, created_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+        RETURNING id, customer, as_of_date, group_filter_json, group_filter_label,
+                  model_name, prompt_version, explanation_text, created_at
+    """, (
+        customer,
+        as_of_date,
+        json.dumps(group_filter_json),
+        group_filter_label,
+        model_name,
+        prompt_version,
+        explanation_text,
+        json.dumps(raw_context_json),
+        raw_response_text,
+    ))
 
 
 # ── Drill-down ───────────────────────────────────────────────────────

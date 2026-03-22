@@ -16,6 +16,8 @@ Usage:
     python run_rollups.py wait_states               # rebuild ticket_wait_states
     python run_rollups.py snapshot                  # write today's ticket_snapshots_daily
     python run_rollups.py health                    # refresh customer + product health
+    python run_rollups.py customer_health_history --all-dates  # explicit historical health backfill
+    python run_rollups.py customer_health_history --from 2026-01-01 --to 2026-03-16
     python run_rollups.py daily_open_counts          # compute today's daily open counts (skips if exists)
     python run_rollups.py daily_open_counts --date 2026-03-01   # compute a specific date
     python run_rollups.py daily_open_counts --from 2026-01-01 --to 2026-03-16  # date range
@@ -31,13 +33,14 @@ import argparse
 import hashlib
 import json
 import sys
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timedelta, timezone
 from typing import Optional
 
 import psycopg2.extras
 
 import db
 from action_classifier import classify_action, is_noise, is_technical_substance
+from rollups.customer_health import SCORE_FORMULA_VERSION, build_customer_health_model
 from rollups.orchestrator import run_analytics_pipeline, run_full_rollups_pipeline
 
 
@@ -84,6 +87,240 @@ def run_full_rollups(ticket_ids: list[int] | None = None) -> None:
 def _sha256(text: str) -> str:
     """Return hex SHA-256 of the given text."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _daterange(start: date, end: date) -> list[date]:
+    days = (end - start).days
+    return [start.fromordinal(start.toordinal() + offset) for offset in range(days + 1)]
+
+
+def _customer_health_history_dates(
+    *,
+    target_date: date | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    all_dates: bool = False,
+) -> list[date]:
+    if target_date:
+        return [target_date]
+    if date_from or date_to:
+        start = date_from or date_to
+        end = date_to or date_from
+        if start is None or end is None:
+            return []
+        return _daterange(start, end)
+    if all_dates:
+        existing = sorted(db.daily_open_counts_existing_dates())
+        if existing:
+            return existing
+        row = db.fetch_one(
+            "SELECT MIN(date_created)::date, MAX(COALESCE(closed_at::date, CURRENT_DATE)) FROM tickets;"
+        )
+        if not row or not row[0]:
+            return []
+        return _daterange(row[0], row[1] or date.today())
+    return [date.today()]
+
+
+def _existing_customer_health_history_dates() -> set[date]:
+    rows = db.fetch_all(
+        "SELECT DISTINCT as_of_date FROM customer_ticket_health WHERE score_formula_version = %s;",
+        (SCORE_FORMULA_VERSION,),
+    )
+    return {row[0] for row in rows}
+
+
+def _fetch_customer_health_input_rows(as_of_date: date) -> list[dict]:
+    day_end = datetime(as_of_date.year, as_of_date.month, as_of_date.day, 23, 59, 59, tzinfo=timezone.utc)
+    cutoff_90d = day_end - timedelta(days=90)
+    rows = db.fetch_all(
+        """
+        WITH latest_priority AS (
+            SELECT DISTINCT ON (ticket_id) ticket_id, priority
+            FROM ticket_priority_scores
+            WHERE scored_at <= %s
+            ORDER BY ticket_id, scored_at DESC, id DESC
+        ),
+        latest_complexity AS (
+            SELECT DISTINCT ON (ticket_id) ticket_id, overall_complexity
+            FROM ticket_complexity_scores
+            WHERE scored_at <= %s
+            ORDER BY ticket_id, scored_at DESC, id DESC
+        ),
+        latest_sentiment AS (
+            SELECT DISTINCT ON (ticket_id) ticket_id, frustrated
+            FROM ticket_sentiment
+            WHERE scored_at <= %s
+            ORDER BY ticket_id, scored_at DESC, id DESC
+        ),
+        latest_cluster AS (
+            SELECT DISTINCT ON (tc.ticket_id)
+                tc.ticket_id,
+                tc.cluster_id,
+                p4.mechanism_class,
+                p4.intervention_type,
+                p1.component
+            FROM ticket_clusters tc
+            LEFT JOIN LATERAL (
+                SELECT mechanism_class, intervention_type
+                FROM ticket_llm_pass_results
+                WHERE ticket_id = tc.ticket_id
+                  AND pass_name = 'pass4_intervention'
+                  AND status = 'success'
+                  AND completed_at <= %s
+                ORDER BY completed_at DESC NULLS LAST, updated_at DESC
+                LIMIT 1
+            ) p4 ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT component
+                FROM ticket_llm_pass_results
+                WHERE ticket_id = tc.ticket_id
+                  AND pass_name = 'pass1_phenomenon'
+                  AND status = 'success'
+                  AND completed_at <= %s
+                ORDER BY completed_at DESC NULLS LAST, updated_at DESC
+                LIMIT 1
+            ) p1 ON TRUE
+            ORDER BY tc.ticket_id, tc.assigned_at DESC, tc.id DESC
+        )
+        SELECT
+            t.customer,
+            COALESCE(t.group_name, '') AS group_name,
+            t.ticket_id,
+            t.ticket_number,
+            t.ticket_name,
+            t.product_name,
+            t.status,
+            t.severity,
+            t.assignee,
+            t.date_modified,
+            CASE
+                WHEN t.date_created IS NULL OR t.date_created::date > %s THEN NULL
+                ELSE (%s::date - t.date_created::date)
+            END AS days_opened,
+            CASE
+                WHEN t.date_modified IS NULL THEN NULL
+                WHEN t.date_modified::date > %s THEN 0
+                ELSE (%s::date - t.date_modified::date)
+            END AS days_since_modified,
+            CASE
+                WHEN t.date_created IS NOT NULL
+                     AND t.date_created::date <= %s
+                     AND (t.closed_at IS NULL OR t.closed_at::date > %s)
+                     AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved', 'Open')
+                     AND COALESCE(t.assignee, '') != 'Marketing'
+                THEN TRUE
+                ELSE FALSE
+            END AS open_flag,
+            p.priority,
+            c.overall_complexity,
+            s.frustrated,
+            m.customer_message_count,
+            m.handoff_count,
+            lc.cluster_id,
+            lc.mechanism_class,
+            lc.intervention_type,
+            lc.component
+        FROM tickets t
+        LEFT JOIN latest_priority p ON p.ticket_id = t.ticket_id
+        LEFT JOIN latest_complexity c ON c.ticket_id = t.ticket_id
+        LEFT JOIN latest_sentiment s ON s.ticket_id = t.ticket_id
+        LEFT JOIN ticket_metrics m ON m.ticket_id = t.ticket_id
+        LEFT JOIN latest_cluster lc ON lc.ticket_id = t.ticket_id
+        WHERE t.customer IS NOT NULL
+          AND t.date_created IS NOT NULL
+          AND t.date_created <= %s
+          AND (
+              t.date_created >= %s
+              OR t.closed_at IS NULL
+              OR t.closed_at >= %s
+          )
+        ORDER BY t.customer, t.ticket_id;
+        """,
+        (
+            day_end,
+            day_end,
+            day_end,
+            day_end,
+            day_end,
+            as_of_date,
+            as_of_date,
+            as_of_date,
+            as_of_date,
+            as_of_date,
+            as_of_date,
+            day_end,
+            cutoff_90d,
+            cutoff_90d,
+        ),
+    )
+    fields = [
+        "customer",
+        "group_name",
+        "ticket_id",
+        "ticket_number",
+        "ticket_name",
+        "product_name",
+        "status",
+        "severity",
+        "assignee",
+        "date_modified",
+        "days_opened",
+        "days_since_modified",
+        "open_flag",
+        "priority",
+        "overall_complexity",
+        "frustrated",
+        "customer_message_count",
+        "handoff_count",
+        "cluster_id",
+        "mechanism_class",
+        "intervention_type",
+        "component",
+    ]
+    return [dict(zip(fields, row)) for row in rows]
+
+
+def _persist_customer_health_model(as_of_date: date, *, include_contributors: bool) -> tuple[int, int]:
+    source_rows = _fetch_customer_health_input_rows(as_of_date)
+    snapshots, contributors = build_customer_health_model(source_rows, as_of_date)
+
+    db.execute("DELETE FROM customer_ticket_health WHERE as_of_date = %s;", (as_of_date,))
+
+    # Remove stale contributor rows for the date only when rebuilding ticket-level history.
+    if include_contributors:
+        db.delete_customer_health_contributors(as_of_date)
+        db.bulk_insert_customer_health_contributors(contributors)
+
+    for snapshot in snapshots:
+        factor_summary = snapshot.get("factor_summary_json")
+        row = {
+            "as_of_date": as_of_date,
+            "customer": snapshot["customer"],
+            "group_name": snapshot.get("group_name") or "",
+            "open_ticket_count": int(sum(1 for item in contributors if item["customer"] == snapshot["customer"] and (item.get("group_name") or "") == (snapshot.get("group_name") or "") and item["pressure_contribution"] >= 1.0)),
+            "high_priority_count": int(sum(1 for item in contributors if item["customer"] == snapshot["customer"] and (item.get("group_name") or "") == (snapshot.get("group_name") or "") and item["priority"] is not None and item["priority"] <= 3 and (item["status"] or "").lower() not in ("closed", "resolved", "open"))),
+            "high_complexity_count": int(sum(1 for item in contributors if item["customer"] == snapshot["customer"] and (item.get("group_name") or "") == (snapshot.get("group_name") or "") and item["overall_complexity"] is not None and item["overall_complexity"] >= 4 and (item["status"] or "").lower() not in ("closed", "resolved", "open"))),
+            "avg_complexity": round(sum((item["overall_complexity"] or 0) for item in contributors if item["customer"] == snapshot["customer"] and (item.get("group_name") or "") == (snapshot.get("group_name") or "") and item["overall_complexity"] is not None) / max(1, sum(1 for item in contributors if item["customer"] == snapshot["customer"] and (item.get("group_name") or "") == (snapshot.get("group_name") or "") and item["overall_complexity"] is not None)), 2) if any(item["customer"] == snapshot["customer"] and (item.get("group_name") or "") == (snapshot.get("group_name") or "") and item["overall_complexity"] is not None for item in contributors) else None,
+            "avg_elapsed_drag": None,
+            "reopen_count_90d": 0,
+            "frustration_count_90d": int(sum(1 for item in contributors if item["customer"] == snapshot["customer"] and (item.get("group_name") or "") == (snapshot.get("group_name") or "") and item["frustrated"] == "Yes")),
+            "top_cluster_ids": psycopg2.extras.Json(snapshot["top_cluster_ids"]) if snapshot.get("top_cluster_ids") else None,
+            "top_products": psycopg2.extras.Json(snapshot["top_products"]) if snapshot.get("top_products") else None,
+            "ticket_load_pressure_score": snapshot["pressure_score"],
+            "customer_health_score": snapshot["customer_health_score"],
+            "customer_health_band": snapshot["customer_health_band"],
+            "pressure_score": snapshot["pressure_score"],
+            "aging_score": snapshot["aging_score"],
+            "friction_score": snapshot["friction_score"],
+            "concentration_score": snapshot["concentration_score"],
+            "breadth_score": snapshot["breadth_score"],
+            "factor_summary_json": psycopg2.extras.Json(factor_summary) if factor_summary else None,
+            "score_formula_version": snapshot["score_formula_version"],
+        }
+        db.upsert_customer_health(row)
+
+    return len(snapshots), len(contributors)
 
 
 # ── A. Classify actions ──────────────────────────────────────────────
@@ -684,93 +921,61 @@ def snapshot_tickets_daily(
 # ── H. Customer ticket health ────────────────────────────────────────
 
 def rebuild_customer_ticket_health(as_of_date: date | None = None) -> int:
-    """Refresh customer_ticket_health for the given date.  Full-refresh.
+    """Refresh customer_ticket_health for one date and persist ticket contributors.
 
-    Aggregates from tickets + latest priority/complexity/sentiment.
-    ticket_load_pressure_score = open_ticket_count + 2*high_priority_count
-                                 + 1.5*high_complexity_count + 3*frustration_count_90d
+    This is the current-day additive model rebuild. Historical backfill is
+    intentionally a separate explicit command.
     """
     d = as_of_date or date.today()
-    cutoff_90d = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
-    from datetime import timedelta
-    cutoff_90d = cutoff_90d - timedelta(days=90)
-
-    rows = db.fetch_all("""
-        SELECT
-            t.customer,
-            COUNT(*) FILTER (WHERE t.status NOT IN ('Closed','Resolved','Open')
-                             AND COALESCE(t.assignee, '') != 'Marketing'
-                             OR t.closed_at IS NULL)                              AS open_ct,
-            COUNT(*) FILTER (WHERE p.priority IS NOT NULL AND p.priority <= 3
-                             AND (t.status NOT IN ('Closed','Resolved','Open')
-                                  AND COALESCE(t.assignee, '') != 'Marketing'
-                                  OR t.closed_at IS NULL))                         AS hp_ct,
-            COUNT(*) FILTER (WHERE c.overall_complexity >= 4
-                             AND (t.status NOT IN ('Closed','Resolved','Open')
-                                  AND COALESCE(t.assignee, '') != 'Marketing'
-                                  OR t.closed_at IS NULL))                         AS hc_ct,
-            ROUND(AVG(c.overall_complexity), 2),
-            ROUND(AVG(c.elapsed_drag), 2),
-            COUNT(*) FILTER (WHERE s.frustrated = 'Yes')                           AS frust_ct,
-            jsonb_agg(DISTINCT t.product_name)
-                FILTER (WHERE t.product_name IS NOT NULL)                          AS top_products
-        FROM tickets t
-        LEFT JOIN (
-            SELECT DISTINCT ON (ticket_id) ticket_id, priority
-            FROM ticket_priority_scores ORDER BY ticket_id, scored_at DESC, id DESC
-        ) p ON p.ticket_id = t.ticket_id
-        LEFT JOIN (
-            SELECT DISTINCT ON (ticket_id) ticket_id, overall_complexity, elapsed_drag
-            FROM ticket_complexity_scores ORDER BY ticket_id, scored_at DESC, id DESC
-        ) c ON c.ticket_id = t.ticket_id
-        LEFT JOIN (
-            SELECT DISTINCT ON (ticket_id) ticket_id, frustrated
-            FROM ticket_sentiment ORDER BY ticket_id, scored_at DESC, id DESC
-        ) s ON s.ticket_id = t.ticket_id
-        WHERE t.customer IS NOT NULL
-          AND (t.date_created >= %s
-               OR t.closed_at IS NULL
-               OR t.closed_at >= %s)
-        GROUP BY t.customer;
-    """, (cutoff_90d, cutoff_90d))
-
-    # Pre-fetch cluster IDs per customer
-    cluster_rows = db.fetch_all("""
-        SELECT t.customer, jsonb_agg(DISTINCT tc.cluster_id)
-        FROM tickets t
-        JOIN ticket_clusters tc ON tc.ticket_id = t.ticket_id
-        WHERE t.customer IS NOT NULL
-        GROUP BY t.customer;
-    """)
-    cluster_map: dict[str, str] = {r[0]: r[1] for r in cluster_rows}
-
-    count = 0
-    for r in rows:
-        (customer, open_ct, hp_ct, hc_ct, avg_c, avg_ed,
-         frust_ct, top_products_json) = r
-        # Pressure score: simple weighted formula (first-pass documented)
-        pressure = (open_ct or 0) + 2 * (hp_ct or 0) + 1.5 * (hc_ct or 0) + 3 * (frust_ct or 0)
-
-        top_clusters = cluster_map.get(customer)
-
-        db.upsert_customer_health({
-            "as_of_date": d,
-            "customer": customer,
-            "open_ticket_count": open_ct or 0,
-            "high_priority_count": hp_ct or 0,
-            "high_complexity_count": hc_ct or 0,
-            "avg_complexity": avg_c,
-            "avg_elapsed_drag": avg_ed,
-            "reopen_count_90d": 0,  # Not inferable from current data; placeholder
-            "frustration_count_90d": frust_ct or 0,
-            "top_cluster_ids": psycopg2.extras.Json(top_clusters) if top_clusters else None,
-            "top_products": psycopg2.extras.Json(top_products_json) if top_products_json else None,
-            "ticket_load_pressure_score": round(pressure, 2),
-        })
-        count += 1
-
-    print(f"[rollups] Customer health for {d}: {count} customer(s).", flush=True)
+    count, contributor_count = _persist_customer_health_model(d, include_contributors=True)
+    print(
+        f"[rollups] Customer health for {d}: {count} customer(s), {contributor_count} contributor row(s).",
+        flush=True,
+    )
     return count
+
+
+def rebuild_customer_health_history(
+    *,
+    target_date: date | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    all_dates: bool = False,
+    force: bool = False,
+) -> int:
+    """Explicit historical backfill for the additive customer health model."""
+    dates_to_process = _customer_health_history_dates(
+        target_date=target_date,
+        date_from=date_from,
+        date_to=date_to,
+        all_dates=all_dates,
+    )
+    if not force:
+        existing = _existing_customer_health_history_dates()
+        dates_to_process = [d for d in dates_to_process if d not in existing]
+
+    if not dates_to_process:
+        print("[rollups] customer_health_history: all requested dates already computed — nothing to do.", flush=True)
+        return 0
+
+    total_customers = 0
+    total_contributors = 0
+    for snapshot_date in dates_to_process:
+        customer_count, contributor_count = _persist_customer_health_model(snapshot_date, include_contributors=True)
+        total_customers += customer_count
+        total_contributors += contributor_count
+        print(
+            f"[rollups] customer_health_history for {snapshot_date}: "
+            f"{customer_count} customer(s), {contributor_count} contributor row(s).",
+            flush=True,
+        )
+
+    print(
+        f"[rollups] customer_health_history: {len(dates_to_process)} date(s), "
+        f"{total_customers} customer snapshot(s), {total_contributors} contributor row(s).",
+        flush=True,
+    )
+    return total_customers
 
 
 # ── I. Product ticket health ─────────────────────────────────────────
@@ -790,6 +995,7 @@ def rebuild_product_ticket_health(as_of_date: date | None = None) -> int:
     rows = db.fetch_all("""
         SELECT
             t.product_name,
+            COALESCE(t.group_name, '') AS group_name,
             COUNT(*)                                      AS vol,
             ROUND(AVG(c.overall_complexity), 2)           AS avg_c,
             ROUND(AVG(c.coordination_load), 2)            AS avg_cl,
@@ -805,12 +1011,13 @@ def rebuild_product_ticket_health(as_of_date: date | None = None) -> int:
           AND (t.date_created >= %s
                OR t.closed_at IS NULL
                OR t.closed_at >= %s)
-        GROUP BY t.product_name;
+        GROUP BY t.product_name, COALESCE(t.group_name, '');
     """, (cutoff_90d, cutoff_90d))
 
     # Pre-fetch dev touched rate per product
     dev_rows = db.fetch_all("""
         SELECT t.product_name,
+               COALESCE(t.group_name, '') AS group_name,
                ROUND(COUNT(DISTINCT ta.ticket_id)::numeric
                      / NULLIF(COUNT(DISTINCT t.ticket_id), 0), 4) AS dev_rate
         FROM tickets t
@@ -818,13 +1025,14 @@ def rebuild_product_ticket_health(as_of_date: date | None = None) -> int:
                                     AND ta.action_class = 'technical_work'
         WHERE t.product_name IS NOT NULL
           AND (t.date_created >= %s OR t.closed_at IS NULL OR t.closed_at >= %s)
-        GROUP BY t.product_name;
+        GROUP BY t.product_name, COALESCE(t.group_name, '');
     """, (cutoff_90d, cutoff_90d))
-    dev_map = {r[0]: r[1] for r in dev_rows}
+    dev_map = {(r[0], r[1] or ""): r[2] for r in dev_rows}
 
     # Pre-fetch customer wait rate per product
     cw_rows = db.fetch_all("""
         SELECT t.product_name,
+               COALESCE(t.group_name, '') AS group_name,
                ROUND(COUNT(*) FILTER (WHERE ws.state_name = 'waiting_on_customer')::numeric
                      / NULLIF(COUNT(*), 0), 4) AS cw_rate
         FROM tickets t
@@ -834,48 +1042,50 @@ def rebuild_product_ticket_health(as_of_date: date | None = None) -> int:
         ) ws ON TRUE
         WHERE t.product_name IS NOT NULL
           AND (t.date_created >= %s OR t.closed_at IS NULL OR t.closed_at >= %s)
-        GROUP BY t.product_name;
+        GROUP BY t.product_name, COALESCE(t.group_name, '');
     """, (cutoff_90d, cutoff_90d))
-    cw_map = {r[0]: r[1] for r in cw_rows}
+    cw_map = {(r[0], r[1] or ""): r[2] for r in cw_rows}
 
     # Pre-fetch clusters + mechanisms per product
     cluster_rows = db.fetch_all("""
-        SELECT t.product_name, jsonb_agg(DISTINCT tc.cluster_id)
+        SELECT t.product_name, COALESCE(t.group_name, '') AS group_name, jsonb_agg(DISTINCT tc.cluster_id)
         FROM tickets t
         JOIN ticket_clusters tc ON tc.ticket_id = t.ticket_id
         WHERE t.product_name IS NOT NULL
-        GROUP BY t.product_name;
+        GROUP BY t.product_name, COALESCE(t.group_name, '');
     """)
-    cluster_map = {r[0]: r[1] for r in cluster_rows}
+    cluster_map = {(r[0], r[1] or ""): r[2] for r in cluster_rows}
 
     mech_rows = db.fetch_all("""
-        SELECT t.product_name, jsonb_agg(DISTINCT iss.mechanism_summary)
+        SELECT t.product_name, COALESCE(t.group_name, '') AS group_name, jsonb_agg(DISTINCT iss.mechanism_summary)
         FROM tickets t
         JOIN (
             SELECT DISTINCT ON (ticket_id) ticket_id, mechanism_summary
             FROM ticket_issue_summaries ORDER BY ticket_id, scored_at DESC, id DESC
         ) iss ON iss.ticket_id = t.ticket_id
         WHERE t.product_name IS NOT NULL AND iss.mechanism_summary IS NOT NULL
-        GROUP BY t.product_name;
+        GROUP BY t.product_name, COALESCE(t.group_name, '');
     """)
-    mech_map = {r[0]: r[1] for r in mech_rows}
+    mech_map = {(r[0], r[1] or ""): r[2] for r in mech_rows}
 
     count = 0
     for r in rows:
-        product, vol, avg_c, avg_cl, avg_ed = r
-        tc = cluster_map.get(product)
-        tm = mech_map.get(product)
+        product, group_name, vol, avg_c, avg_cl, avg_ed = r
+        key = (product, group_name or "")
+        tc = cluster_map.get(key)
+        tm = mech_map.get(key)
         db.upsert_product_health({
             "as_of_date": d,
             "product_name": product,
+            "group_name": group_name or "",
             "ticket_volume": vol or 0,
             "avg_complexity": avg_c,
             "avg_coordination_load": avg_cl,
             "avg_elapsed_drag": avg_ed,
             "top_clusters": psycopg2.extras.Json(tc) if tc else None,
             "top_mechanisms": psycopg2.extras.Json(tm) if tm else None,
-            "dev_touched_rate": dev_map.get(product),
-            "customer_wait_rate": cw_map.get(product),
+            "dev_touched_rate": dev_map.get(key),
+            "customer_wait_rate": cw_map.get(key),
         })
         count += 1
 
@@ -1043,6 +1253,7 @@ def main():
         "wait_states":  "Rebuild ticket_wait_states.",
         "snapshot":     "Write today's ticket_snapshots_daily rows.",
         "health":       "Refresh customer + product ticket health.",
+        "customer_health_history": "Explicit backfill for daily customer health history + contributors.",
         "daily_open_counts": "Rebuild daily_open_counts (today, range, or all).",
         "analytics":    "Participants + handoffs + wait_states + snapshot + health + daily_open_counts.",
         "full":         "All + analytics (everything).",
@@ -1050,7 +1261,7 @@ def main():
     for cmd, helptext in _ALL_CMDS.items():
         p = sub.add_parser(cmd, help=helptext)
         p.add_argument("--ticket", "-t", help="Process only this ticket number.")
-        if cmd == "daily_open_counts":
+        if cmd in ("daily_open_counts", "customer_health_history"):
             p.add_argument("--date", help="Single date to compute (YYYY-MM-DD). Default: today.")
             p.add_argument("--from", dest="date_from", help="Start of date range (YYYY-MM-DD).")
             p.add_argument("--to", dest="date_to", help="End of date range (YYYY-MM-DD).")
@@ -1112,8 +1323,33 @@ def main():
         rebuild_customer_ticket_health()
         rebuild_product_ticket_health()
 
+    if cmd == "customer_health_history":
+        target_date = None
+        date_from = None
+        date_to = None
+        all_dates = getattr(args, "all_dates", False)
+        force = getattr(args, "force", False)
+
+        raw_date = getattr(args, "date", None)
+        raw_from = getattr(args, "date_from", None)
+        raw_to = getattr(args, "date_to", None)
+
+        if raw_date:
+            target_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+        if raw_from:
+            date_from = datetime.strptime(raw_from, "%Y-%m-%d").date()
+        if raw_to:
+            date_to = datetime.strptime(raw_to, "%Y-%m-%d").date()
+
+        rebuild_customer_health_history(
+            target_date=target_date,
+            date_from=date_from,
+            date_to=date_to,
+            all_dates=all_dates,
+            force=force,
+        )
+
     if cmd in ("daily_open_counts", "analytics", "full"):
-        # Parse daily_open_counts-specific flags (only present when cmd is daily_open_counts)
         target_date = None
         date_from = None
         date_to = None

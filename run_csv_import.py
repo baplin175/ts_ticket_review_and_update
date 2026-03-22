@@ -247,6 +247,7 @@ def run_import(
                 if ticket_id not in tickets_upserted:
                     ticket_name = (row.get("Ticket Name") or "").strip()
                     product_name = (row.get("Ticket Product Name") or "").strip()
+                    assignee = (row.get("Assigned To") or "").strip()
                     customer = (row.get("Primary Customer") or "").strip()
                     severity = (row.get("Severity") or "").strip()
                     group_name = (row.get("Group Name") or "").strip()
@@ -297,7 +298,8 @@ def run_import(
                         "status": status,
                         "severity": severity or None,
                         "product_name": product_name or None,
-                        "assignee": group_name or None,
+                        "assignee": assignee or None,
+                        "group_name": group_name or None,
                         "customer": customer or None,
                         "date_created": date_created,
                         "closed_at": closed_at,
