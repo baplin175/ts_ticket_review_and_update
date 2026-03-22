@@ -533,15 +533,26 @@ def _subcluster_chart(cluster_row):
     if not subclusters:
         return dmc.Text("No subcluster data for this cluster.", c="dimmed", ta="center", py="xl")
 
+    display_limit = 12
+    total_tickets = int(cluster_row.get("ticket_count") or 0)
+    top_subclusters = list(subclusters[:display_limit])
+    shown_ticket_count = sum(int(item.get("ticket_count", 0) or 0) for item in top_subclusters)
+    other_ticket_count = max(total_tickets - shown_ticket_count, 0)
+
     labels = []
     values = []
     percents = []
-    for item in reversed(subclusters[:12]):
+    for item in reversed(top_subclusters):
         component = item.get("component") or "Unknown"
         operation = item.get("operation") or "Unknown"
         labels.append(f"{component} -> {operation}")
         values.append(item.get("ticket_count", 0))
         percents.append(item.get("percent_within_cluster", 0))
+
+    if other_ticket_count:
+        labels.insert(0, "Other")
+        values.insert(0, other_ticket_count)
+        percents.insert(0, other_ticket_count / total_tickets if total_tickets else 0)
 
     fig = go.Figure(go.Bar(
         x=values,
@@ -555,7 +566,11 @@ def _subcluster_chart(cluster_row):
     fig.update_layout(
         template="plotly_white",
         title={
-            "text": f"{_pretty(cluster_row.get('cluster_id'))}: top component/operation slices",
+            "text": (
+                f"{_pretty(cluster_row.get('cluster_id'))}: top component/operation slices"
+                f"<br><sup>Showing {shown_ticket_count} of {total_tickets} tickets"
+                f"{' + Other' if other_ticket_count else ''}</sup>"
+            ),
             "x": 0.01,
             "xanchor": "left",
             "font": {"size": 14},
