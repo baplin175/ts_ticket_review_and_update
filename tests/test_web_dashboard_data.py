@@ -80,3 +80,37 @@ def test_get_dashboard_by_slug_returns_none_when_db_is_unavailable():
     with patch.object(data, "query_one", side_effect=psycopg2.OperationalError()):
         result = data.get_dashboard_by_slug("ops")
     assert result is None
+
+
+def test_root_cause_ticket_list_uses_latest_cluster_view():
+    with patch.object(data, "query", return_value=[]) as mocked:
+        data.get_root_cause_tickets()
+    sql = mocked.call_args[0][0]
+    assert "FROM vw_latest_mechanism_ticket_clusters tc" in sql
+    assert "latest_p4" in sql
+
+
+def test_root_cause_mechanism_distribution_uses_latest_catalog_view():
+    with patch.object(data, "query", return_value=[]) as mocked:
+        data.get_mechanism_class_distribution()
+    sql = mocked.call_args[0][0]
+    assert "FROM vw_latest_mechanism_cluster_catalog" in sql
+    assert "cluster_id AS mechanism_class" in sql
+
+
+def test_root_cause_cluster_catalog_uses_latest_catalog_view():
+    with patch.object(data, "query", return_value=[]) as mocked:
+        data.get_root_cause_cluster_catalog()
+    sql = mocked.call_args[0][0]
+    assert "FROM vw_latest_mechanism_cluster_catalog" in sql
+    assert "subclusters" in sql
+
+
+def test_root_cause_fix_drilldown_uses_latest_cluster_view():
+    with patch.object(data, "query", return_value=[]) as mocked:
+        data.get_tickets_by_fixes([("configuration_mismatch", "configuration_change")])
+    sql = mocked.call_args[0][0]
+    params = mocked.call_args[0][1]
+    assert "FROM vw_latest_mechanism_ticket_clusters tc" in sql
+    assert "latest_p4" in sql
+    assert params == ("configuration_mismatch", "configuration_change")

@@ -9,8 +9,10 @@ description = "TeamSupport ticket ingestion, enrichment, analytics, and dashboar
 requires-python = ">=3.11"
 dependencies = [
     "PyYAML>=6.0,<7",
+    "pandas>=2.2,<3",
     "psycopg2-binary>=2.9,<3",
     "requests>=2.28,<3",
+    "SQLAlchemy>=2.0,<3",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +39,7 @@ py-modules = [
     "action_classifier",
     "activity_cleaner",
     "analytics_queries",
+    "build_cluster_catalog",
     "config",
     "db",
     "get_models",

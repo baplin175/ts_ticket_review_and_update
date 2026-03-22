@@ -384,8 +384,51 @@ def get_recent_ingest_runs(limit=10):
 # ── Root Cause (LLM pass results) ───────────────────────────────────
 
 def get_root_cause_tickets():
-    """Return tickets that have at least one pass1, pass3, or pass4 result."""
+    """Return tickets in the latest deterministic mechanism cluster run."""
     return query("""
+        WITH latest_p1 AS (
+            SELECT DISTINCT ON (ticket_id)
+                ticket_id,
+                phenomenon,
+                component,
+                operation,
+                canonical_failure,
+                (parsed_json->>'confidence') AS confidence,
+                status,
+                completed_at
+            FROM ticket_llm_pass_results
+            WHERE pass_name = 'pass1_phenomenon'
+            ORDER BY ticket_id,
+                     CASE WHEN status = 'success' THEN 0 ELSE 1 END,
+                     updated_at DESC
+        ),
+        latest_p3 AS (
+            SELECT DISTINCT ON (ticket_id)
+                ticket_id,
+                mechanism,
+                (parsed_json->>'evidence') AS evidence,
+                status,
+                completed_at
+            FROM ticket_llm_pass_results
+            WHERE pass_name = 'pass3_mechanism'
+            ORDER BY ticket_id,
+                     CASE WHEN status = 'success' THEN 0 ELSE 1 END,
+                     updated_at DESC
+        ),
+        latest_p4 AS (
+            SELECT DISTINCT ON (ticket_id)
+                ticket_id,
+                mechanism_class,
+                intervention_type,
+                intervention_action,
+                status,
+                completed_at
+            FROM ticket_llm_pass_results
+            WHERE pass_name = 'pass4_intervention'
+            ORDER BY ticket_id,
+                     CASE WHEN status = 'success' THEN 0 ELSE 1 END,
+                     updated_at DESC
+        )
         SELECT
             t.ticket_id,
             t.ticket_number,
@@ -404,45 +447,17 @@ def get_root_cause_tickets():
             p3.evidence,
             p3.status        AS pass3_status,
             p3.completed_at  AS pass3_completed_at,
-            p4.mechanism_class,
+            tc.cluster_id     AS mechanism_class,
             p4.intervention_type,
             p4.intervention_action,
             p4.status        AS pass4_status,
             p4.completed_at  AS pass4_completed_at
-        FROM tickets t
-        LEFT JOIN LATERAL (
-            SELECT phenomenon, component, operation, canonical_failure,
-                   (parsed_json->>'confidence') AS confidence,
-                   status, completed_at
-            FROM ticket_llm_pass_results lp
-            WHERE lp.ticket_id = t.ticket_id
-              AND lp.pass_name = 'pass1_phenomenon'
-            ORDER BY CASE WHEN lp.status = 'success' THEN 0 ELSE 1 END,
-                     lp.updated_at DESC
-            LIMIT 1
-        ) p1 ON TRUE
-        LEFT JOIN LATERAL (
-            SELECT mechanism,
-                   (parsed_json->>'evidence') AS evidence,
-                   status, completed_at
-            FROM ticket_llm_pass_results lp
-            WHERE lp.ticket_id = t.ticket_id
-              AND lp.pass_name = 'pass3_mechanism'
-            ORDER BY CASE WHEN lp.status = 'success' THEN 0 ELSE 1 END,
-                     lp.updated_at DESC
-            LIMIT 1
-        ) p3 ON TRUE
-        LEFT JOIN LATERAL (
-            SELECT mechanism_class, intervention_type, intervention_action,
-                   status, completed_at
-            FROM ticket_llm_pass_results lp
-            WHERE lp.ticket_id = t.ticket_id
-              AND lp.pass_name = 'pass4_intervention'
-            ORDER BY CASE WHEN lp.status = 'success' THEN 0 ELSE 1 END,
-                     lp.updated_at DESC
-            LIMIT 1
-        ) p4 ON TRUE
-        WHERE p1.status = 'success'
+        FROM vw_latest_mechanism_ticket_clusters tc
+        JOIN tickets t ON t.ticket_id = tc.ticket_id
+        LEFT JOIN latest_p1 p1 ON p1.ticket_id = t.ticket_id
+        LEFT JOIN latest_p3 p3 ON p3.ticket_id = t.ticket_id
+        LEFT JOIN latest_p4 p4 ON p4.ticket_id = t.ticket_id
+        WHERE tc.cluster_id IS NOT NULL
           AND COALESCE(t.status, '') != 'Open'
           AND COALESCE(t.assignee, '') != 'Marketing'
         ORDER BY COALESCE(p4.completed_at, p3.completed_at, p1.completed_at) DESC NULLS LAST
@@ -477,40 +492,50 @@ def get_root_cause_detail(ticket_id):
 def get_root_cause_stats():
     """KPI counts for the root cause dashboard."""
     return query_one("""
+        WITH latest_p1 AS (
+            SELECT DISTINCT ON (ticket_id)
+                ticket_id,
+                status,
+                component
+            FROM ticket_llm_pass_results
+            WHERE pass_name = 'pass1_phenomenon'
+            ORDER BY ticket_id,
+                     CASE WHEN status = 'success' THEN 0 ELSE 1 END,
+                     updated_at DESC
+        ),
+        latest_p3 AS (
+            SELECT DISTINCT ON (ticket_id)
+                ticket_id,
+                status
+            FROM ticket_llm_pass_results
+            WHERE pass_name = 'pass3_mechanism'
+            ORDER BY ticket_id,
+                     CASE WHEN status = 'success' THEN 0 ELSE 1 END,
+                     updated_at DESC
+        ),
+        scoped_tickets AS (
+            SELECT ticket_id
+            FROM tickets
+            WHERE COALESCE(status, '') != 'Open'
+              AND COALESCE(assignee, '') != 'Marketing'
+        )
         SELECT
-            COUNT(DISTINCT CASE WHEN p1.status = 'success' THEN p1.ticket_id END) AS pass1_success,
-            COUNT(DISTINCT CASE WHEN p3.status = 'success' THEN p3.ticket_id END) AS pass3_success,
-            COUNT(DISTINCT CASE WHEN p4.status = 'success' THEN p4.ticket_id END) AS pass4_success,
-            COUNT(DISTINCT p4.mechanism_class)
-                FILTER (WHERE p4.status = 'success' AND p4.mechanism_class IS NOT NULL
-                        AND p4.mechanism_class != 'other')                        AS distinct_mechanism_classes,
+            COUNT(DISTINCT st.ticket_id)
+                FILTER (WHERE p1.status = 'success') AS pass1_success,
+            COUNT(DISTINCT st.ticket_id)
+                FILTER (WHERE p3.status = 'success') AS pass3_success,
+            COUNT(DISTINCT tc.ticket_id)             AS pass4_success,
+            COUNT(DISTINCT cc.cluster_id)
+                FILTER (WHERE cc.cluster_id IS NOT NULL AND cc.cluster_id != 'other')
+                                                  AS distinct_mechanism_classes,
             COUNT(DISTINCT p1.component)
-                FILTER (WHERE p1.status = 'success' AND p1.component IS NOT NULL) AS distinct_components
-        FROM tickets t
-        LEFT JOIN LATERAL (
-            SELECT ticket_id, status, component
-            FROM ticket_llm_pass_results lp
-            WHERE lp.ticket_id = t.ticket_id AND lp.pass_name = 'pass1_phenomenon'
-            ORDER BY CASE WHEN lp.status='success' THEN 0 ELSE 1 END, lp.updated_at DESC
-            LIMIT 1
-        ) p1 ON TRUE
-        LEFT JOIN LATERAL (
-            SELECT ticket_id, status
-            FROM ticket_llm_pass_results lp
-            WHERE lp.ticket_id = t.ticket_id AND lp.pass_name = 'pass3_mechanism'
-            ORDER BY CASE WHEN lp.status='success' THEN 0 ELSE 1 END, lp.updated_at DESC
-            LIMIT 1
-        ) p3 ON TRUE
-        LEFT JOIN LATERAL (
-            SELECT ticket_id, status, mechanism_class
-            FROM ticket_llm_pass_results lp
-            WHERE lp.ticket_id = t.ticket_id AND lp.pass_name = 'pass4_intervention'
-            ORDER BY CASE WHEN lp.status='success' THEN 0 ELSE 1 END, lp.updated_at DESC
-            LIMIT 1
-        ) p4 ON TRUE
-        WHERE (p1.status IS NOT NULL OR p3.status IS NOT NULL OR p4.status IS NOT NULL)
-          AND COALESCE(t.status, '') != 'Open'
-          AND COALESCE(t.assignee, '') != 'Marketing'
+                FILTER (WHERE p1.status = 'success' AND p1.component IS NOT NULL)
+                                                  AS distinct_components
+        FROM scoped_tickets st
+        LEFT JOIN latest_p1 p1 ON p1.ticket_id = st.ticket_id
+        LEFT JOIN latest_p3 p3 ON p3.ticket_id = st.ticket_id
+        LEFT JOIN vw_latest_mechanism_ticket_clusters tc ON tc.ticket_id = st.ticket_id
+        LEFT JOIN vw_latest_mechanism_cluster_catalog cc ON cc.cluster_id = tc.cluster_id
     """) or {
         "pass1_success": 0, "pass3_success": 0, "pass4_success": 0,
         "distinct_mechanism_classes": 0, "distinct_components": 0,
@@ -518,33 +543,72 @@ def get_root_cause_stats():
 
 
 def get_mechanism_class_distribution():
-    """Mechanism class counts from successful Pass 4 results."""
+    """Mechanism class counts from the latest deterministic cluster catalog."""
     return query("""
-        SELECT mechanism_class, ticket_count
-        FROM vw_intervention_roi
+        SELECT cluster_id AS mechanism_class, ticket_count
+        FROM vw_latest_mechanism_cluster_catalog
         ORDER BY ticket_count DESC
     """)
 
 
-def get_intervention_type_distribution():
-    """Intervention type counts from successful Pass 4 results."""
+def get_root_cause_cluster_catalog():
+    """Persisted deterministic cluster catalog for the root-cause dashboard."""
     return query("""
-        SELECT intervention_type, SUM(ticket_count)::int AS ticket_count
-        FROM vw_intervention_roi
+        SELECT
+            cluster_id,
+            cluster_label,
+            ticket_count,
+            percent_of_total,
+            customer_count,
+            product_count,
+            dominant_component,
+            dominant_operation,
+            dominant_intervention_type,
+            example_ticket_ids,
+            example_mechanisms,
+            subclusters
+        FROM vw_latest_mechanism_cluster_catalog
+        ORDER BY ticket_count DESC, cluster_id
+    """)
+
+
+def get_intervention_type_distribution():
+    """Intervention type counts from tickets in the latest cluster run."""
+    return query("""
+        WITH latest_p4 AS (
+            SELECT DISTINCT ON (ticket_id)
+                ticket_id,
+                intervention_type
+            FROM ticket_llm_pass_results
+            WHERE pass_name = 'pass4_intervention'
+              AND status = 'success'
+            ORDER BY ticket_id, updated_at DESC
+        )
+        SELECT p4.intervention_type, COUNT(*)::int AS ticket_count
+        FROM vw_latest_mechanism_ticket_clusters tc
+        JOIN latest_p4 p4 ON p4.ticket_id = tc.ticket_id
         GROUP BY intervention_type
         ORDER BY ticket_count DESC
     """)
 
 
 def get_component_distribution(limit=20):
-    """Top components by ticket count from successful Pass 1 results."""
+    """Top components by ticket count within the latest cluster run."""
     return query("""
-        SELECT component, COUNT(*) AS ticket_count
-        FROM ticket_llm_pass_results
-        WHERE pass_name = 'pass1_phenomenon'
-          AND status = 'success'
-          AND component IS NOT NULL
-          AND component != ''
+        WITH latest_p1 AS (
+            SELECT DISTINCT ON (ticket_id)
+                ticket_id,
+                component
+            FROM ticket_llm_pass_results
+            WHERE pass_name = 'pass1_phenomenon'
+              AND status = 'success'
+            ORDER BY ticket_id, updated_at DESC
+        )
+        SELECT p1.component, COUNT(*) AS ticket_count
+        FROM vw_latest_mechanism_ticket_clusters tc
+        JOIN latest_p1 p1 ON p1.ticket_id = tc.ticket_id
+        WHERE p1.component IS NOT NULL
+          AND p1.component != ''
         GROUP BY component
         ORDER BY ticket_count DESC
         LIMIT %s
@@ -552,26 +616,49 @@ def get_component_distribution(limit=20):
 
 
 def get_operation_distribution():
-    """Operation verb counts from successful Pass 1 results."""
+    """Operation verb counts within the latest cluster run."""
     return query("""
-        SELECT operation, COUNT(*) AS ticket_count
-        FROM ticket_llm_pass_results
-        WHERE pass_name = 'pass1_phenomenon'
-          AND status = 'success'
-          AND operation IS NOT NULL
-          AND operation != ''
+        WITH latest_p1 AS (
+            SELECT DISTINCT ON (ticket_id)
+                ticket_id,
+                operation
+            FROM ticket_llm_pass_results
+            WHERE pass_name = 'pass1_phenomenon'
+              AND status = 'success'
+            ORDER BY ticket_id, updated_at DESC
+        )
+        SELECT p1.operation, COUNT(*) AS ticket_count
+        FROM vw_latest_mechanism_ticket_clusters tc
+        JOIN latest_p1 p1 ON p1.ticket_id = tc.ticket_id
+        WHERE p1.operation IS NOT NULL
+          AND p1.operation != ''
         GROUP BY operation
         ORDER BY ticket_count DESC
     """)
 
 
 def get_top_engineering_fixes(limit=25):
-    """Top engineering fixes ranked by ticket count (from vw_intervention_roi)."""
+    """Top engineering fixes ranked by ticket count in the latest cluster run."""
     return query("""
-        SELECT mechanism_class, intervention_type,
-               ticket_count, representative_action
-        FROM vw_intervention_roi
-        ORDER BY ticket_count DESC
+        WITH latest_p4 AS (
+            SELECT DISTINCT ON (ticket_id)
+                ticket_id,
+                intervention_type,
+                intervention_action
+            FROM ticket_llm_pass_results
+            WHERE pass_name = 'pass4_intervention'
+              AND status = 'success'
+            ORDER BY ticket_id, updated_at DESC
+        )
+        SELECT
+            tc.cluster_id AS mechanism_class,
+            p4.intervention_type,
+            COUNT(*)::int AS ticket_count,
+            MODE() WITHIN GROUP (ORDER BY p4.intervention_action) AS representative_action
+        FROM vw_latest_mechanism_ticket_clusters tc
+        JOIN latest_p4 p4 ON p4.ticket_id = tc.ticket_id
+        GROUP BY tc.cluster_id, p4.intervention_type
+        ORDER BY ticket_count DESC, mechanism_class, intervention_type
         LIMIT %s
     """, (limit,))
 
@@ -584,48 +671,54 @@ def get_tickets_by_fixes(fix_keys):
     conditions = []
     params = []
     for mc, it in fix_keys:
-        conditions.append("(p4.mechanism_class = %s AND p4.intervention_type = %s)")
+        conditions.append("(tc.cluster_id = %s AND p4.intervention_type = %s)")
         params.extend([mc, it])
     where = " OR ".join(conditions)
     return query(f"""
+        WITH latest_p4 AS (
+            SELECT DISTINCT ON (ticket_id)
+                ticket_id,
+                intervention_type,
+                intervention_action
+            FROM ticket_llm_pass_results
+            WHERE pass_name = 'pass4_intervention'
+              AND status = 'success'
+            ORDER BY ticket_id, updated_at DESC
+        )
         SELECT DISTINCT v.ticket_id, v.ticket_number, v.ticket_name, v.status, v.severity,
                v.product_name, v.assignee, v.customer, v.days_opened, v.priority,
                v.overall_complexity, v.frustrated, v.date_modified,
-               p4.mechanism_class, p4.intervention_type, p4.intervention_action
-        FROM ticket_llm_pass_results p4
-        JOIN vw_ticket_analytics_core v ON v.ticket_id = p4.ticket_id
-        WHERE p4.pass_name = 'pass4_intervention'
-          AND p4.status = 'success'
+               tc.cluster_id AS mechanism_class, p4.intervention_type, p4.intervention_action
+        FROM vw_latest_mechanism_ticket_clusters tc
+        JOIN latest_p4 p4 ON p4.ticket_id = tc.ticket_id
+        JOIN vw_ticket_analytics_core v ON v.ticket_id = tc.ticket_id
+        WHERE tc.cluster_id IS NOT NULL
           AND ({where})
         ORDER BY v.date_modified DESC NULLS LAST
     """, tuple(params))
 
 
 def get_root_cause_by_product(limit=10):
-    """Mechanism class counts broken down by product (top products only)."""
+    """Mechanism class counts broken down by product for the latest cluster run."""
     return query("""
         WITH ranked_products AS (
             SELECT t.product_name, COUNT(*) AS total
-            FROM ticket_llm_pass_results lp
-            JOIN tickets t ON t.ticket_id = lp.ticket_id
-            WHERE lp.pass_name = 'pass4_intervention'
-              AND lp.status = 'success'
-              AND lp.mechanism_class IS NOT NULL
+            FROM vw_latest_mechanism_ticket_clusters tc
+            JOIN tickets t ON t.ticket_id = tc.ticket_id
+            WHERE tc.cluster_id IS NOT NULL
             GROUP BY t.product_name
             ORDER BY total DESC
             LIMIT %s
         )
         SELECT
             COALESCE(NULLIF(t.product_name, ''), 'Unknown') AS product_name,
-            lp.mechanism_class,
+            tc.cluster_id AS mechanism_class,
             COUNT(*) AS ticket_count
-        FROM ticket_llm_pass_results lp
-        JOIN tickets t ON t.ticket_id = lp.ticket_id
+        FROM vw_latest_mechanism_ticket_clusters tc
+        JOIN tickets t ON t.ticket_id = tc.ticket_id
         JOIN ranked_products rp ON rp.product_name = t.product_name
-        WHERE lp.pass_name = 'pass4_intervention'
-          AND lp.status = 'success'
-          AND lp.mechanism_class IS NOT NULL
-        GROUP BY t.product_name, lp.mechanism_class
+        WHERE tc.cluster_id IS NOT NULL
+        GROUP BY t.product_name, tc.cluster_id
         ORDER BY t.product_name, ticket_count DESC
     """, (limit,))
 
@@ -634,35 +727,52 @@ def get_root_cause_sankey(component_limit=15):
     """Flow data for Sankey: component → mechanism_class → intervention_type."""
     return query("""
         WITH top_components AS (
+            WITH latest_p1 AS (
+                SELECT DISTINCT ON (ticket_id)
+                    ticket_id,
+                    component
+                FROM ticket_llm_pass_results
+                WHERE pass_name = 'pass1_phenomenon'
+                  AND status = 'success'
+                ORDER BY ticket_id, updated_at DESC
+            )
             SELECT component
-            FROM ticket_llm_pass_results
-            WHERE pass_name = 'pass1_phenomenon'
-              AND status = 'success'
-              AND component IS NOT NULL AND component != ''
+            FROM vw_latest_mechanism_ticket_clusters tc
+            JOIN latest_p1 p1 ON p1.ticket_id = tc.ticket_id
+            WHERE p1.component IS NOT NULL AND p1.component != ''
             GROUP BY component
             ORDER BY COUNT(*) DESC
             LIMIT %s
+        ),
+        latest_p1 AS (
+            SELECT DISTINCT ON (ticket_id)
+                ticket_id,
+                component
+            FROM ticket_llm_pass_results
+            WHERE pass_name = 'pass1_phenomenon'
+              AND status = 'success'
+            ORDER BY ticket_id, updated_at DESC
+        ),
+        latest_p4 AS (
+            SELECT DISTINCT ON (ticket_id)
+                ticket_id,
+                intervention_type
+            FROM ticket_llm_pass_results
+            WHERE pass_name = 'pass4_intervention'
+              AND status = 'success'
+            ORDER BY ticket_id, updated_at DESC
         )
         SELECT
             COALESCE(NULLIF(p1.component, ''), 'Unknown') AS component,
-            COALESCE(p4.mechanism_class, 'unclassified')  AS mechanism_class,
+            COALESCE(tc.cluster_id, 'unclassified')       AS mechanism_class,
             COALESCE(p4.intervention_type, 'unmapped')    AS intervention_type,
             COUNT(*) AS ticket_count
-        FROM ticket_llm_pass_results p1
-        LEFT JOIN LATERAL (
-            SELECT mechanism_class, intervention_type
-            FROM ticket_llm_pass_results lp
-            WHERE lp.ticket_id = p1.ticket_id
-              AND lp.pass_name = 'pass4_intervention'
-              AND lp.status = 'success'
-            ORDER BY lp.updated_at DESC
-            LIMIT 1
-        ) p4 ON TRUE
-        WHERE p1.pass_name = 'pass1_phenomenon'
-          AND p1.status = 'success'
-          AND p1.component IS NOT NULL AND p1.component != ''
+        FROM vw_latest_mechanism_ticket_clusters tc
+        JOIN latest_p1 p1 ON p1.ticket_id = tc.ticket_id
+        LEFT JOIN latest_p4 p4 ON p4.ticket_id = tc.ticket_id
+        WHERE p1.component IS NOT NULL AND p1.component != ''
           AND p1.component IN (SELECT component FROM top_components)
-        GROUP BY p1.component, p4.mechanism_class, p4.intervention_type
+        GROUP BY p1.component, tc.cluster_id, p4.intervention_type
         HAVING COUNT(*) >= 1
         ORDER BY ticket_count DESC
     """, (component_limit,))

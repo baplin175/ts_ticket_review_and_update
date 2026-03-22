@@ -134,6 +134,7 @@ def _build_dashboard_tab():
     intv_dist = data.get_intervention_type_distribution()
     comp_dist = data.get_component_distribution()
     op_dist = data.get_operation_distribution()
+    cluster_catalog = data.get_root_cause_cluster_catalog()
     top_fixes = data.get_top_engineering_fixes()
     by_product = data.get_root_cause_by_product()
     sankey_data = data.get_root_cause_sankey()
@@ -198,6 +199,37 @@ def _build_dashboard_tab():
                 dmc.Paper([
                     dmc.Text("Operation Verb Frequency", fw=600, mb="xs"),
                     _operation_chart(op_dist),
+                ], withBorder=True, p="md", radius="md", shadow="sm"),
+            ],
+        )
+    )
+
+    children.append(
+        dmc.SimpleGrid(
+            cols={"base": 1, "xl": 2},
+            children=[
+                dmc.Paper([
+                    dmc.Text("Cluster Catalog", fw=600, mb="xs"),
+                    _cluster_catalog_grid(cluster_catalog),
+                ], withBorder=True, p="md", radius="md", shadow="sm"),
+                dmc.Paper([
+                    dmc.Group(
+                        [
+                            dmc.Text("Subcluster Breakdown", fw=600),
+                            dmc.Text(
+                                "Select a cluster to see its dominant component/operation slices.",
+                                size="sm",
+                                c="dimmed",
+                            ),
+                        ],
+                        justify="space-between",
+                        align="flex-end",
+                        mb="xs",
+                    ),
+                    html.Div(
+                        id="rc-cluster-subcluster-chart",
+                        children=_subcluster_chart(cluster_catalog[0] if cluster_catalog else None),
+                    ),
                 ], withBorder=True, p="md", radius="md", shadow="sm"),
             ],
         )
@@ -436,6 +468,100 @@ def _operation_chart(rows):
         template="plotly_white",
         margin=dict(l=10, r=20, t=10, b=10),
         height=max(260, len(rows) * 32),
+        yaxis=dict(automargin=True),
+        xaxis_title="Tickets",
+    )
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+
+def _cluster_catalog_grid(rows):
+    """Single-select grid of persisted cluster catalog rows."""
+    grid = dag.AgGrid(
+        id="rc-cluster-catalog-grid",
+        rowData=rows,
+        columnDefs=[
+            {
+                "field": "cluster_id",
+                "headerName": "Cluster",
+                "minWidth": 180,
+                "checkboxSelection": True,
+                "headerCheckboxSelection": False,
+                "valueFormatter": {
+                    "function": "params.value ? params.value.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase()) : ''"
+                },
+            },
+            {"field": "ticket_count", "headerName": "Tickets", "width": 95, "type": "numericColumn", "sort": "desc"},
+            {
+                "field": "percent_of_total",
+                "headerName": "% Total",
+                "width": 95,
+                "type": "numericColumn",
+                "valueFormatter": {"function": "params.value != null ? (params.value * 100).toFixed(1) + '%' : ''"},
+            },
+            {"field": "customer_count", "headerName": "Customers", "width": 105, "type": "numericColumn"},
+            {"field": "product_count", "headerName": "Products", "width": 95, "type": "numericColumn"},
+            {"field": "dominant_component", "headerName": "Dominant Component", "minWidth": 170, "flex": 1},
+            {"field": "dominant_operation", "headerName": "Dominant Operation", "width": 150},
+            {
+                "field": "dominant_intervention_type",
+                "headerName": "Dominant Intervention",
+                "width": 170,
+                "valueFormatter": {
+                    "function": "params.value ? params.value.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase()) : ''"
+                },
+            },
+        ],
+        defaultColDef={"sortable": True, "filter": True, "resizable": True},
+        dashGridOptions={
+            "rowSelection": "single",
+            "pagination": True,
+            "paginationPageSize": 10,
+            "animateRows": True,
+        },
+        style={"height": "420px"},
+        className="ag-theme-alpine",
+    )
+    return grid_with_export(grid, "rc-cluster-catalog-grid")
+
+
+def _subcluster_chart(cluster_row):
+    """Horizontal bar chart of component/operation subclusters for one cluster."""
+    if not cluster_row:
+        return dmc.Text("No cluster catalog data yet.", c="dimmed", ta="center", py="xl")
+
+    subclusters = cluster_row.get("subclusters") or []
+    if not subclusters:
+        return dmc.Text("No subcluster data for this cluster.", c="dimmed", ta="center", py="xl")
+
+    labels = []
+    values = []
+    percents = []
+    for item in reversed(subclusters[:12]):
+        component = item.get("component") or "Unknown"
+        operation = item.get("operation") or "Unknown"
+        labels.append(f"{component} -> {operation}")
+        values.append(item.get("ticket_count", 0))
+        percents.append(item.get("percent_within_cluster", 0))
+
+    fig = go.Figure(go.Bar(
+        x=values,
+        y=labels,
+        orientation="h",
+        marker_color="#0b7285",
+        text=[f"{v} ({p * 100:.0f}%)" for v, p in zip(values, percents)],
+        textposition="auto",
+        hovertemplate="%{y}<br>Tickets: %{x}<extra></extra>",
+    ))
+    fig.update_layout(
+        template="plotly_white",
+        title={
+            "text": f"{_pretty(cluster_row.get('cluster_id'))}: top component/operation slices",
+            "x": 0.01,
+            "xanchor": "left",
+            "font": {"size": 14},
+        },
+        margin=dict(l=10, r=20, t=50, b=10),
+        height=max(320, len(labels) * 34),
         yaxis=dict(automargin=True),
         xaxis_title="Tickets",
     )
@@ -752,6 +878,16 @@ def root_cause_layout():
 # ══════════════════════════════════════════════════════════════════════
 
 def register_callbacks(app):
+    @app.callback(
+        Output("rc-cluster-subcluster-chart", "children"),
+        Input("rc-cluster-catalog-grid", "selectedRows"),
+        State("rc-cluster-catalog-grid", "rowData"),
+    )
+    def show_cluster_subclusters(selected, rows):
+        if selected:
+            return _subcluster_chart(selected[0])
+        return _subcluster_chart(rows[0] if rows else None)
+
     @app.callback(
         Output("root-cause-detail", "children"),
         Input("root-cause-grid", "selectedRows"),

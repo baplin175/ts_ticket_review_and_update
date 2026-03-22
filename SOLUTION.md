@@ -54,16 +54,17 @@ pass4/intervention_types.py — Normalized intervention type taxonomy (8 types i
 pass4/mechanism_classifier.py — Pass 4 response parser (strict JSON validation, taxonomy enforcement with soft 'other' + proposed_class/proposed_type, action validation)
 pass4/intervention_mapper.py  — Pass 4 per-ticket LLM orchestrator (prompt build, Matcha call, parse, DB persist)
 pass4/intervention_aggregator.py — ROI aggregation engine (mechanism class counts, intervention type counts, top engineering fixes, JSON artifact export)
+build_cluster_catalog.py — Deterministic cluster/catalog pipeline: loads `ticket_llm_pass_results`, reshapes the native row-per-pass table into analytical wide rows, filters to successful intervention mappings, clusters by `mechanism_class`, computes `(component, operation)` subclusters, writes CSV/JSON artifacts, and persists the latest cluster run into `cluster_runs`, `ticket_clusters`, and `cluster_catalog`
 migrations/            — Numbered SQL migration files applied by db.py
 web/app.py             — Dash + Mantine web dashboard entry point (read-only, live Postgres queries; run with `python -m web.app`)
 web/dashboard.yaml     — YAML-driven dashboard configuration (pages, nav, queries, grids, charts, stat cards)
 web/renderer.py        — YAML config renderer: parses dashboard.yaml, builds Dash layouts for YAML-driven pages, imports custom page modules
-web/data.py            — Data access layer for the web dashboard (SELECT-only for analytics, plus dashboard-local CRUD for saved reports; no TS writes); includes root cause analytics queries (mechanism class/intervention type distributions, component/operation aggregations, Sankey flow data, pipeline funnel, per-product breakdown, top engineering fixes from vw_intervention_roi); get_filtered_backlog_daily() reconstructs daily backlog trend from tickets table with dynamic WHERE clauses for overview filters; get_tickets_by_customers() returns open tickets for a list of customer names (health drill-down); get_tickets_by_fixes() returns tickets matching (mechanism_class, intervention_type) pairs (engineering fixes drill-down)
+web/data.py            — Data access layer for the web dashboard (SELECT-only for analytics, plus dashboard-local CRUD for saved reports; no TS writes); root cause analytics now read from the persisted deterministic cluster views `vw_latest_mechanism_cluster_catalog` and `vw_latest_mechanism_ticket_clusters` instead of recomputing distributions from raw pass rows; get_filtered_backlog_daily() reconstructs daily backlog trend from tickets table with dynamic WHERE clauses for overview filters; get_tickets_by_customers() returns open tickets for a list of customer names (health drill-down); get_tickets_by_fixes() returns tickets matching (mechanism_class, intervention_type) pairs (engineering fixes drill-down)
 web/pages/overview.py  — Overview page: KPI stat cards, backlog trend chart, aging distribution, open-by-product, chart drill-down; multi-select filter bar (status, severity, product, assignee, customer, frustrated) — empty = all open tickets (original DB views), selected values = include only those; all visualizations update including backlog trend (reconstructed from tickets table with filter-matching SQL); clearing filters reverts to original DB-view data; filters update KPI values in-place (no card recreation to avoid drill-down trigger); drill-downs use ticket store when filters active for consistent counts (custom)
 web/pages/tickets.py   — Ticket explorer: AG Grid with filters, sorting, row-click navigation to detail, saved filter reports, background sync via subprocess with live log panel and auto-dismiss; tabbed view with Open (default, excludes Closed) and All Tickets tabs; rowSelection uses string format "single" for compatibility; filter persistence via browser sessionStorage — AG Grid filterModel and active tab are saved to a session-scoped dcc.Store on every change and restored automatically when navigating back from ticket detail, so filters survive page transitions until the user clicks Clear Filters; sync-progress-panel hidden via display:none when empty to avoid blank gap in stack layout (custom)
 web/pages/ticket_detail.py — Ticket detail: metadata header, thread timeline (newest-first), score cards, wait profile chart, issue summary, refresh button (re-syncs single ticket from TeamSupport via run_ingest.py --ticket-id, then re-renders page) (custom)
 web/pages/health.py    — Health dashboards: Customer and Product health AG Grid tables; Customer Health tab supports multi-row checkbox selection with "View Tickets" drill-down button that opens a modal showing all open tickets for selected customers (custom)
-web/pages/root_cause.py — Root Cause Analytics dashboard: tabbed layout (Dashboard + Detail + Glossary). Dashboard tab: KPI stat cards (tickets analyzed, mechanisms found, interventions mapped, pipeline completion %, top mechanism), pipeline completion funnel chart, mechanism class distribution (horizontal bar), intervention type breakdown (donut), component treemap, operation verb frequency bar chart, Sankey flow diagram (Component → Mechanism Class → Intervention Type), root cause by product (stacked bar), top engineering fixes AG Grid (ROI-ranked from vw_intervention_roi) with multi-row checkbox selection and "View Tickets" drill-down modal. Detail tab: original AG Grid of pass-processed tickets with CSV export, row-click expands Pass 1/3/4 cards + cleaned thread text. Glossary tab: reference guide for pipeline passes, canonical failure grammar fields, all 14 mechanism classes, all 8 intervention types, and dashboard metrics (custom)
+web/pages/root_cause.py — Root Cause Analytics dashboard: tabbed layout (Dashboard + Detail + Glossary). Dashboard tab: KPI stat cards (tickets analyzed, mechanisms found, interventions mapped, pipeline completion %, top mechanism), pipeline completion funnel chart, mechanism class distribution (horizontal bar), intervention type breakdown (donut), component treemap, operation verb frequency bar chart, Sankey flow diagram (Component → Mechanism Class → Intervention Type), root cause by product (stacked bar), top engineering fixes AG Grid (ROI-ranked from the latest deterministic cluster run) with multi-row checkbox selection and "View Tickets" drill-down modal. Detail tab: original AG Grid of pass-processed tickets with CSV export, row-click expands Pass 1/2/3 cards + cleaned thread text. Glossary tab: reference guide for pipeline passes, canonical failure grammar fields, all 14 mechanism classes, all 8 intervention types, and dashboard metrics (custom)
 web/pages/config_view.py — Pipeline config editor (editable settings with Save button writes to config.py + live reload; MATCHA_RESPONSE_LLM model override, toggles, text fields, sync status; custom)
 web_requirements.txt   — Python dependencies for the web dashboard (dash, dash-mantine-components, dash-ag-grid, PyYAML, etc.)
 pipeline/__init__.py   — Standalone CSV pipeline package (no DB dependency, self-contained)
@@ -102,16 +103,16 @@ All database objects live in the `tickets_ai` schema. Every table that reference
 | `ticket_embeddings` | Enrichment | Vector embeddings for similarity search (schema-only) |
 | `ticket_interventions` | Enrichment | Recommended interventions per ticket (schema-only) |
 | `enrichment_runs` | Enrichment | Audit log for enrichment batches (schema-only) |
-| `cluster_runs` | Clustering | Clustering run metadata (schema-only) |
-| `ticket_clusters` | Clustering | Ticket-to-cluster assignments (schema-only) |
-| `cluster_catalog` | Clustering | Cluster descriptions and patterns (schema-only) |
+| `cluster_runs` | Clustering | Metadata for deterministic cluster rebuilds (`cluster_method='mechanism_class_catalog'`) |
+| `ticket_clusters` | Clustering | Ticket-to-cluster assignments for the latest deterministic mechanism-class run |
+| `cluster_catalog` | Clustering | Persisted cluster catalog with counts, dominant fields, examples, and subcluster JSON |
 | `ticket_snapshots_daily` | Snapshot/Health | Point-in-time snapshot of ticket state on a given date |
 | `customer_ticket_health` | Snapshot/Health | Per-customer health rollup (open/HP/HC counts, pressure score) |
 | `product_ticket_health` | Snapshot/Health | Per-product health rollup (volume, complexity, dev-touched rate) |
 | `daily_open_counts` | Snapshot/Health | Aggregated daily counts of open tickets by product, status, and last-active participant (from ticket_participants) |
 | `saved_reports` | Dashboard | Named saved filter presets for the ticket explorer grid |
 
-### Views (17)
+### Views
 
 | View | Purpose |
 |------|---------|
@@ -138,8 +139,18 @@ All database objects live in the `tickets_ai` schema. Every table that reference
 | `vw_ticket_pass2_results` | Latest Pass 2 grammar result per ticket (joined with Pass 1 phenomenon) |
 | `vw_ticket_pass3_results` | Latest Pass 3 mechanism result per ticket (joined with Pass 1 + Pass 2) |
 | `vw_ticket_pass4_results` | Latest Pass 4 intervention mapping per ticket (mechanism_class, intervention_type, intervention_action) |
-| `vw_intervention_roi` | Engineering ROI: ticket counts by mechanism_class × intervention_type |
-| `vw_ticket_pass_pipeline` | Full pipeline status: Pass 1 + Pass 2 + Pass 3 + Pass 4 side-by-side per ticket |
+| `vw_intervention_roi` | Engineering ROI: ticket counts by mechanism_class × intervention_type from raw Pass 4 success rows |
+| `vw_latest_mechanism_cluster_catalog` | Latest persisted deterministic cluster catalog for the root-cause dashboard |
+| `vw_latest_mechanism_ticket_clusters` | Ticket-to-cluster assignments for the latest deterministic cluster run |
+| `vw_ticket_pass_pipeline` | Full legacy/internal pipeline status: Pass 1 + legacy grammar + mechanism + intervention side-by-side per ticket |
+
+Note: the active user-facing pass numbering is now:
+
+- Pass 1 = phenomenon + grammar decomposition (`run_ticket_pass1.py`)
+- Pass 2 = mechanism inference (`run_ticket_pass3.py`)
+- Pass 3 = intervention mapping (`run_pass4.py`)
+
+`run_ticket_pass2.py` remains only as a backward-compatibility path for historical grammar rows and prompt versions.
 
 ## Data Flow
 
@@ -374,6 +385,34 @@ All tables are created inside the `tickets_ai` Postgres schema (configurable via
 | `ticket_sentiment`         | Sentiment enrichment results (append-only)             |
 | `ticket_priority_scores`   | AI priority enrichment results (append-only)           |
 | `ticket_complexity_scores` | Complexity enrichment results (append-only)            |
+
+### Deterministic Cluster Catalog
+
+The clustering pipeline is now implemented and persisted in Postgres.
+
+- Entry point: `python build_cluster_catalog.py`
+- Source: `tickets_ai.ticket_llm_pass_results`
+- Scope: successful intervention-mapping tickets only
+- Cluster ID: `mechanism_class`
+- Subclusters: `(component, operation)`
+- Method: deterministic grouping only; no embeddings and no ML
+
+The script supports both a wide analytical source shape with human-readable columns such as `Ticket #`, `Pass 4`, and `Mechanism Class`, and the repo's native row-per-pass table shape. When pointed at the native table, it reshapes the latest pass rows per ticket into that same analytical wide shape before computing the catalog.
+
+Each rebuild:
+
+- writes `cluster_catalog.csv`, `cluster_catalog.json`, and `ticket_cluster_mapping.csv`
+- creates a fresh `cluster_runs` row with `cluster_method='mechanism_class_catalog'`
+- replaces prior persisted rows for that method
+- populates `ticket_clusters` with one assignment per ticket
+- populates `cluster_catalog` with counts, dominant fields, examples, and subcluster JSON
+
+The root-cause dashboard now reads from:
+
+- `vw_latest_mechanism_cluster_catalog`
+- `vw_latest_mechanism_ticket_clusters`
+
+This gives the dashboard a stable persisted cluster snapshot instead of recomputing its distributions directly from raw Pass 4 rows on each page load.
 
 ### Upsert helpers
 
@@ -865,10 +904,10 @@ A live analytics dashboard built with Dash + Dash Mantine Components + AG Grid. 
 pip install -r web_requirements.txt
 
 # Start the dashboard (default: http://localhost:8050)
-python3 web/app.py
+python3 -m web.app
 
 # Override port or disable debug mode
-WEB_PORT=9000 WEB_DEBUG=0 python3 web/app.py
+WEB_PORT=9000 WEB_DEBUG=0 python3 -m web.app
 
 # For production (gunicorn)
 gunicorn web.app:server -b 0.0.0.0:8050
@@ -884,6 +923,7 @@ Requires `DATABASE_URL` to be set (reads from the `tickets_ai` schema).
 | Tickets | `/tickets` | `vw_ticket_analytics_core` | AG Grid explorer with column filters, sorting, floating filters. Click any row to navigate to detail. |
 | Ticket Detail | `/ticket/{id}` | `vw_ticket_analytics_core`, `ticket_actions`, `vw_ticket_wait_profile` | Metadata header, tabbed view: Thread (chronological action cards with party-colored borders), Scores (priority/complexity/sentiment cards), Wait Profile (horizontal bar chart of time per state), Summary (issue/cause/mechanism/resolution) |
 | Health | `/health` | `customer_ticket_health`, `product_ticket_health` | Tabbed AG Grid tables: Customer Health (pressure score, frustration, HP/HC counts) and Product Health (volume, complexity, dev-touched rate, customer wait rate) |
+| Root Cause | `/root-cause` | `vw_latest_mechanism_cluster_catalog`, `vw_latest_mechanism_ticket_clusters`, latest pass rows from `ticket_llm_pass_results` | Persisted deterministic root-cause cluster analytics plus per-ticket pass drill-down |
 | Config | `/config` | `config.*` attributes, `sync_state` | Read-only display of all pipeline settings grouped by category, plus sync status |
 
 ### Architecture
@@ -919,6 +959,7 @@ python -m pytest tests/ -v
 Test coverage includes:
 - **Action classifier** (18 tests): all classification categories, noise/substance helpers
 - **Activity cleaner** (9 tests): HTML conversion, boilerplate removal, party classification
+- **Deterministic cluster catalog** (5 tests): success filtering, dominant-value selection, catalog construction, mapping construction, DB serializer payloads
 - **DB upserts** (11 tests): idempotent INSERT ON CONFLICT, first_ingested_at stability, sync_state, ingest_runs
 - **Incremental sync** (9 tests): watermark reading, safety buffer filtering, watermark advancement on success, no advancement on targeted/replay/failed syncs, empty result handling
 - **Hash-based skipping** (9 tests): all three enrichment types, force override, missing rollups
@@ -927,6 +968,7 @@ Test coverage includes:
 - **Post-sync rollups** (4 tests): CSV import returns upserted IDs, rollup rebuild triggered after import, skipped on dry-run
 - **Pass 1 — phenomenon** (35 tests): parser, selection logic, idempotency, DB persistence, malformed handling, success flow, prompt template
 - **Pass 2 — grammar** (51 tests): parser, operation normalization, canonical failure reconstruction, selection logic, idempotency, DB persistence, malformed handling, success flow, prompt template
+- **Web dashboard data** includes regression coverage for the persisted root-cause cluster views
 
 ## Audit Summary (2026-03-13)
 
@@ -1037,7 +1079,7 @@ The full schema (`tickets_ai`) is now organized into five categories:
 | **Source truth** | `tickets`, `ticket_actions`, `sync_state`, `ingest_runs` | Raw data from TeamSupport API / CSV import |
 | **Derived (per-ticket)** | `ticket_thread_rollups`, `ticket_metrics`, `ticket_participants`, `ticket_handoffs`, `ticket_wait_states` | Deterministic rebuilds from action stream |
 | **Enrichment (append-only)** | `ticket_sentiment`, `ticket_priority_scores`, `ticket_complexity_scores`, `ticket_issue_summaries`, `ticket_embeddings`, `ticket_interventions`, `enrichment_runs` | LLM-scored analytics, append-only with hash-based skip |
-| **Clustering** | `cluster_runs`, `ticket_clusters`, `cluster_catalog` | Grouping tickets by similarity; populated by future clustering pipeline |
+| **Clustering** | `cluster_runs`, `ticket_clusters`, `cluster_catalog` | Persisted deterministic mechanism-class cluster catalog and ticket assignments |
 | **Snapshot / Health** | `ticket_snapshots_daily`, `customer_ticket_health`, `product_ticket_health` | Point-in-time backlog snapshots and customer/product health rollups |
 
 ### New Derived Tables
@@ -1098,13 +1140,13 @@ Per-product health rollup for a given date. Full-refresh. Includes:
 - `customer_wait_rate`: fraction of tickets whose latest wait state is `waiting_on_customer`
 - Top clusters and mechanisms (JSONB arrays)
 
-### Enrichment / Clustering Tables (Schema-Only)
+### Enrichment / Clustering Tables
 
-These tables are created by the migration but are **not yet populated** by the normal run. They are designed for future enrichment stages:
+Some enrichment tables remain schema-only, but the deterministic cluster catalog is now populated by the normal clustering rebuild:
 
 - `ticket_issue_summaries`: LLM-generated issue/cause/mechanism/resolution summaries
 - `ticket_embeddings`: Vector embeddings for similarity search
-- `cluster_runs`, `ticket_clusters`, `cluster_catalog`: Ticket clustering results
+- `cluster_runs`, `ticket_clusters`, `cluster_catalog`: Persisted deterministic mechanism-class cluster results produced by `build_cluster_catalog.py`
 - `ticket_interventions`: Recommended interventions per ticket
 - `enrichment_runs`: Audit log for enrichment batches (UUID PK generated in Python)
 
