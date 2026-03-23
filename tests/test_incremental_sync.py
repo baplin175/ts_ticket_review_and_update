@@ -11,6 +11,7 @@ These tests mock the DB and API layers to verify:
   - Empty result sets still produce a successful run
 """
 
+import sys
 import uuid
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock, patch, call
@@ -91,6 +92,7 @@ def _mock_sync_deps(monkeypatch):
     monkeypatch.setattr(config, "MAX_TICKETS", 0)  # unlimited
     monkeypatch.setattr(config, "SAFETY_BUFFER_MINUTES", 10)
     monkeypatch.setattr(config, "INITIAL_BACKFILL_DAYS", 0)
+    monkeypatch.setattr(config, "SYNC_CUSTOMER_ATTRIBUTES", False, raising=False)
 
 
 def test_incremental_sync_reads_watermark_and_applies_buffer(_mock_sync_deps, monkeypatch):
@@ -300,3 +302,96 @@ def test_ticket_id_sync_does_not_advance_watermark(_mock_sync_deps, monkeypatch)
     assert result["status"] == "completed"
     final_call = sync_state_calls[-1]
     assert final_call["is_success"] is False
+
+
+def test_fetch_open_ticket_numbers_missing_sentiment_returns_numbers():
+    import db
+
+    with patch("db.fetch_all", return_value=[("110016",), ("110501",)]):
+        result = db.fetch_open_ticket_numbers_missing_sentiment()
+
+    assert result == ["110016", "110501"]
+
+
+def test_fetch_open_ticket_numbers_missing_complexity_returns_numbers():
+    import db
+
+    with patch("db.fetch_all", return_value=[("110844",), ("110893",)]):
+        result = db.fetch_open_ticket_numbers_missing_complexity()
+
+    assert result == ["110844", "110893"]
+
+
+def test_main_enrich_open_missing_sentiment_targets_only_missing(monkeypatch):
+    import run_ingest
+
+    log_fh = MagicMock()
+
+    monkeypatch.setattr(sys, "argv", [
+        "run_ingest.py",
+        "sync",
+        "--ticket",
+        "110016",
+        "--enrich-open-missing-sentiment",
+    ])
+
+    with patch("run_ingest._start_log_file", return_value=log_fh), \
+         patch("db._is_enabled", return_value=True), \
+         patch("db.migrate", return_value=[]), \
+         patch("run_ingest._sync", return_value={
+             "status": "completed",
+             "upserted_ids": [],
+             "new_ticket_ids": [],
+             "fetched_open_ids": [],
+         }), \
+         patch("run_ingest.rebuild_for_tickets"), \
+         patch("db.fetch_open_ticket_numbers_missing_sentiment", return_value=["110016", "110501"]), \
+         patch("db.ticket_ids_for_numbers", return_value={"110016": 21038155, "110501": 21040001}), \
+         patch("run_ingest.enrich_tickets") as enrich_mock:
+        run_ingest.main()
+
+    enrich_mock.assert_called_once_with(
+        [21038155, 21040001],
+        sentiment=True,
+        complexity=False,
+        full_enrichment=False,
+    )
+    log_fh.close.assert_called()
+
+
+def test_main_enrich_open_missing_complexity_targets_only_missing(monkeypatch):
+    import run_ingest
+
+    log_fh = MagicMock()
+
+    monkeypatch.setattr(sys, "argv", [
+        "run_ingest.py",
+        "sync",
+        "--ticket",
+        "110844",
+        "--enrich-open-missing-complexity",
+    ])
+
+    with patch("run_ingest._start_log_file", return_value=log_fh), \
+         patch("db._is_enabled", return_value=True), \
+         patch("db.migrate", return_value=[]), \
+         patch("run_ingest._sync", return_value={
+             "status": "completed",
+             "upserted_ids": [],
+             "new_ticket_ids": [],
+             "fetched_open_ids": [],
+         }), \
+         patch("run_ingest.rebuild_for_tickets") as rebuild_mock, \
+         patch("db.fetch_open_ticket_numbers_missing_complexity", return_value=["110844", "110893"]), \
+         patch("db.ticket_ids_for_numbers", return_value={"110844": 21092873, "110893": 21094000}), \
+         patch("run_ingest.enrich_tickets") as enrich_mock:
+        run_ingest.main()
+
+    rebuild_mock.assert_any_call([21092873, 21094000])
+    enrich_mock.assert_called_once_with(
+        [21092873, 21094000],
+        sentiment=False,
+        complexity=True,
+        full_enrichment=False,
+    )
+    log_fh.close.assert_called()

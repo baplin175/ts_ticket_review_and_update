@@ -107,3 +107,33 @@ def extract_action_row(action_raw: dict, tid: int, cleaned: dict) -> dict:
         "is_customer_visible": cleaned.get("is_visible"),
         "source_payload": action_raw,
     }
+
+
+def _parse_ts_bool(value):
+    if value is None:
+        return None
+    v = str(value).strip().lower()
+    if v in {"true", "t", "1", "yes", "y"}:
+        return True
+    if v in {"false", "f", "0", "no", "n"}:
+        return False
+    return None
+
+
+def extract_customer_row(customer_raw: dict, now: datetime) -> dict:
+    """Build a dict suitable for db.upsert_customer_attribute from raw TS customer data."""
+    customer_id = str(customer_raw.get("ID") or customer_raw.get("CustomerID") or "").strip()
+    customer_name = str(customer_raw.get("Name") or "").strip()
+    key_acct_raw = customer_raw.get("KeyAcct")
+    return {
+        "customer_id": int(customer_id) if customer_id else None,
+        "customer_name": customer_name or None,
+        "is_active": _parse_ts_bool(customer_raw.get("IsActive")),
+        "key_acct": _parse_ts_bool(key_acct_raw),
+        "key_acct_raw": str(key_acct_raw).strip() if key_acct_raw is not None else None,
+        "default_support_group": str(customer_raw.get("DefaultSupportGroup") or "").strip() or None,
+        "date_created": parse_ts_datetime(customer_raw.get("DateCreated")),
+        "date_modified": parse_ts_datetime(customer_raw.get("DateModified")),
+        "source_payload": customer_raw,
+        "now": now,
+    }

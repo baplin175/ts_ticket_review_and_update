@@ -26,6 +26,7 @@ from pass4.mechanism_classifier import (
     validate_intervention_action,
     Pass4ParseError,
 )
+from prompt_store import get_prompt
 from pipeline.blob_store import (
     upload_file as blob_upload_file,
     upload_json as blob_upload_json,
@@ -37,10 +38,6 @@ from pipeline.blob_store import (
 
 # ── Prompt helpers ───────────────────────────────────────────────────
 
-_PROMPTS_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts"
-)
-
 _VIOLATION_RE = re.compile(
     r"^.*(?:Ticket\s+\d+\s+is\s+in\s+violation|"
     r"Warning:\s*Ticket\s+\d+|"
@@ -49,9 +46,8 @@ _VIOLATION_RE = re.compile(
 )
 
 
-def _load_prompt(filename: str) -> str:
-    with open(os.path.join(_PROMPTS_DIR, filename), "r", encoding="utf-8") as f:
-        return f.read()
+def _load_prompt(prompt_key: str) -> str:
+    return get_prompt(prompt_key, allow_fallback=True)["content"]
 
 
 def _strip_violation_warnings(text: str) -> str:
@@ -77,7 +73,7 @@ def run_pass1_csv(
 
     Returns the number of rows processed.
     """
-    template = _load_prompt("pass1_phenomenon.txt")
+    template = _load_prompt("pass1_phenomenon")
     rows = _read_csv(input_csv)
     total = len(rows)
 
@@ -151,7 +147,7 @@ def run_pass3_csv(
     Skips rows with LOW confidence or missing canonical_failure.
     Returns the number of rows processed.
     """
-    template = _load_prompt("pass3_mechanism.txt")
+    template = _load_prompt("pass3_mechanism")
 
     pass1_rows = _read_csv(pass1_csv)
     thread_map = {r["ticket_id"]: r.get("full_thread_text", "") for r in _read_csv(input_csv)}
@@ -231,7 +227,7 @@ def run_pass4_csv(
     Skips rows that did not succeed in Pass 3.
     Returns the number of rows processed.
     """
-    template = _load_prompt("pass4_intervention.txt")
+    template = _load_prompt("pass4_intervention")
 
     pass3_rows = _read_csv(pass3_csv)
     total = len(pass3_rows)

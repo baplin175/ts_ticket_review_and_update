@@ -1,32 +1,25 @@
-"""
-Pass 4 — Intervention Mapper.
-
-Orchestrates the LLM call for a single ticket: builds the prompt,
-calls Matcha, parses and validates the response, and stores results in the DB.
-"""
-
-import os
+"""Pass 4 — Intervention Mapper."""
 
 from config import MATCHA_MISSION_ID
-from passes.runtime import load_prompt_template, process_ticket_pass
+from matcha_client import call_matcha
+from passes.runtime import process_ticket_pass
 from pass4.mechanism_classifier import (
     parse_pass4_response,
     validate_intervention_action,
 )
-
-PROMPT_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "prompts",
-    "pass4_intervention.txt",
-)
+from prompt_store import get_prompt
 
 PASS_NAME = "pass4_intervention"
-PROMPT_VERSION = "2"
+DEFAULT_PROMPT_VERSION = "2"
 MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
 
 
+def load_prompt_record() -> dict:
+    return get_prompt(PASS_NAME, allow_fallback=False)
+
+
 def _load_prompt_template() -> str:
-    return load_prompt_template(PROMPT_PATH)
+    return load_prompt_record()["content"]
 
 
 def _build_prompt(template: str, mechanism: str) -> str:
@@ -38,6 +31,7 @@ def process_ticket(
     ticket_id: int,
     mechanism: str,
     prompt_template: str,
+    prompt_version: str = DEFAULT_PROMPT_VERSION,
     *,
     force: bool = False,
 ) -> dict:
@@ -71,7 +65,7 @@ def process_ticket(
     return process_ticket_pass(
         ticket_id,
         pass_name=PASS_NAME,
-        prompt_version=PROMPT_VERSION,
+        prompt_version=prompt_version,
         model_name=MODEL_NAME,
         input_text=mechanism,
         prompt_text=full_prompt,
@@ -85,4 +79,5 @@ def process_ticket(
         build_success_update=_success_update,
         build_result_update=_result_update,
         validate_parsed=_validate_parsed,
+        call_matcha_fn=call_matcha,
     )

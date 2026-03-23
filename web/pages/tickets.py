@@ -12,7 +12,7 @@ from dash import callback, ctx, dcc, html, Input, Output, State, no_update
 from dash_iconify import DashIconify
 
 from .. import data
-from ..renderer import grid_with_export
+from ..renderer import grid_with_export, ticket_number_column
 
 # Path to run_ingest.py in the project root (web/pages/ → web/ → project root)
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -66,12 +66,7 @@ def _run_sync_in_background():
 # ── Column definitions ───────────────────────────────────────────────
 
 COLUMN_DEFS = [
-    {
-        "field": "ticket_number",
-        "headerName": "Ticket #",
-        "width": 110,
-        "pinned": "left",
-    },
+    ticket_number_column(width=110, pinned="left"),
     {
         "field": "ticket_name",
         "headerName": "Name",
@@ -160,7 +155,7 @@ DEFAULT_COL_DEF = {
 _OPEN_FILTER_MODEL = {
     "status": {
         "filterType": "text",
-        "type": "notEqual",
+        "type": "notContains",
         "filter": "Closed",
     }
 }
@@ -170,34 +165,29 @@ _OPEN_FILTER_MODEL = {
 
 def _build_report_chips(reports):
     """Build a row of clickable report chips with delete buttons."""
+    return []
+
+
+def normalize_saved_reports(reports):
     if not reports:
         return []
-    chips = []
-    for r in reports:
-        chips.append(
-            dmc.Group(
-                [
-                    dmc.Button(
-                        r["name"],
-                        id={"type": "report-chip", "index": r["id"]},
-                        variant="light",
-                        color="violet",
-                        size="compact-sm",
-                        radius="xl",
-                    ),
-                    dmc.ActionIcon(
-                        DashIconify(icon="tabler:x", width=12),
-                        id={"type": "report-delete", "index": r["id"]},
-                        variant="subtle",
-                        color="gray",
-                        size="xs",
-                        radius="xl",
-                    ),
-                ],
-                gap=2,
-            )
-        )
-    return chips
+    if isinstance(reports, dict):
+        reports = list(reports.values())
+    return sorted(reports, key=lambda r: (r.get("name") or "").lower())
+
+
+def build_report_tabs(reports):
+    report_tabs = [
+        dmc.TabsTab(report["name"], value=f"report:{report['id']}")
+        for report in normalize_saved_reports(reports)
+    ]
+    return [
+        dmc.TabsList([
+            dmc.TabsTab("Open", value="open"),
+            dmc.TabsTab("All Tickets", value="all"),
+            *report_tabs,
+        ]),
+    ]
 
 
 def tickets_layout():
@@ -233,11 +223,7 @@ def tickets_layout():
             # Saved reports bar
             dmc.Group(
                 [
-                    dmc.Group(
-                        _build_report_chips(reports),
-                        id="report-chip-group",
-                        gap="xs",
-                    ),
+                    html.Div(id="report-chip-group", style={"display": "none"}),
                     dmc.Group(
                         [
                             dmc.Button(
@@ -246,6 +232,15 @@ def tickets_layout():
                                 leftSection=DashIconify(icon="tabler:device-floppy", width=16),
                                 variant="light",
                                 size="compact-sm",
+                            ),
+                            dmc.Button(
+                                "Delete Report",
+                                id="delete-report-btn",
+                                leftSection=DashIconify(icon="tabler:trash", width=16),
+                                variant="subtle",
+                                color="red",
+                                size="compact-sm",
+                                disabled=True,
                             ),
                             dmc.Button(
                                 "Clear Filters",
@@ -288,7 +283,7 @@ def tickets_layout():
             ),
             # Hidden stores
             dcc.Store(id="report-filter-store", data={}),
-            dcc.Store(id="saved-reports-store", data={str(r["id"]): r["filter_model"] for r in reports}),
+            dcc.Store(id="saved-reports-store", data={str(r["id"]): r for r in reports}),
             # One-shot trigger to restore persisted filters after mount
             dcc.Interval(id="filter-restore-trigger", interval=200, max_intervals=1),
             # Sync progress panel (above the grid so it's visible)
@@ -296,12 +291,7 @@ def tickets_layout():
             dcc.Interval(id="sync-poll-interval", interval=800, disabled=True),
             dcc.Interval(id="sync-dismiss-interval", interval=5000, disabled=True),
             dmc.Tabs(
-                [
-                    dmc.TabsList([
-                        dmc.TabsTab("Open", value="open"),
-                        dmc.TabsTab("All Tickets", value="all"),
-                    ]),
-                ],
+                build_report_tabs(reports),
                 id="ticket-view-tabs",
                 value="open",
             ),
@@ -311,6 +301,7 @@ def tickets_layout():
                     rowData=rows,
                     columnDefs=COLUMN_DEFS,
                     defaultColDef=DEFAULT_COL_DEF,
+                    getRowId="params.data.ticket_id",
                     dashGridOptions={
                         "rowSelection": "single",
                         "pagination": True,
@@ -462,24 +453,68 @@ def auto_dismiss_sync_panel(_n):
 
 @callback(
     Output("ticket-grid", "filterModel", allow_duplicate=True),
-    Output("ticket-count-badge", "children", allow_duplicate=True),
     Input("ticket-view-tabs", "value"),
     State("ticket-grid", "rowData"),
     State("ticket-grid", "filterModel"),
+    State("saved-reports-store", "data"),
     prevent_initial_call=True,
 )
-def switch_tab(tab_value, all_rows, current_filter):
+def switch_tab(tab_value, all_rows, current_filter, saved_reports):
     """Apply open filter on initial load and when switching tabs.
 
-    Merges the status filter into (or removes it from) the existing
-    filterModel so that user-applied column filters are preserved.
+    Tabs define their own baseline filter models. Saved report tabs apply the
+    saved filter set exactly; the built-in Open and All Tickets tabs reset to
+    their own defaults instead of inheriting filters from the previously
+    selected report tab.
+
+    The badge count is updated separately by the update_badge_from_grid
+    callback which watches virtualRowData.
     """
-    merged = dict(current_filter) if current_filter else {}
+    saved_reports = saved_reports or {}
     if tab_value == "open":
-        merged["status"] = _OPEN_FILTER_MODEL["status"]
-        count = sum(1 for r in (all_rows or []) if (r.get("status") or "").lower() != "closed")
-        return merged, f"{count} open tickets"
-    # "all" tab — remove the status filter but keep everything else
-    merged.pop("status", None)
-    count = len(all_rows or [])
-    return merged, f"{count} tickets"
+        return dict(_OPEN_FILTER_MODEL)
+    if tab_value and str(tab_value).startswith("report:"):
+        report_id = str(tab_value).split(":", 1)[1]
+        report = saved_reports.get(report_id) or saved_reports.get(int(report_id), {})
+        filter_model = (report or {}).get("filter_model") or {}
+        return filter_model
+    # "all" tab — clear any report-specific or prior-tab filters
+    return {}
+
+
+@callback(
+    Output("ticket-count-badge", "children", allow_duplicate=True),
+    Input("ticket-grid", "virtualRowData"),
+    prevent_initial_call=True,
+)
+def update_badge_from_grid(virtual_rows):
+    """Keep the ticket-count badge in sync with the grid's filtered row count."""
+    count = len(virtual_rows) if virtual_rows else 0
+    return f"{count} tickets"
+
+
+@callback(
+    Output("report-chip-group", "children"),
+    Output("ticket-view-tabs", "children"),
+    Input("saved-reports-store", "data"),
+)
+def render_saved_report_navigation(saved_reports):
+    reports = normalize_saved_reports(saved_reports)
+    return _build_report_chips(reports), build_report_tabs(reports)
+
+
+@callback(
+    Output("delete-report-btn", "disabled"),
+    Output("delete-report-btn", "children"),
+    Input("ticket-view-tabs", "value"),
+    State("saved-reports-store", "data"),
+)
+def update_delete_report_button(tab_value, saved_reports):
+    if not tab_value or not str(tab_value).startswith("report:"):
+        return True, "Delete Report"
+    report_id = str(tab_value).split(":", 1)[1]
+    report = (saved_reports or {}).get(report_id) or (saved_reports or {}).get(int(report_id), {})
+    report_name = (report or {}).get("name")
+    if not report_name:
+        return True, "Delete Report"
+    return False, f"Delete {report_name}"

@@ -27,14 +27,10 @@ from pathlib import Path
 
 from config import FORCE_ENRICHMENT, OUTPUT_DIR, RUN_COMPLEXITY, TARGET_TICKETS, MATCHA_MISSION_ID, TS_WRITEBACK, SKIP_OUTPUT_FILES
 from matcha_client import call_matcha
+from prompt_store import get_prompt
 from ts_client import update_ticket
 
-PROMPT_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "prompts", "complexity.md"
-)
-
 PROMPT_NAME = "complexity"
-PROMPT_VERSION = "1"
 MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
 
 
@@ -47,8 +43,7 @@ def _run_timestamp() -> str:
 
 
 def _load_prompt() -> str:
-    with open(PROMPT_PATH, "r", encoding="utf-8") as f:
-        return f.read()
+    return get_prompt(PROMPT_NAME, allow_fallback=True)["content"]
 
 
 def _latest_activities_file() -> str | None:
@@ -153,7 +148,7 @@ def _should_skip(ticket_id: int, force: bool) -> bool:
 
 
 def _persist_to_db(ticket_id: int, ticket_number: str | None, technical_core_hash: str | None,
-                   result: dict, raw_reply: str) -> None:
+                   result: dict, raw_reply: str, prompt_version: str) -> None:
     """Insert complexity result into DB."""
     import db
     if not db._is_enabled():
@@ -177,7 +172,7 @@ def _persist_to_db(ticket_id: int, ticket_number: str | None, technical_core_has
         technical_core_hash=technical_core_hash,
         model_name=MODEL_NAME,
         prompt_name=PROMPT_NAME,
-        prompt_version=PROMPT_VERSION,
+        prompt_version=prompt_version,
         intrinsic_complexity=_safe_int(result.get("intrinsic_complexity")),
         coordination_load=_safe_int(result.get("coordination_load")),
         elapsed_drag=_safe_int(result.get("elapsed_drag")),
@@ -207,6 +202,11 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
     if not target_tickets:
         _log("[complexity] TARGET_TICKET is required. Set it as an env var.")
         sys.exit(1)
+
+    prompt_record = get_prompt(PROMPT_NAME, allow_fallback=True)
+    prompt_template = prompt_record["content"]
+    prompt_version = prompt_record["version"]
+    _log(f"[complexity] Prompt: {PROMPT_NAME} v{prompt_version}")
 
     # Check if DB mode is available
     try:
@@ -257,7 +257,6 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
         sys.exit(1)
     _log(f"[complexity] Scoring {len(tickets)} ticket(s).")
 
-    prompt_template = _load_prompt()
     all_results = []
     total_tickets = len(tickets)
 
@@ -291,7 +290,7 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
         # 5. Persist to DB
         tid_int = tid_map.get(tnum)
         if tid_int and db_enabled:
-            _persist_to_db(tid_int, tnum, hash_map.get(tnum), result, raw_reply)
+            _persist_to_db(tid_int, tnum, hash_map.get(tnum), result, raw_reply, prompt_version)
             _log(f"  [complexity] Persisted to DB for ticket {tnum}.")
 
     _log(f"[complexity] Scored {len(all_results)}/{len(tickets)} ticket(s). Skipped {len(skipped)}.")

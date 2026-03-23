@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import requests
+
 import db
 from activity_cleaner import clean_activity_dict
 from ts_client import fetch_all_activities, fetch_ticket_by_id
@@ -11,10 +13,37 @@ from ts_client import fetch_all_activities, fetch_ticket_by_id
 from .extractors import extract_action_row, extract_ticket_row
 
 
-def reconcile_closed(upserted_ids: list[int], *, verbose: bool = False) -> list[int]:
-    """Refresh tickets that are still open in DB but absent from the latest full sync."""
+def _mark_deleted(ticket_id: int, now: datetime) -> None:
+    """Mark a ticket as deleted/closed in the DB when TS returns 400 (ticket no longer exists)."""
+    conn = db.get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE tickets
+                      SET status    = 'Deleted',
+                          closed_at = %(now)s,
+                          last_ingested_at = %(now)s,
+                          last_seen_at     = %(now)s
+                    WHERE ticket_id = %(tid)s;""",
+                {"tid": ticket_id, "now": now},
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        db.put_conn(conn)
+
+
+def reconcile_closed(synced_open_ids: list[int], *, verbose: bool = False) -> list[int]:
+    """Refresh tickets that are still open in DB but absent from the latest TS open-ticket fetch.
+
+    *synced_open_ids* should contain ALL ticket IDs that TeamSupport reported
+    as open (before any date-based filtering), so the diff accurately
+    identifies tickets that TS no longer considers open.
+    """
     db_open_ids = set(db.get_open_ticket_ids())
-    synced_ids = set(upserted_ids)
+    synced_ids = set(synced_open_ids)
     missing_ids = sorted(db_open_ids - synced_ids)
 
     if not missing_ids:
@@ -58,6 +87,23 @@ def reconcile_closed(upserted_ids: list[int], *, verbose: bool = False) -> list[
             label = f"CLOSED ({closed})" if closed else f"status={status}"
             if verbose:
                 print(f"  [reconcile] #{tnum} (id={tid}): {label}", flush=True)
+
+        except requests.exceptions.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 400:
+                # 400 = ticket deleted/merged in TS — mark closed in DB so it
+                # doesn't reappear in reconcile every sync.
+                try:
+                    _mark_deleted(tid, now)
+                    reconciled.append(tid)
+                    print(
+                        f"  [reconcile] ticket_id={tid}: TS returned 400 (deleted/merged) "
+                        f"— marked as Deleted in DB.",
+                        flush=True,
+                    )
+                except Exception as inner:
+                    print(f"  [reconcile] ERROR marking ticket_id={tid} as deleted: {inner}", flush=True)
+            else:
+                print(f"  [reconcile] ERROR ticket_id={tid}: {exc}", flush=True)
 
         except Exception as exc:
             print(f"  [reconcile] ERROR ticket_id={tid}: {exc}", flush=True)

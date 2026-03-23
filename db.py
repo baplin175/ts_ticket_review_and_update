@@ -257,6 +257,76 @@ def upsert_ticket(ticket: Dict[str, Any], *, now: Optional[datetime] = None) -> 
         put_conn(conn)
 
 
+def upsert_customer_attribute(customer: Dict[str, Any], *, now: Optional[datetime] = None) -> None:
+    """Insert or update a TeamSupport customer metadata row."""
+    now = now or datetime.now(timezone.utc)
+    customer_id = customer.get("customer_id")
+    customer_name = customer.get("customer_name")
+    if not customer_id or not customer_name:
+        return
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO customer_attributes (
+                    customer_id,
+                    customer_name,
+                    is_active,
+                    key_acct,
+                    key_acct_raw,
+                    default_support_group,
+                    date_created,
+                    date_modified,
+                    source_payload,
+                    first_synced_at,
+                    last_synced_at
+                ) VALUES (
+                    %(customer_id)s,
+                    %(customer_name)s,
+                    %(is_active)s,
+                    %(key_acct)s,
+                    %(key_acct_raw)s,
+                    %(default_support_group)s,
+                    %(date_created)s,
+                    %(date_modified)s,
+                    %(source_payload)s,
+                    %(now)s,
+                    %(now)s
+                )
+                ON CONFLICT (customer_id) DO UPDATE SET
+                    customer_name = EXCLUDED.customer_name,
+                    is_active = EXCLUDED.is_active,
+                    key_acct = EXCLUDED.key_acct,
+                    key_acct_raw = EXCLUDED.key_acct_raw,
+                    default_support_group = EXCLUDED.default_support_group,
+                    date_created = COALESCE(EXCLUDED.date_created, customer_attributes.date_created),
+                    date_modified = COALESCE(EXCLUDED.date_modified, customer_attributes.date_modified),
+                    source_payload = COALESCE(EXCLUDED.source_payload, customer_attributes.source_payload),
+                    last_synced_at = %(now)s;
+            """, {
+                "customer_id": customer_id,
+                "customer_name": customer_name,
+                "is_active": customer.get("is_active"),
+                "key_acct": customer.get("key_acct"),
+                "key_acct_raw": customer.get("key_acct_raw"),
+                "default_support_group": customer.get("default_support_group"),
+                "date_created": customer.get("date_created"),
+                "date_modified": customer.get("date_modified"),
+                "source_payload": (
+                    psycopg2.extras.Json(customer.get("source_payload"))
+                    if customer.get("source_payload") is not None else None
+                ),
+                "now": now,
+            })
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
 def upsert_action(action: Dict[str, Any], *, now: Optional[datetime] = None) -> None:
     """Insert or update a ticket_actions row.  Idempotent on action_id.
 
@@ -875,6 +945,7 @@ def fetch_ticket_numbers_by_status(status: str, *, exclude_closed: bool = False)
                  JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
                 WHERE COALESCE(t.status, '') NOT IN ('Closed', 'Closed with Survey', 'Open')
                   AND COALESCE(t.assignee, '') != 'Marketing'
+                  AND COALESCE(t.group_name, '') != 'Marketing'
                   AND r.thread_hash IS NOT NULL
                 ORDER BY t.ticket_number;""",
         )
@@ -886,6 +957,7 @@ def fetch_ticket_numbers_by_status(status: str, *, exclude_closed: bool = False)
                 WHERE t.closed_at IS NULL
                   AND COALESCE(t.status, '') NOT IN ('Closed', 'Closed with Survey', 'Open')
                   AND COALESCE(t.assignee, '') != 'Marketing'
+                  AND COALESCE(t.group_name, '') != 'Marketing'
                   AND r.thread_hash IS NOT NULL
                 ORDER BY t.ticket_number;""",
         )
@@ -896,10 +968,55 @@ def fetch_ticket_numbers_by_status(status: str, *, exclude_closed: bool = False)
                  JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
                 WHERE t.status = %s AND t.status != 'Open'
                   AND COALESCE(t.assignee, '') != 'Marketing'
+                  AND COALESCE(t.group_name, '') != 'Marketing'
                   AND r.thread_hash IS NOT NULL
                 ORDER BY t.ticket_number;""",
             (status,),
         )
+    return [str(r[0]) for r in rows]
+
+
+def fetch_open_ticket_numbers_missing_sentiment() -> list[str]:
+    """Return open ticket_numbers whose latest sentiment value is missing."""
+    rows = fetch_all(
+        """WITH latest_sentiment AS (
+               SELECT DISTINCT ON (ticket_id) ticket_id, frustrated
+               FROM ticket_sentiment
+               ORDER BY ticket_id, scored_at DESC
+           )
+           SELECT t.ticket_number
+             FROM tickets t
+             JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
+             LEFT JOIN latest_sentiment s ON s.ticket_id = t.ticket_id
+            WHERE t.closed_at IS NULL
+              AND COALESCE(t.status, '') NOT IN ('Closed', 'Closed with Survey', 'Open')
+              AND COALESCE(t.assignee, '') != 'Marketing'
+              AND COALESCE(t.group_name, '') != 'Marketing'
+              AND r.thread_hash IS NOT NULL
+              AND NULLIF(COALESCE(s.frustrated, ''), '') IS NULL
+            ORDER BY t.ticket_number;""",
+    )
+    return [str(r[0]) for r in rows]
+
+
+def fetch_open_ticket_numbers_missing_complexity() -> list[str]:
+    """Return open ticket_numbers whose latest complexity value is missing."""
+    rows = fetch_all(
+        """WITH latest_complexity AS (
+               SELECT DISTINCT ON (ticket_id) ticket_id, overall_complexity
+               FROM ticket_complexity_scores
+               ORDER BY ticket_id, scored_at DESC
+           )
+           SELECT t.ticket_number
+             FROM tickets t
+             LEFT JOIN latest_complexity c ON c.ticket_id = t.ticket_id
+            WHERE t.closed_at IS NULL
+              AND COALESCE(t.status, '') NOT IN ('Closed', 'Closed with Survey', 'Open')
+              AND COALESCE(t.assignee, '') != 'Marketing'
+              AND COALESCE(t.group_name, '') != 'Marketing'
+              AND c.overall_complexity IS NULL
+            ORDER BY t.ticket_number;""",
+    )
     return [str(r[0]) for r in rows]
 
 
@@ -909,7 +1026,7 @@ def get_open_ticket_ids() -> list[int]:
     Excludes status='Open' tickets which are user test tickets.
     """
     rows = fetch_all(
-        "SELECT ticket_id FROM tickets WHERE closed_at IS NULL AND COALESCE(status, '') != 'Open' AND COALESCE(assignee, '') != 'Marketing' ORDER BY ticket_id;"
+        "SELECT ticket_id FROM tickets WHERE closed_at IS NULL AND COALESCE(status, '') != 'Open' AND COALESCE(assignee, '') != 'Marketing' AND COALESCE(group_name, '') != 'Marketing' ORDER BY ticket_id;"
     )
     return [r[0] for r in rows]
 

@@ -3,21 +3,16 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
 from config import MATCHA_MISSION_ID
 from matcha_client import call_matcha
+from prompt_store import get_prompt
 
 from . import data
 
-PROMPT_VERSION = "1"
+PROMPT_NAME = "customer_health_explanation"
 MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
-PROMPT_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "prompts",
-    "customer_health_explanation.md",
-)
 
 
 def build_group_filter_label(selected_groups: list[str], available_groups: list[str]) -> str:
@@ -40,8 +35,7 @@ def _find_previous_row(history: list[dict[str, Any]], as_of_date: str) -> dict[s
 
 
 def _load_prompt() -> str:
-    with open(PROMPT_PATH, "r", encoding="utf-8") as f:
-        return f.read()
+    return get_prompt(PROMPT_NAME, allow_fallback=False)["content"]
 
 
 def _build_prompt(
@@ -97,13 +91,14 @@ def generate_customer_health_explanation(
         contributors=contributors,
     )
     response_text = call_matcha(prompt, timeout=600)
+    prompt_record = get_prompt(PROMPT_NAME, allow_fallback=False)
     return data.save_customer_health_explanation(
         customer=customer,
         as_of_date=as_of_date,
         group_filter_json=selected_groups,
         group_filter_label=group_filter_label,
         model_name=MODEL_NAME,
-        prompt_version=PROMPT_VERSION,
+        prompt_version=prompt_record["version"],
         explanation_text=response_text.strip(),
         raw_context_json={
             "current_row": current_row,

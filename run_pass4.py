@@ -30,20 +30,30 @@ from config import OUTPUT_DIR
 from pipeline_stages import stage_title
 from pass4.intervention_mapper import (
     PASS_NAME,
-    PROMPT_VERSION,
     MODEL_NAME,
+    load_prompt_record,
+    _load_prompt_template,
     process_ticket,
 )
-from pass4.intervention_mapper import _load_prompt_template
 from pass4.intervention_aggregator import (
     aggregate_from_db,
     aggregate_from_results,
     write_artifacts,
 )
+from prompt_store import get_prompt
 
 # Upstream dependency: user-facing Pass 2, internal pass3_mechanism
 PASS3_PASS_NAME = "pass3_mechanism"
-PASS3_PROMPT_VERSION = "3"
+DEFAULT_PROMPT_VERSION = "2"
+DEFAULT_PASS3_PROMPT_VERSION = "3"
+
+
+def _coerce_prompt_version(value, default: str) -> str:
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return value
+    return default
 
 
 def _log(msg: str) -> None:
@@ -87,16 +97,19 @@ def main(
         _log(f"[pass4] Top fixes: {len(aggregation['top_engineering_fixes'])}")
         return []
 
+    prompt_record = load_prompt_record()
+    upstream_prompt = get_prompt(PASS3_PASS_NAME, allow_fallback=False)
     prompt_template = _load_prompt_template()
-    _log(f"[pass4] Loaded prompt from {os.path.basename(prompt_template) if isinstance(prompt_template, str) and os.path.exists(prompt_template) else 'pass4_intervention.txt'}")
-    _log(f"[pass4] Stage: {stage_title('intervention')}  Internal pass: {PASS_NAME}  Prompt version: {PROMPT_VERSION}  Model: {MODEL_NAME}")
-    _log(f"[pass4] Requires Pass 2: {PASS3_PASS_NAME} v{PASS3_PROMPT_VERSION}")
+    prompt_version = _coerce_prompt_version(prompt_record.get("version"), DEFAULT_PROMPT_VERSION)
+    pass3_prompt_version = _coerce_prompt_version(upstream_prompt.get("version"), DEFAULT_PASS3_PROMPT_VERSION)
+    _log(f"[pass4] Stage: {stage_title('intervention')}  Internal pass: {PASS_NAME}  Prompt version: {prompt_version}  Model: {MODEL_NAME}")
+    _log(f"[pass4] Requires Pass 2: {PASS3_PASS_NAME} v{pass3_prompt_version}")
 
     # Fetch eligible tickets (those with successful Pass 2 mechanism)
     rows = db.fetch_pending_pass4_tickets(
-        PROMPT_VERSION,
+        prompt_version,
         pass3_pass_name=PASS3_PASS_NAME,
-        pass3_prompt_version=PASS3_PROMPT_VERSION,
+        pass3_prompt_version=pass3_prompt_version,
         limit=limit,
         ticket_ids=ticket_ids,
         failed_only=failed_only,
@@ -111,12 +124,12 @@ def main(
             invalidated = db.invalidate_stale_pass4(
                 missing_p3,
                 pass3_pass_name=PASS3_PASS_NAME,
-                pass3_prompt_version=PASS3_PROMPT_VERSION,
+                pass3_prompt_version=pass3_prompt_version,
             )
             if invalidated:
-                _log(f"[pass4] Invalidated {invalidated} stale P4 result(s) for {len(missing_p3)} ticket(s) missing P3 v{PASS3_PROMPT_VERSION}.")
+                _log(f"[pass4] Invalidated {invalidated} stale P4 result(s) for {len(missing_p3)} ticket(s) missing P3 v{pass3_prompt_version}.")
             else:
-                _log(f"[pass4] {len(missing_p3)} ticket(s) skipped (no P3 v{PASS3_PROMPT_VERSION} mechanism).")
+                _log(f"[pass4] {len(missing_p3)} ticket(s) skipped (no P3 v{pass3_prompt_version} mechanism).")
 
     total = len(rows)
     if total == 0:
@@ -140,6 +153,7 @@ def main(
             ticket_id,
             mechanism,
             prompt_template,
+            prompt_version,
             force=force,
         )
         results.append(r)

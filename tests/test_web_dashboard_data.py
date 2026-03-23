@@ -145,6 +145,12 @@ def test_customer_health_excludes_marketing_and_sales():
         data.get_customer_health()
     sql = mocked.call_args[0][0]
     params = mocked.call_args[0][1]
+    assert "FROM customer_attributes" in sql
+    assert "WHERE is_active IS TRUE" in sql
+    assert "JOIN display_customers ON TRUE" in sql
+    assert "LEFT JOIN filtered" in sql
+    assert "COALESCE(ROUND(SUM(total_contribution), 2), 0)" in sql
+    assert "AS key_account" in sql
     assert "COALESCE(group_name, '') NOT IN (%s,%s)" in sql
     assert params == ("v1", "v1", "Marketing", "Sales (S)", "v1")
 

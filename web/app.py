@@ -11,14 +11,16 @@ Does NOT modify any existing project code or write to TeamSupport.
 
 import os
 import traceback
+from urllib.parse import parse_qs, quote
 
-from dash import Dash, html, callback, Input, Output, State, no_update, ALL  # noqa: E402
+from dash import Dash, html, callback, Input, Output, State, no_update, ALL, callback_context  # noqa: E402
 import dash_mantine_components as dmc                              # noqa: E402
 from dash import dcc                                               # noqa: E402
 from dash_iconify import DashIconify                               # noqa: E402
 
 if __package__ in (None, ""):
     import web.dashboard_registry as dashboard_registry            # noqa: E402
+    import web.data as data                                        # noqa: E402
     import web.renderer as renderer                               # noqa: E402
     from web.pages.dashboard_editor import register_callbacks as dashboard_editor_callbacks  # noqa: E402
     from web.pages.health import register_health_callbacks as health_callbacks  # noqa: E402
@@ -26,6 +28,7 @@ if __package__ in (None, ""):
     from web.pages.root_cause import register_callbacks as rc_callbacks  # noqa: E402
     from web.pages.ticket_detail import ticket_detail_layout, register_callbacks as td_callbacks  # noqa: E402
 else:
+    from . import data                                             # noqa: E402
     from . import dashboard_registry                               # noqa: E402
     from . import renderer                                         # noqa: E402
     from .pages.dashboard_editor import register_callbacks as dashboard_editor_callbacks  # noqa: E402
@@ -47,7 +50,7 @@ app = Dash(
         "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
     ],
 )
-app.title = "TS Ticket Analytics"
+app.title = "CS Analytics"
 server = app.server  # for gunicorn: gunicorn web.app:server
 
 # Register page-specific callbacks
@@ -79,7 +82,7 @@ app.layout = dmc.MantineProvider(
                     dmc.Group(
                         [
                             DashIconify(icon="tabler:chart-dots-3", width=28, color="#1c7ed6"),
-                            dmc.Text("TS Ticket Analytics", fw=700, size="lg"),
+                            dmc.Text("CS Analytics", fw=700, size="lg"),
                         ],
                         h="100%",
                         px="md",
@@ -110,8 +113,8 @@ def _page_error(message: str):
         children=message,
     )
 
-@callback(Output("page-content", "children"), Input("url", "pathname"))
-def display_page(pathname):
+@callback(Output("page-content", "children"), Input("url", "pathname"), State("url", "search"))
+def display_page(pathname, search):
     try:
         if pathname is None:
             pathname = "/"
@@ -120,7 +123,12 @@ def display_page(pathname):
         if pathname and pathname.startswith("/ticket/"):
             try:
                 ticket_id = int(pathname.split("/")[-1])
-                return ticket_detail_layout(ticket_id)
+                params = parse_qs((search or "").lstrip("?"))
+                back_tab = params.get("back_tab", [None])[0]
+                back_href = "/tickets"
+                if back_tab:
+                    back_href = f"/tickets?tab={quote(back_tab)}"
+                return ticket_detail_layout(ticket_id, back_href=back_href)
             except (ValueError, IndexError):
                 return dmc.Text("Invalid ticket ID.", c="red")
 
@@ -180,15 +188,46 @@ def render_sidebar_nav(pathname):
 
 @callback(
     Output("url", "pathname", allow_duplicate=True),
+    Output("url", "search", allow_duplicate=True),
     Input("ticket-grid", "selectedRows"),
+    State("ticket-view-tabs", "value"),
     prevent_initial_call=True,
 )
-def navigate_to_ticket(selected_rows):
+def navigate_to_ticket(selected_rows, current_tab):
     if selected_rows and len(selected_rows) > 0:
         tid = selected_rows[0].get("ticket_id")
         if tid is not None:
-            return f"/ticket/{tid}"
-    return no_update
+            return f"/ticket/{tid}", f"?back_tab={quote(str(current_tab or 'open'))}"
+    return no_update, no_update
+
+
+def _ticket_id_from_cell_click(cell_event):
+    if not isinstance(cell_event, dict):
+        return None
+    row = cell_event.get("data") or {}
+    col_id = cell_event.get("colId") or ((cell_event.get("colDef") or {}).get("field"))
+    if col_id is None:
+        value = cell_event.get("value")
+        ticket_number = row.get("ticket_number")
+        if value is not None and ticket_number is not None and str(value) == str(ticket_number):
+            col_id = "ticket_number"
+    if col_id != "ticket_number":
+        return None
+    return row.get("ticket_id")
+
+
+@callback(
+    Output("url", "pathname", allow_duplicate=True),
+    Output("url", "search", allow_duplicate=True),
+    Input("ticket-grid", "cellClicked", allow_optional=True),
+    State("ticket-view-tabs", "value"),
+    prevent_initial_call=True,
+)
+def navigate_from_ticket_grid_ticket_number(cell_event, current_tab):
+    tid = _ticket_id_from_cell_click(cell_event)
+    if tid is None:
+        return no_update, no_update
+    return f"/ticket/{tid}", f"?back_tab={quote(str(current_tab or 'open'))}"
 
 
 # ── Aging detail expand/collapse ─────────────────────────────────────
@@ -414,10 +453,12 @@ def toggle_save_modal(open_clicks, cancel_clicks, confirm_clicks):
     return False
 
 
-# ── Saved reports — persist to DB and refresh page ───────────────────
+# ── Saved reports — persist to DB and update tabs live ───────────────
 
 @callback(
-    Output("url", "pathname", allow_duplicate=True),
+    Output("saved-reports-store", "data", allow_duplicate=True),
+    Output("ticket-view-tabs", "value", allow_duplicate=True),
+    Output("report-name-input", "value"),
     Input("confirm-save-report-btn", "n_clicks"),
     State("report-name-input", "value"),
     State("ticket-grid", "filterModel"),
@@ -425,19 +466,21 @@ def toggle_save_modal(open_clicks, cancel_clicks, confirm_clicks):
 )
 def save_report(n_clicks, name, filter_model):
     if not n_clicks or not name or not name.strip():
-        return no_update
+        return no_update, no_update, no_update
     fm = filter_model or {}
     if not fm:
-        return no_update
-    data.save_report(name.strip(), fm)
-    # Refresh the page to pick up the new report chip
-    return "/tickets"
+        return no_update, no_update, no_update
+    saved = data.save_report(name.strip(), fm)
+    reports = {str(r["id"]): r for r in data.get_saved_reports()}
+    selected_tab = f"report:{saved['id']}" if saved else no_update
+    return reports, selected_tab, ""
 
 
 # ── Saved reports — apply filters from chip click ────────────────────
 
 @callback(
     Output("report-filter-store", "data"),
+    Output("ticket-view-tabs", "value", allow_duplicate=True),
     Input({"type": "report-chip", "index": ALL}, "n_clicks"),
     State("saved-reports-store", "data"),
     prevent_initial_call=True,
@@ -445,12 +488,14 @@ def save_report(n_clicks, name, filter_model):
 def apply_report_filter(n_clicks_list, saved_reports):
     from dash import ctx
     if not ctx.triggered_id or not any(n_clicks_list):
-        return no_update
+        return no_update, no_update
+    saved_reports = saved_reports or {}
     report_id = str(ctx.triggered_id["index"])
-    fm = saved_reports.get(report_id) or saved_reports.get(int(report_id), {})
+    report = saved_reports.get(report_id) or saved_reports.get(int(report_id), {})
+    fm = (report or {}).get("filter_model") or {}
     if not fm:
-        return no_update
-    return fm
+        return no_update, no_update
+    return fm, f"report:{report_id}"
 
 
 # Apply the filter model from the store to the grid via clientside callback
@@ -505,39 +550,56 @@ app.clientside_callback(
 
 # ── Restore ticket filters from session store on page load ───────────
 
-app.clientside_callback(
-    """function(n, sessionData) {
-        var nu = window.dash_clientside.no_update;
-        if (!sessionData || Object.keys(sessionData).length === 0) {
-            // No saved state — apply the default "open" filter
-            return [{status: {filterType: 'text', type: 'notEqual', filter: 'Closed'}}, 'open'];
-        }
-        var fm = sessionData.filterModel || {};
-        var tab = sessionData.tab || 'open';
-        return [fm, tab];
-    }""",
+@callback(
     Output("ticket-grid", "filterModel", allow_duplicate=True),
     Output("ticket-view-tabs", "value", allow_duplicate=True),
     Input("filter-restore-trigger", "n_intervals"),
     State("ticket-filter-session", "data"),
+    State("url", "search"),
     prevent_initial_call=True,
 )
+def restore_ticket_filters(_n, session_data, search):
+    open_filter = {
+        "status": {"filterType": "text", "type": "doesNotContain", "filter": "Closed"}
+    }
+    params = parse_qs((search or "").lstrip("?"))
+    explicit_tab = params.get("tab", [None])[0]
+    if explicit_tab:
+        if explicit_tab == "open":
+            return open_filter, "open"
+        filter_model = (session_data or {}).get("filterModel") or {}
+        return filter_model, explicit_tab
+
+    if not session_data:
+        return open_filter, "open"
+
+    filter_model = session_data.get("filterModel") or {}
+    tab_value = session_data.get("tab") or "open"
+    if tab_value == "open":
+        return open_filter, "open"
+    return filter_model, tab_value
 
 
-# ── Saved reports — delete via right-click (long press on pill) ──────
+# ── Saved reports — delete active saved-report tab ───────────────────
 
 @callback(
-    Output("url", "pathname", allow_duplicate=True),
-    Input({"type": "report-delete", "index": ALL}, "n_clicks"),
+    Output("saved-reports-store", "data", allow_duplicate=True),
+    Output("ticket-view-tabs", "value", allow_duplicate=True),
+    Input("delete-report-btn", "n_clicks"),
+    State("ticket-view-tabs", "value"),
+    State("saved-reports-store", "data"),
     prevent_initial_call=True,
 )
-def delete_report(n_clicks_list):
-    from dash import ctx
-    if not ctx.triggered_id or not any(n_clicks_list):
-        return no_update
-    report_id = ctx.triggered_id["index"]
+def delete_report(n_clicks, active_tab, saved_reports):
+    if not n_clicks or not active_tab or not str(active_tab).startswith("report:"):
+        return no_update, no_update
+    report_id = str(active_tab).split(":", 1)[1]
+    report = (saved_reports or {}).get(report_id) or (saved_reports or {}).get(int(report_id), {})
+    if not report:
+        return no_update, no_update
     data.delete_report(report_id)
-    return "/tickets"
+    reports = {str(r["id"]): r for r in data.get_saved_reports()}
+    return reports, "open"
 
 
 # ── CSV export callbacks (one per grid) ──────────────────────────────
@@ -555,8 +617,38 @@ def _collect_grid_ids():
             if comp.get("type") == "grid":
                 ids.add(comp.get("id", f"yaml-grid-{comp['query']}"))
     # Code-driven grids
-    ids.update(["ticket-grid", "drilldown-grid", "root-cause-grid"])
+    ids.update([
+        "ticket-grid",
+        "drilldown-grid",
+        "root-cause-grid",
+        "health-drilldown-grid",
+        "health-contributors-grid",
+        "rc-fixes-drilldown-grid",
+    ])
     return ids
+
+
+_TICKET_NUMBER_CLICK_GRID_IDS = [
+    grid_id for grid_id in sorted(_collect_grid_ids())
+    if grid_id != "ticket-grid"
+]
+
+
+@callback(
+    Output("url", "pathname", allow_duplicate=True),
+    Output("url", "search", allow_duplicate=True),
+    [Input(grid_id, "cellClicked", allow_optional=True) for grid_id in _TICKET_NUMBER_CLICK_GRID_IDS],
+    prevent_initial_call=True,
+)
+def navigate_from_ticket_number_cells(*cell_events):
+    trigger_id = callback_context.triggered_id
+    if not trigger_id or trigger_id not in _TICKET_NUMBER_CLICK_GRID_IDS:
+        return no_update, no_update
+    event = cell_events[_TICKET_NUMBER_CLICK_GRID_IDS.index(trigger_id)]
+    tid = _ticket_id_from_cell_click(event)
+    if tid is None:
+        return no_update, no_update
+    return f"/ticket/{tid}", ""
 
 
 for _grid_id in _collect_grid_ids():
@@ -573,5 +665,5 @@ for _grid_id in _collect_grid_ids():
 if __name__ == "__main__":
     port = int(os.getenv("WEB_PORT", "8050"))
     debug = os.getenv("WEB_DEBUG", "1").strip() == "1"
-    print(f"[web] Starting TS Ticket Analytics on http://localhost:{port}", flush=True)
+    print(f"[web] Starting CS Analytics on http://localhost:{port}", flush=True)
     app.run(debug=debug, port=port)

@@ -29,12 +29,11 @@ from pathlib import Path
 
 from config import FORCE_ENRICHMENT, OUTPUT_DIR, RUN_SENTIMENT, TARGET_TICKETS, MATCHA_MISSION_ID, SKIP_OUTPUT_FILES
 from matcha_client import call_matcha
+from prompt_store import get_prompt
 
 CUST_COMMENT_COUNT = int(os.getenv("CUST_COMMENT_COUNT", "4"))
-PROMPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "sentiment.md")
 
 PROMPT_NAME = "sentiment"
-PROMPT_VERSION = "1"
 MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
 
 
@@ -46,9 +45,8 @@ def _run_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
 
-def _load_prompt_template() -> str:
-    with open(PROMPT_PATH, "r", encoding="utf-8") as f:
-        return f.read()
+def _load_prompt_record() -> dict:
+    return get_prompt(PROMPT_NAME, allow_fallback=True)
 
 
 def _latest_activities_file() -> str | None:
@@ -131,7 +129,7 @@ def _should_skip(ticket_id: int, force: bool) -> bool:
 
 
 def _persist_to_db(ticket_id: int, ticket_number: str | None, thread_hash: str | None,
-                   response_obj: dict, source_file: str | None) -> None:
+                   response_obj: dict, source_file: str | None, prompt_version: str) -> None:
     """Insert sentiment result into DB."""
     import db
     if not db._is_enabled():
@@ -142,7 +140,7 @@ def _persist_to_db(ticket_id: int, ticket_number: str | None, thread_hash: str |
         thread_hash=thread_hash,
         model_name=MODEL_NAME,
         prompt_name=PROMPT_NAME,
-        prompt_version=PROMPT_VERSION,
+        prompt_version=prompt_version,
         frustrated=response_obj.get("frustrated"),
         frustrated_reason=response_obj.get("frustrated_reason"),
         activity_id=str(response_obj.get("activity_id", "")) or None,
@@ -150,6 +148,17 @@ def _persist_to_db(ticket_id: int, ticket_number: str | None, thread_hash: str |
         source_file=source_file,
         raw_response=response_obj,
     )
+
+
+def _default_no_comment_response(ticket_number: str) -> dict:
+    """Return a deterministic non-frustrated result when no customer comments exist."""
+    return {
+        "frustrated": "No",
+        "frustrated_reason": None,
+        "ticket_number": ticket_number,
+        "activity_id": None,
+        "created_at": None,
+    }
 
 
 def main(activities_file: str | None = None, *, force: bool = False,
@@ -180,6 +189,11 @@ def main(activities_file: str | None = None, *, force: bool = False,
     if activities_file:
         _log(f"[sentiment] Using activities file: {activities_file}")
 
+    prompt_record = _load_prompt_record()
+    prompt_template = prompt_record["content"]
+    prompt_version = prompt_record["version"]
+    _log(f"[sentiment] Prompt: {PROMPT_NAME} v{prompt_version}")
+
     all_results = []
     total_tickets = len(target_tickets)
 
@@ -209,12 +223,30 @@ def main(activities_file: str | None = None, *, force: bool = False,
         _log(f"[sentiment] Found {len(cust_comments)} customer comment(s) for ticket {tkt_num}.")
         last_n = cust_comments[:CUST_COMMENT_COUNT]
         if not last_n:
-            _log(f"[sentiment] No customer comments for ticket {tkt_num}. Skipping.")
+            _log(f"[sentiment] No customer comments for ticket {tkt_num}. Recording frustrated=No.")
+            response_obj = _default_no_comment_response(tkt_num)
+            if ticket_id and db_enabled:
+                _persist_to_db(
+                    ticket_id,
+                    tkt_num,
+                    thread_hash,
+                    response_obj,
+                    os.path.basename(activities_file) if activities_file else None,
+                    prompt_version,
+                )
+                _log(f"[sentiment] Persisted default non-frustrated result to DB for ticket {tkt_num}.")
+
+            record = {
+                "ticket_number": tkt_num,
+                "comments_sent": 0,
+                "source_file": os.path.basename(activities_file) if activities_file else "db",
+                **response_obj,
+            }
+            all_results.append(record)
             continue
         _log(f"[sentiment] Sending last {len(last_n)} customer comment(s) to Matcha.")
 
         # 3. Build prompt
-        prompt_template = _load_prompt_template()
         parts = prompt_template.split("Input:", 1)
         instructions = parts[0].strip()
 
@@ -266,8 +298,14 @@ Output format (strict JSON):
 
         # 5. Persist to DB
         if ticket_id and db_enabled:
-            _persist_to_db(ticket_id, tkt_num, thread_hash, response_obj,
-                           os.path.basename(activities_file) if activities_file else None)
+            _persist_to_db(
+                ticket_id,
+                tkt_num,
+                thread_hash,
+                response_obj,
+                os.path.basename(activities_file) if activities_file else None,
+                prompt_version,
+            )
             _log(f"[sentiment] Persisted to DB for ticket {tkt_num}.")
 
         record = {

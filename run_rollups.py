@@ -209,6 +209,7 @@ def _fetch_customer_health_input_rows(as_of_date: date) -> list[dict]:
                      AND (t.closed_at IS NULL OR t.closed_at::date > %s)
                      AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved', 'Open')
                      AND COALESCE(t.assignee, '') != 'Marketing'
+                     AND COALESCE(t.group_name, '') != 'Marketing'
                 THEN TRUE
                 ELSE FALSE
             END AS open_flag,
@@ -848,6 +849,7 @@ def snapshot_tickets_daily(
         SELECT
             t.ticket_id, t.ticket_number, t.ticket_name,
             t.status, t.assignee, t.product_name, t.customer,
+            t.group_name,
             t.date_created, t.date_modified, t.source_updated_at,
             p.priority, c.overall_complexity
         FROM tickets t
@@ -875,12 +877,14 @@ def snapshot_tickets_daily(
     count = 0
     for r in rows:
         (tid, tnum, tname, status, assignee, product, customer,
+         group_name,
          date_created, date_modified, source_updated_at,
          priority, complexity) = r
 
         is_open = (status is not None
                   and status.lower() not in ("closed", "resolved", "open")
-                  and (assignee or "") != "Marketing")
+                  and (assignee or "") != "Marketing"
+                  and (group_name or "") != "Marketing")
         age_days = None
         if date_created:
             age_days = (datetime.now(timezone.utc) - date_created).days
@@ -1189,6 +1193,7 @@ def rebuild_daily_open_counts(
                    AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved', 'Open'))
               )
               AND COALESCE(t.assignee, '') != 'Marketing'
+              AND COALESCE(t.group_name, '') != 'Marketing'
             GROUP BY
                 COALESCE(t.product_name, ''),
                 COALESCE(t.status, ''),

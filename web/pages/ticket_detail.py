@@ -186,18 +186,24 @@ def _wait_chart(profile):
 
 # ── Layout ───────────────────────────────────────────────────────────
 
-def _build_detail(ticket_id):
+def _build_detail(ticket_id, back_href="/tickets"):
     """Build the full ticket detail content (header + tabs) from DB data."""
     ticket = data.get_ticket_detail(ticket_id)
     if not ticket:
         return dmc.Stack([
             dmc.Title("Ticket Not Found", order=3),
             dmc.Text(f"No ticket with ID {ticket_id} exists in the database.", c="dimmed"),
-            dmc.Anchor("Back to Tickets", href="/tickets"),
+            dmc.Anchor("Back to Tickets", href=back_href),
         ], gap="md")
 
     actions = data.get_ticket_actions(ticket_id)
     wait = data.get_ticket_wait_profile(ticket_id)
+    ticket_number = ticket.get("ticket_number", "")
+    ticket_name = ticket.get("ticket_name", "")
+    teamsupport_url = (
+        f"https://app.na2.teamsupport.com/?TicketNumber={ticket_number}"
+        if ticket_number else None
+    )
 
     # Header
     header = dmc.Paper(
@@ -206,7 +212,7 @@ def _build_detail(ticket_id):
                 [
                     dmc.Anchor(
                         dmc.Group([DashIconify(icon="tabler:arrow-left", width=16), "Tickets"], gap=4),
-                        href="/tickets", size="sm",
+                        href=back_href, size="sm",
                     ),
                     dmc.Group(
                         [
@@ -226,7 +232,19 @@ def _build_detail(ticket_id):
             ),
             dmc.Group(
                 [
-                    dmc.Title(f"#{ticket.get('ticket_number', '')} — {ticket.get('ticket_name', '')}", order=3),
+                    dmc.Title(
+                        [
+                            dmc.Anchor(
+                                f"#{ticket_number}",
+                                href=teamsupport_url,
+                                target="_blank",
+                                underline="never",
+                                style={"color": "inherit"},
+                            ),
+                            html.Span(f" — {ticket_name}"),
+                        ],
+                        order=3,
+                    ),
                 ],
                 mb="sm",
             ),
@@ -340,14 +358,15 @@ def _build_detail(ticket_id):
     return dmc.Stack([header, tabs], gap="md")
 
 
-def ticket_detail_layout(ticket_id):
+def ticket_detail_layout(ticket_id, back_href="/tickets"):
     """Shell layout: stores ticket_id and wraps _build_detail in a refreshable container."""
     return html.Div([
         dcc.Store(id="ticket-detail-id", data=ticket_id),
+        dcc.Store(id="ticket-detail-back-href", data=back_href),
         dcc.Loading(
             id="ticket-detail-loading",
             type="dot",
-            children=html.Div(id="ticket-detail-content", children=_build_detail(ticket_id)),
+            children=html.Div(id="ticket-detail-content", children=_build_detail(ticket_id, back_href=back_href)),
         ),
     ])
 
@@ -357,9 +376,10 @@ def register_callbacks(app):
         Output("ticket-detail-content", "children"),
         Input("ticket-refresh-btn", "n_clicks"),
         State("ticket-detail-id", "data"),
+        State("ticket-detail-back-href", "data"),
         prevent_initial_call=True,
     )
-    def refresh_ticket(n_clicks, ticket_id):
+    def refresh_ticket(n_clicks, ticket_id, back_href):
         if not n_clicks or not ticket_id:
             return no_update
 
@@ -376,4 +396,4 @@ def register_callbacks(app):
         except Exception:
             pass  # still rebuild from whatever DB state we have
 
-        return _build_detail(ticket_id)
+        return _build_detail(ticket_id, back_href=back_href or "/tickets")

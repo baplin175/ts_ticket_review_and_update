@@ -26,16 +26,14 @@ import sys
 import time
 
 from config import MATCHA_MISSION_ID
-from passes.runtime import load_prompt_template, process_ticket_pass
+from matcha_client import call_matcha
+from passes.runtime import process_ticket_pass
 from pass1_parser import parse_pass1_response
 from pipeline_stages import stage_title
-
-PROMPT_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "prompts", "pass1_phenomenon.txt"
-)
+from prompt_store import get_prompt
 
 PASS_NAME = "pass1_phenomenon"
-PROMPT_VERSION = "2"
+DEFAULT_PROMPT_VERSION = "2"
 MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
 
 # Pattern to strip automated violation/SLA warning lines
@@ -51,8 +49,20 @@ def _log(msg: str) -> None:
     print(msg, flush=True)
 
 
+def _load_prompt_record() -> dict:
+    return get_prompt(PASS_NAME, allow_fallback=False)
+
+
 def _load_prompt_template() -> str:
-    return load_prompt_template(PROMPT_PATH)
+    return _load_prompt_record()["content"]
+
+
+def _coerce_prompt_version(value, default: str) -> str:
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return value
+    return default
 
 
 def _strip_violation_warnings(text: str) -> str:
@@ -71,6 +81,7 @@ def process_ticket(
     ticket_id: int,
     full_thread_text: str,
     prompt_template: str,
+    prompt_version: str = DEFAULT_PROMPT_VERSION,
     *,
     ticket_name: str = "",
     force: bool = False,
@@ -108,7 +119,7 @@ def process_ticket(
     result = process_ticket_pass(
         ticket_id,
         pass_name=PASS_NAME,
-        prompt_version=PROMPT_VERSION,
+        prompt_version=prompt_version,
         model_name=MODEL_NAME,
         input_text=full_thread_text,
         prompt_text=full_prompt,
@@ -124,6 +135,7 @@ def process_ticket(
         parse_response=parse_pass1_response,
         build_success_update=_success_update,
         build_result_update=_result_update,
+        call_matcha_fn=call_matcha,
     )
     if result["status"] == "success" and result["phenomenon"] is None:
         _log(f"[pass1]   (no observable phenomenon — confidence: {result.get('confidence', 'N/A')})")
@@ -154,13 +166,14 @@ def main(
         from run_rollups import run_full_rollups
         run_full_rollups()
 
+    prompt_record = _load_prompt_record()
     prompt_template = _load_prompt_template()
-    _log(f"[pass1] Loaded prompt from {PROMPT_PATH}")
-    _log(f"[pass1] Pass: {PASS_NAME}  Prompt version: {PROMPT_VERSION}  Model: {MODEL_NAME}")
+    prompt_version = _coerce_prompt_version(prompt_record.get("version"), DEFAULT_PROMPT_VERSION)
+    _log(f"[pass1] Pass: {PASS_NAME}  Prompt version: {prompt_version}  Model: {MODEL_NAME}")
 
     # Fetch eligible tickets
     rows = db.fetch_pending_pass1_tickets(
-        PROMPT_VERSION,
+        prompt_version,
         limit=limit,
         ticket_ids=ticket_ids,
         failed_only=failed_only,
@@ -189,6 +202,7 @@ def main(
             ticket_id,
             full_thread_text,
             prompt_template,
+            prompt_version,
             ticket_name=ticket_name,
             force=force,
         )

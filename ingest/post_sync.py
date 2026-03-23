@@ -26,7 +26,9 @@ def rebuild_for_tickets(ticket_ids: list[int]) -> None:
     run_analytics_for_tickets(ticket_ids)
 
 
-def enrich_tickets(ticket_ids: list[int], *, sentiment: bool, full_enrichment: bool) -> None:
+def enrich_tickets(
+    ticket_ids: list[int], *, sentiment: bool, complexity: bool = False, full_enrichment: bool
+) -> None:
     """Run DB-backed enrichment for touched ticket ids."""
     if not ticket_ids:
         return
@@ -50,23 +52,24 @@ def enrich_tickets(ticket_ids: list[int], *, sentiment: bool, full_enrichment: b
         except Exception as exc:
             print(f"[ingest] Sentiment error: {exc}", flush=True)
 
-    if not full_enrichment:
+    if not (full_enrichment or complexity):
         return
 
     from run_complexity import main as complexity_main
-    from run_priority import main as priority_main
     from run_rollups import rebuild_customer_ticket_health, rebuild_product_ticket_health
+    if full_enrichment:
+        from run_priority import main as priority_main
 
-    print(
-        f"\n[ingest] Post-sync: running priority for {len(touched_numbers)} ticket(s)…",
-        flush=True,
-    )
-    try:
-        priority_main(write_back=False, force=False, ticket_numbers=touched_numbers)
-    except SystemExit:
-        print("[ingest] Priority stage exited.", flush=True)
-    except Exception as exc:
-        print(f"[ingest] Priority error: {exc}", flush=True)
+        print(
+            f"\n[ingest] Post-sync: running priority for {len(touched_numbers)} ticket(s)…",
+            flush=True,
+        )
+        try:
+            priority_main(write_back=False, force=False, ticket_numbers=touched_numbers)
+        except SystemExit:
+            print("[ingest] Priority stage exited.", flush=True)
+        except Exception as exc:
+            print(f"[ingest] Priority error: {exc}", flush=True)
 
     print(
         f"\n[ingest] Post-sync: running complexity for {len(touched_numbers)} ticket(s)…",

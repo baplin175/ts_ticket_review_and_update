@@ -39,11 +39,17 @@ from datetime import datetime, timezone, timedelta
 
 import config
 import db
-from ingest.extractors import extract_action_row, extract_ticket_row, parse_ts_datetime
+from ingest.extractors import (
+    extract_action_row,
+    extract_customer_row,
+    extract_ticket_row,
+    parse_ts_datetime,
+)
 from ingest.post_sync import enrich_tickets, rebuild_for_tickets
 from ingest.reconcile import reconcile_closed
 from ts_client import (
     fetch_open_tickets,
+    fetch_all_customers,
     fetch_tickets_created_since,
     fetch_ticket_by_id,
     fetch_all_activities,
@@ -199,11 +205,24 @@ def _sync(
     actions_upserted = 0
     upserted_ids: list[int] = []
     new_ticket_ids: list[int] = []
+    fetched_open_ids: list[int] = []  # all IDs TS considers open (before date filter)
     errors: list[str] = []
 
     try:
         # ── Ensure inHANCE user IDs are cached (needed by clean_activity_dict)
         fetch_inhance_user_ids()
+
+        # ── Refresh TeamSupport customer metadata used by health/reporting
+        if not dry_run and getattr(config, "SYNC_CUSTOMER_ATTRIBUTES", True):
+            try:
+                print("[ingest] Refreshing TeamSupport customer metadata …", flush=True)
+                raw_customers = fetch_all_customers()
+                for raw_customer in raw_customers:
+                    customer_row = extract_customer_row(raw_customer, now)
+                    db.upsert_customer_attribute(customer_row, now=now)
+                print(f"[ingest] Refreshed {len(raw_customers)} customer metadata row(s).", flush=True)
+            except Exception as exc:
+                print(f"[ingest] WARNING: customer metadata refresh failed: {exc}", flush=True)
 
         # ── Fetch tickets
         print("[ingest] Fetching tickets …", flush=True)
@@ -253,6 +272,17 @@ def _sync(
                             f"(opened+closed between syncs).",
                             flush=True,
                         )
+
+        # ── Capture all fetched open IDs before date filtering.
+        # This is the authoritative set of ticket IDs that TS considers open
+        # and is used by reconcile to identify truly-missing (closed) tickets.
+        for t in raw_tickets:
+            _tid = extract_ticket_id(t)
+            if _tid:
+                try:
+                    fetched_open_ids.append(int(_tid))
+                except ValueError:
+                    pass
 
         # ── Filter by effective_since (local post-filter).
         # The TeamSupport API supports server-side date filtering using the
@@ -447,23 +477,23 @@ def _sync(
         "actions_upserted": actions_upserted,
         "upserted_ids": upserted_ids,
         "new_ticket_ids": new_ticket_ids,
+        "fetched_open_ids": fetched_open_ids,
         "errors": errors,
     }
 
 
 # ── Closed-ticket reconciliation ─────────────────────────────────────
 
-def _reconcile_closed(upserted_ids: list[int], verbose: bool = False) -> list[int]:
+def _reconcile_closed(synced_open_ids: list[int], verbose: bool = False) -> list[int]:
     """Re-fetch tickets the DB thinks are open but were NOT returned by TS.
 
-    After a full sync that fetched all open tickets, any ticket still marked
-    open in the DB but absent from the sync results has likely been closed in
-    TeamSupport.  This function re-fetches each one individually and upserts
-    the current state so that closed_at / status are updated.
+    *synced_open_ids* should be ALL ticket IDs that TS reported as open
+    (before any modified-since filtering), so the reconcile accurately
+    identifies tickets that TS no longer considers open.
 
     Returns the list of ticket_ids that were reconciled.
     """
-    return reconcile_closed(upserted_ids, verbose=verbose)
+    return reconcile_closed(synced_open_ids, verbose=verbose)
 
 
 # ── Status display ───────────────────────────────────────────────────
@@ -569,6 +599,14 @@ def main():
         "--enrich-new", action="store_true",
         help="Run enrichment (sentiment, priority, complexity) only for newly added tickets.",
     )
+    p_sync.add_argument(
+        "--enrich-open-missing-sentiment", action="store_true",
+        help="Run sentiment enrichment for open tickets whose latest sentiment value is blank.",
+    )
+    p_sync.add_argument(
+        "--enrich-open-missing-complexity", action="store_true",
+        help="Run complexity enrichment for open tickets whose latest complexity value is blank.",
+    )
 
     # status
     sub.add_parser("status", help="Show sync state and recent ingest runs.")
@@ -652,7 +690,7 @@ def main():
     reconciled_ids = []
     if can_reconcile:
         reconciled_ids = _reconcile_closed(
-            result.get("upserted_ids", []),
+            result.get("fetched_open_ids", []),
             verbose=args.verbose,
         )
 
@@ -664,15 +702,48 @@ def main():
     # ── Post-sync: enrichment for touched tickets ──
     run_enrichment = (
         args.enrich or args.sentiment or args.enrich_new
+        or args.enrich_open_missing_sentiment or args.enrich_open_missing_complexity
     ) and not args.dry_run and result["status"] == "completed"
     if run_enrichment:
-        enrich_ids = result.get("new_ticket_ids", []) if args.enrich_new else (
-            result.get("upserted_ids", []) + reconciled_ids
-        )
+        if args.enrich_new:
+            enrich_ids = result.get("new_ticket_ids", [])
+        else:
+            enrich_ids = result.get("upserted_ids", []) + reconciled_ids
+        missing_complexity_ids: list[int] = []
+
+        if args.enrich_open_missing_sentiment:
+            missing_numbers = db.fetch_open_ticket_numbers_missing_sentiment()
+            if missing_numbers:
+                missing_id_map = db.ticket_ids_for_numbers(missing_numbers)
+                enrich_ids.extend(int(tid) for tid in missing_id_map.values())
+                print(
+                    "\n[ingest] Post-sync: adding %d open ticket(s) with missing sentiment." % len(missing_id_map),
+                    flush=True,
+                )
+            else:
+                print("\n[ingest] Post-sync: no open tickets with missing sentiment found.", flush=True)
+
+        if args.enrich_open_missing_complexity:
+            missing_numbers = db.fetch_open_ticket_numbers_missing_complexity()
+            if missing_numbers:
+                missing_id_map = db.ticket_ids_for_numbers(missing_numbers)
+                missing_complexity_ids = [int(tid) for tid in missing_id_map.values()]
+                enrich_ids.extend(missing_complexity_ids)
+                print(
+                    "\n[ingest] Post-sync: adding %d open ticket(s) with missing complexity." % len(missing_id_map),
+                    flush=True,
+                )
+            else:
+                print("\n[ingest] Post-sync: no open tickets with missing complexity found.", flush=True)
+
+        enrich_ids = list(dict.fromkeys(enrich_ids))
+        if missing_complexity_ids:
+            rebuild_for_tickets(list(dict.fromkeys(missing_complexity_ids)))
         if enrich_ids:
             enrich_tickets(
                 enrich_ids,
-                sentiment=(args.sentiment or args.enrich or args.enrich_new),
+                sentiment=(args.sentiment or args.enrich or args.enrich_new or args.enrich_open_missing_sentiment),
+                complexity=(args.enrich or args.enrich_new or args.enrich_open_missing_complexity),
                 full_enrichment=(args.enrich or args.enrich_new),
             )
         elif args.enrich_new:

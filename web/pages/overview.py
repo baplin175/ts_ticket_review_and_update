@@ -7,7 +7,7 @@ from dash_iconify import DashIconify
 import plotly.graph_objects as go
 
 from .. import data
-from ..renderer import grid_with_export
+from ..renderer import grid_with_export, ticket_number_column
 
 
 AGE_BUCKET_ORDER = ["0-6", "7-13", "14-29", "30-59", "60-89", "90+"]
@@ -116,7 +116,7 @@ def _backlog_chart(rows, severity_rows=None):
 # ── Drill-down column defs (reused for modal grid) ──────────────────
 
 DRILLDOWN_COL_DEFS = [
-    {"field": "ticket_number", "headerName": "Ticket #", "width": 110, "pinned": "left"},
+    ticket_number_column(width=110, pinned="left"),
     {"field": "ticket_name", "headerName": "Name", "minWidth": 200, "flex": 1,
      "tooltipField": "ticket_name"},
     {"field": "status", "headerName": "Status", "width": 120},

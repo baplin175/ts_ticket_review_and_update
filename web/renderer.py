@@ -188,6 +188,41 @@ _COLUMN_ALIASES = {
     "cell_renderer": "cellRenderer",
 }
 
+_TICKET_NUMBER_CELL_STYLE = {
+    "function": """
+        params.data && params.data.ticket_id
+            ? {
+                'color': '#1c7ed6',
+                'textDecoration': 'underline',
+                'cursor': 'pointer',
+                'fontWeight': '600'
+              }
+            : {}
+    """
+}
+
+
+def ticket_number_column(width=110, header_name="Ticket #", pinned="left", **kwargs):
+    """Return a standard ticket-number column with link-like styling."""
+    col = {
+        "field": "ticket_number",
+        "headerName": header_name,
+        "width": width,
+        "cellStyle": _TICKET_NUMBER_CELL_STYLE,
+    }
+    if pinned is not None:
+        col["pinned"] = pinned
+    col.update(kwargs)
+    return col
+
+
+def _decorate_ticket_number_column(col):
+    if col.get("field") != "ticket_number":
+        return col
+    decorated = dict(col)
+    decorated.setdefault("cellStyle", _TICKET_NUMBER_CELL_STYLE)
+    return decorated
+
 
 def _normalize_columns(col_defs):
     """Convert YAML column definitions to AG Grid format."""
@@ -196,7 +231,7 @@ def _normalize_columns(col_defs):
         ag_col = {}
         for k, v in col.items():
             ag_col[_COLUMN_ALIASES.get(k, k)] = v
-        result.append(ag_col)
+        result.append(_decorate_ticket_number_column(ag_col))
     return result
 
 
@@ -241,10 +276,10 @@ def _infer_columns(rows):
     result = []
     for field in rows[0].keys():
         result.append(
-            {
+            _decorate_ticket_number_column({
                 "field": field,
                 "headerName": field.replace("_", " ").title(),
-            }
+            })
         )
     return result
 

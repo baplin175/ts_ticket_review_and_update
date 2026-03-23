@@ -8,30 +8,40 @@ import plotly.graph_objects as go
 
 from .. import data
 from ..health_explainer import generate_customer_health_explanation
-from ..renderer import grid_with_export
+from ..renderer import grid_with_export, ticket_number_column
 
 
 # ── Customer health columns ──────────────────────────────────────────
 
 CUSTOMER_COLS = [
-    {"field": "customer", "headerName": "Customer", "minWidth": 160, "flex": 1, "pinned": "left",
+    {"field": "customer", "headerName": "Customer", "minWidth": 150, "flex": 1.5, "pinned": "left",
      "checkboxSelection": True, "headerCheckboxSelection": True},
-    {"field": "open_ticket_count", "headerName": "Open", "width": 80, "type": "numericColumn"},
-    {"field": "high_priority_count", "headerName": "High Pri", "width": 90, "type": "numericColumn",
+    {"field": "key_account", "headerName": "Key Acct", "minWidth": 85, "flex": 0.55,
+     "cellStyle": {"function": "params.value ? {'color': '#2b8a3e', 'fontWeight': 'bold'} : {}"}},
+    {"field": "open_ticket_count", "headerName": "Open", "minWidth": 65, "flex": 0.45, "type": "numericColumn"},
+    {"field": "high_priority_count", "headerName": "High Pri", "minWidth": 75, "flex": 0.5, "type": "numericColumn",
      "cellStyle": {"function": "params.value > 0 ? {'color': '#e03131', 'fontWeight': 'bold'} : {}"}},
-    {"field": "high_complexity_count", "headerName": "High Cmplx", "width": 100, "type": "numericColumn",
-     "cellStyle": {"function": "params.value > 0 ? {'color': '#e8590c', 'fontWeight': 'bold'} : {}"}},
-    {"field": "avg_complexity", "headerName": "Avg Complexity", "width": 130, "type": "numericColumn",
-     "valueFormatter": {"function": "params.value != null ? Number(params.value).toFixed(1) : ''"}},
-    {"field": "frustration_count_90d", "headerName": "Frustrated (90d)", "width": 140, "type": "numericColumn",
+    {"field": "frustration_count_90d", "headerName": "Frustrated", "minWidth": 85, "flex": 0.55, "type": "numericColumn",
      "cellStyle": {"function": "params.value > 0 ? {'color': '#c2255c', 'fontWeight': 'bold'} : {}"}},
-    {"field": "ticket_load_pressure_score", "headerName": "Pressure Score", "width": 130, "type": "numericColumn",
-     "valueFormatter": {"function": "params.value != null ? Number(params.value).toFixed(2) : ''"},
+    {"field": "pressure_score", "headerName": "Pressure", "minWidth": 80, "flex": 0.55, "type": "numericColumn",
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"},
      "cellStyle": {"function": "params.value != null && params.value > 5 ? {'color': '#e03131', 'fontWeight': 'bold'} : {}"}},
-    {"field": "customer_health_score", "headerName": "Health Score", "width": 120, "type": "numericColumn",
-     "valueFormatter": {"function": "params.value != null ? Number(params.value).toFixed(2) : ''"}},
-    {"field": "customer_health_band", "headerName": "Band", "width": 110},
-    {"field": "as_of_date", "headerName": "As Of", "width": 110,
+    {"field": "aging_score", "headerName": "Aging", "minWidth": 70, "flex": 0.5, "type": "numericColumn",
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"},
+     "cellStyle": {"function": "params.value != null && params.value > 5 ? {'color': '#f08c00', 'fontWeight': 'bold'} : {}"}},
+    {"field": "friction_score", "headerName": "Friction", "minWidth": 75, "flex": 0.5, "type": "numericColumn",
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"},
+     "cellStyle": {"function": "params.value != null && params.value > 5 ? {'color': '#c2255c', 'fontWeight': 'bold'} : {}"}},
+    {"field": "concentration_score", "headerName": "Concentr.", "minWidth": 85, "flex": 0.55, "type": "numericColumn",
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"},
+     "cellStyle": {"function": "params.value != null && params.value > 5 ? {'color': '#6741d9', 'fontWeight': 'bold'} : {}"}},
+    {"field": "breadth_score", "headerName": "Breadth", "minWidth": 75, "flex": 0.5, "type": "numericColumn",
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"},
+     "cellStyle": {"function": "params.value != null && params.value > 5 ? {'color': '#0b7285', 'fontWeight': 'bold'} : {}"}},
+    {"field": "customer_health_score", "headerName": "Distress", "minWidth": 80, "flex": 0.55, "type": "numericColumn",
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
+    {"field": "customer_health_band", "headerName": "Band", "minWidth": 70, "flex": 0.5},
+    {"field": "as_of_date", "headerName": "As Of", "minWidth": 90, "flex": 0.55,
      "valueFormatter": {"function": "params.value ? new Date(params.value).toLocaleDateString() : ''"}},
 ]
 
@@ -64,7 +74,7 @@ DEFAULT_COL_DEF = {
 # ── Drill-down column defs ───────────────────────────────────────────
 
 DRILLDOWN_COL_DEFS = [
-    {"field": "ticket_number", "headerName": "Ticket #", "width": 110, "pinned": "left"},
+    ticket_number_column(width=110, pinned="left"),
     {"field": "ticket_name", "headerName": "Name", "minWidth": 200, "flex": 1,
      "tooltipField": "ticket_name"},
     {"field": "status", "headerName": "Status", "width": 120},
@@ -84,7 +94,7 @@ DRILLDOWN_COL_DEFS = [
 ]
 
 CONTRIBUTOR_COL_DEFS = [
-    {"field": "ticket_number", "headerName": "Ticket #", "width": 110, "pinned": "left"},
+    ticket_number_column(width=110, pinned="left"),
     {"field": "ticket_name", "headerName": "Name", "minWidth": 220, "flex": 1, "tooltipField": "ticket_name"},
     {"field": "group_name", "headerName": "Group", "width": 170},
     {"field": "product_name", "headerName": "Product", "width": 140},
@@ -94,17 +104,17 @@ CONTRIBUTOR_COL_DEFS = [
     {"field": "cluster_id", "headerName": "Cluster", "width": 170},
     {"field": "mechanism_class", "headerName": "Mechanism", "width": 170},
     {"field": "total_contribution", "headerName": "Total", "width": 90, "type": "numericColumn",
-     "valueFormatter": {"function": "params.value != null ? Number(params.value).toFixed(2) : ''"}},
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
     {"field": "pressure_contribution", "headerName": "Pressure", "width": 100, "type": "numericColumn",
-     "valueFormatter": {"function": "params.value != null ? Number(params.value).toFixed(2) : ''"}},
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
     {"field": "aging_contribution", "headerName": "Aging", "width": 90, "type": "numericColumn",
-     "valueFormatter": {"function": "params.value != null ? Number(params.value).toFixed(2) : ''"}},
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
     {"field": "friction_contribution", "headerName": "Friction", "width": 100, "type": "numericColumn",
-     "valueFormatter": {"function": "params.value != null ? Number(params.value).toFixed(2) : ''"}},
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
     {"field": "concentration_contribution", "headerName": "Concentration", "width": 120, "type": "numericColumn",
-     "valueFormatter": {"function": "params.value != null ? Number(params.value).toFixed(2) : ''"}},
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
     {"field": "breadth_contribution", "headerName": "Breadth", "width": 95, "type": "numericColumn",
-     "valueFormatter": {"function": "params.value != null ? Number(params.value).toFixed(2) : ''"}},
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
     {"field": "days_opened", "headerName": "Age (d)", "width": 90, "type": "numericColumn"},
     {"field": "date_modified", "headerName": "Last Modified", "width": 130,
      "valueFormatter": {"function": "params.value ? new Date(params.value).toLocaleDateString() : ''"}},
@@ -183,7 +193,7 @@ def _history_figure(history_rows):
                 name=label,
                 line={"color": color, "width": width},
                 marker={"size": 7},
-                hovertemplate="%{x}<br>" + label + ": %{y:.2f}<extra></extra>",
+                hovertemplate="%{x}<br>" + label + ": %{y:.0f}<extra></extra>",
             )
         )
 
@@ -206,12 +216,12 @@ def _history_summary(latest_row):
     return dmc.SimpleGrid(
         cols={"base": 2, "lg": 6},
         children=[
-            _history_stat("Latest Distress Score", f'{latest_row.get("customer_health_score", 0):.2f}', "blue"),
+            _history_stat("Latest Distress Score", f'{round(latest_row.get("customer_health_score", 0))}', "blue"),
             _history_stat("Band", str(latest_row.get("customer_health_band") or "—").replace("_", " ").title(), "grape"),
-            _history_stat("Pressure", f'{latest_row.get("pressure_score", 0):.2f}', "red"),
-            _history_stat("Aging", f'{latest_row.get("aging_score", 0):.2f}', "orange"),
-            _history_stat("Friction", f'{latest_row.get("friction_score", 0):.2f}', "pink"),
-            _history_stat("Concentration", f'{latest_row.get("concentration_score", 0):.2f}', "violet"),
+            _history_stat("Pressure", f'{round(latest_row.get("pressure_score", 0))}', "red"),
+            _history_stat("Aging", f'{round(latest_row.get("aging_score", 0))}', "orange"),
+            _history_stat("Friction", f'{round(latest_row.get("friction_score", 0))}', "pink"),
+            _history_stat("Concentration", f'{round(latest_row.get("concentration_score", 0))}', "violet"),
         ],
     )
 
@@ -649,3 +659,27 @@ def register_health_callbacks(app):
             else f"No ticket drivers recorded on {as_of_date}"
         )
         return contributors, subtitle
+
+    @app.callback(
+        Output("url", "pathname", allow_duplicate=True),
+        Input("health-drilldown-grid", "selectedRows"),
+        prevent_initial_call=True,
+    )
+    def navigate_from_health_drilldown(selected_rows):
+        if selected_rows and len(selected_rows) > 0:
+            tid = selected_rows[0].get("ticket_id")
+            if tid is not None:
+                return f"/ticket/{tid}"
+        return no_update
+
+    @app.callback(
+        Output("url", "pathname", allow_duplicate=True),
+        Input("health-contributors-grid", "selectedRows"),
+        prevent_initial_call=True,
+    )
+    def navigate_from_health_contributors(selected_rows):
+        if selected_rows and len(selected_rows) > 0:
+            tid = selected_rows[0].get("ticket_id")
+            if tid is not None:
+                return f"/ticket/{tid}"
+        return no_update

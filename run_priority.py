@@ -29,14 +29,10 @@ from pathlib import Path
 
 from config import FORCE_ENRICHMENT, OUTPUT_DIR, RUN_PRIORITY, TARGET_TICKETS, MATCHA_MISSION_ID, TS_WRITEBACK, SKIP_OUTPUT_FILES
 from matcha_client import call_matcha
+from prompt_store import get_prompt
 from ts_client import update_ticket
 
-PROMPT_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "prompts", "ai_priority.md"
-)
-
 PROMPT_NAME = "ai_priority"
-PROMPT_VERSION = "1"
 MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
 
 
@@ -56,8 +52,7 @@ def _run_timestamp() -> str:
 
 
 def _load_prompt() -> str:
-    with open(PROMPT_PATH, "r", encoding="utf-8") as f:
-        return f.read()
+    return get_prompt(PROMPT_NAME, allow_fallback=True)["content"]
 
 
 def _latest_activities_file() -> str | None:
@@ -164,7 +159,7 @@ def _should_skip(ticket_id: int, force: bool) -> bool:
 
 
 def _persist_to_db(ticket_id: int, ticket_number: str | None, thread_hash: str | None,
-                   result: dict, raw_reply: str) -> None:
+                   result: dict, raw_reply: str, prompt_version: str) -> None:
     """Insert priority result into DB."""
     import db
     if not db._is_enabled():
@@ -180,7 +175,7 @@ def _persist_to_db(ticket_id: int, ticket_number: str | None, thread_hash: str |
         thread_hash=thread_hash,
         model_name=MODEL_NAME,
         prompt_name=PROMPT_NAME,
-        prompt_version=PROMPT_VERSION,
+        prompt_version=prompt_version,
         priority=priority_val,
         priority_explanation=result.get("priority_explanation"),
         raw_response={"parsed": result, "raw_text": raw_reply},
@@ -202,6 +197,11 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
     if not target_tickets:
         _log("[priority] TARGET_TICKET is required. Set it as an env var (comma-delimited for multiple).")
         sys.exit(1)
+
+    prompt_record = get_prompt(PROMPT_NAME, allow_fallback=True)
+    prompt_template = prompt_record["content"]
+    prompt_version = prompt_record["version"]
+    _log(f"[priority] Prompt: {PROMPT_NAME} v{prompt_version}")
 
     # Check if DB mode is available
     try:
@@ -253,7 +253,7 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
     _log(f"[priority] Scoring {len(tickets)} ticket(s).")
 
     # 2. Build prompt
-    prompt_instructions = _load_prompt()
+    prompt_instructions = prompt_template
     input_data = [_build_input_block(t) for t in tickets]
     input_json = json.dumps(input_data, ensure_ascii=False, indent=2, default=_json_default)
 
@@ -313,7 +313,7 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
         # Persist to DB
         tid_int = tid_map.get(tnum)
         if tid_int and db_enabled:
-            _persist_to_db(tid_int, tnum, hash_map.get(tnum), result, raw_reply)
+            _persist_to_db(tid_int, tnum, hash_map.get(tnum), result, raw_reply, prompt_version)
             _log(f"  [priority] ticket count {idx}/{total_results} — Persisted to DB for ticket {tnum}.")
 
     # 6. Write back to TeamSupport (only when running standalone)

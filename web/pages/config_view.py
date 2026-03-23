@@ -2,6 +2,7 @@
 
 import os
 import re
+from datetime import datetime
 
 import dash_mantine_components as dmc
 from dash import callback, Input, Output, State, no_update, ctx
@@ -10,6 +11,7 @@ from dash_iconify import DashIconify
 import requests
 
 import config
+from prompt_store import PROMPT_SEEDS, get_prompt_revisions, list_prompts, save_prompt_version
 from .. import data
 
 # Path to the config.py file on disk
@@ -103,6 +105,118 @@ def _cfg_card(title, icon, items):
                 gap="sm", mb="sm",
             ),
             dmc.Stack(items, gap="xs"),
+        ],
+        withBorder=True, p="md", radius="md", shadow="sm",
+    )
+
+
+_PROMPT_KEYS = [seed.key for seed in PROMPT_SEEDS]
+
+
+def _format_prompt_timestamp(value):
+    if not value:
+        return "—"
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M")
+    return str(value)
+
+
+def _prompt_editor_card(prompt):
+    key = prompt["prompt_key"]
+    revisions = get_prompt_revisions(key, limit=5)
+    revision_items = []
+    for rev in revisions:
+        revision_items.append(
+            dmc.Group(
+                [
+                    dmc.Badge(f"v{rev['version']}", variant="light", color="blue"),
+                    dmc.Text(rev.get("change_summary") or "No summary", size="sm"),
+                    dmc.Text(_format_prompt_timestamp(rev.get("created_at")), size="xs", c="dimmed"),
+                ],
+                gap="sm",
+            )
+        )
+
+    return dmc.AccordionItem(
+        [
+            dmc.AccordionControl(
+                dmc.Group(
+                    [
+                        dmc.Text(prompt["title"], fw=700),
+                        dmc.Badge(f"v{prompt['version']}", variant="light", color="grape"),
+                        dmc.Text(prompt.get("description") or "", size="sm", c="dimmed"),
+                    ],
+                    gap="sm",
+                )
+            ),
+            dmc.AccordionPanel(
+                dmc.Stack(
+                    [
+                        dmc.Textarea(
+                            id=f"prompt-content-{key}",
+                            value=prompt["content"],
+                            autosize=True,
+                            minRows=12,
+                        ),
+                        dmc.TextInput(
+                            id=f"prompt-summary-{key}",
+                            label="Change Summary",
+                            placeholder="What changed in this prompt version?",
+                        ),
+                        dmc.Group(
+                            [
+                                dmc.Button(
+                                    "Save New Version",
+                                    id=f"prompt-save-{key}",
+                                    leftSection=DashIconify(icon="tabler:history-toggle", width=16),
+                                ),
+                            ],
+                            gap="md",
+                        ),
+                        dmc.Divider(label="Recent Versions", labelPosition="left"),
+                        dmc.Stack(revision_items or [dmc.Text("No saved versions yet.", c="dimmed", size="sm")], gap="xs"),
+                    ],
+                    gap="sm",
+                )
+            ),
+        ],
+        value=key,
+    )
+
+
+def _prompts_section():
+    try:
+        prompts = list_prompts(allow_fallback=True)
+    except Exception as exc:
+        return dmc.Paper(
+            dmc.Text(f"Unable to load prompts: {exc}", c="red", size="sm"),
+            withBorder=True, p="md", radius="md", shadow="sm",
+        )
+
+    items = [_prompt_editor_card(prompt) for prompt in prompts]
+    return dmc.Paper(
+        [
+            dmc.Group(
+                [
+                    dmc.ThemeIcon(
+                        DashIconify(icon="tabler:message-2-code", width=20),
+                        variant="light", color="grape", size=36, radius="md",
+                    ),
+                    dmc.Stack(
+                        [
+                            dmc.Text("Prompts", fw=700, size="md"),
+                            dmc.Text(
+                                "Prompt edits are stored as new DB versions and used by the active pipeline.",
+                                size="sm",
+                                c="dimmed",
+                            ),
+                        ],
+                        gap=0,
+                    ),
+                ],
+                gap="sm", mb="sm",
+            ),
+            dmc.Accordion(items, chevronPosition="left", variant="separated"),
         ],
         withBorder=True, p="md", radius="md", shadow="sm",
     )
@@ -220,6 +334,9 @@ def config_layout():
                     ]),
                 ],
             ),
+
+            dmc.Text(id="prompt-save-feedback", size="sm", c="green"),
+            dmc.Box(id="config-prompts-section", children=_prompts_section()),
 
             # Sync status section
             dmc.Paper(
@@ -410,3 +527,84 @@ def save_config(
 
     except Exception as exc:
         return f"Error saving: {exc}"
+
+
+@callback(
+    Output("config-prompts-section", "children"),
+    Output("prompt-save-feedback", "children"),
+    Input("prompt-save-sentiment", "n_clicks"),
+    Input("prompt-save-ai_priority", "n_clicks"),
+    Input("prompt-save-complexity", "n_clicks"),
+    Input("prompt-save-pass1_phenomenon", "n_clicks"),
+    Input("prompt-save-pass2_grammar", "n_clicks"),
+    Input("prompt-save-pass3_mechanism", "n_clicks"),
+    Input("prompt-save-pass4_intervention", "n_clicks"),
+    Input("prompt-save-customer_health_explanation", "n_clicks"),
+    State("prompt-content-sentiment", "value"),
+    State("prompt-content-ai_priority", "value"),
+    State("prompt-content-complexity", "value"),
+    State("prompt-content-pass1_phenomenon", "value"),
+    State("prompt-content-pass2_grammar", "value"),
+    State("prompt-content-pass3_mechanism", "value"),
+    State("prompt-content-pass4_intervention", "value"),
+    State("prompt-content-customer_health_explanation", "value"),
+    State("prompt-summary-sentiment", "value"),
+    State("prompt-summary-ai_priority", "value"),
+    State("prompt-summary-complexity", "value"),
+    State("prompt-summary-pass1_phenomenon", "value"),
+    State("prompt-summary-pass2_grammar", "value"),
+    State("prompt-summary-pass3_mechanism", "value"),
+    State("prompt-summary-pass4_intervention", "value"),
+    State("prompt-summary-customer_health_explanation", "value"),
+    prevent_initial_call=True,
+)
+def save_prompt(
+    n_sentiment,
+    n_priority,
+    n_complexity,
+    n_pass1,
+    n_pass2,
+    n_pass3,
+    n_pass4,
+    n_health,
+    sentiment_content,
+    priority_content,
+    complexity_content,
+    pass1_content,
+    pass2_content,
+    pass3_content,
+    pass4_content,
+    health_content,
+    sentiment_summary,
+    priority_summary,
+    complexity_summary,
+    pass1_summary,
+    pass2_summary,
+    pass3_summary,
+    pass4_summary,
+    health_summary,
+):
+    triggered = ctx.triggered_id
+    if not triggered:
+        return no_update, no_update
+
+    prompt_values = {
+        "sentiment": (sentiment_content, sentiment_summary),
+        "ai_priority": (priority_content, priority_summary),
+        "complexity": (complexity_content, complexity_summary),
+        "pass1_phenomenon": (pass1_content, pass1_summary),
+        "pass2_grammar": (pass2_content, pass2_summary),
+        "pass3_mechanism": (pass3_content, pass3_summary),
+        "pass4_intervention": (pass4_content, pass4_summary),
+        "customer_health_explanation": (health_content, health_summary),
+    }
+
+    try:
+        prompt_key = triggered.replace("prompt-save-", "")
+        content, change_summary = prompt_values[prompt_key]
+        saved = save_prompt_version(prompt_key, content or "", change_summary=change_summary)
+        message = f"{saved['title']} saved as v{saved['version']}."
+    except Exception as exc:
+        message = f"Error saving prompt: {exc}"
+
+    return _prompts_section(), message

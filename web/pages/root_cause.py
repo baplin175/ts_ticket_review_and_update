@@ -10,7 +10,7 @@ from dash_iconify import DashIconify
 import plotly.graph_objects as go
 
 from .. import data
-from ..renderer import grid_with_export
+from ..renderer import grid_with_export, ticket_number_column
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -103,7 +103,7 @@ _INTERVENTION_COLORS = {
 # ══════════════════════════════════════════════════════════════════════
 
 _FIXES_DRILLDOWN_COLS = [
-    {"field": "ticket_number", "headerName": "Ticket #", "width": 110, "pinned": "left"},
+    ticket_number_column(width=110, pinned="left"),
     {"field": "ticket_name", "headerName": "Name", "minWidth": 200, "flex": 1,
      "tooltipField": "ticket_name"},
     {"field": "status", "headerName": "Status", "width": 120},
@@ -775,7 +775,7 @@ def _placeholder_card(title, icon):
 # ── Detail grid columns ─────────────────────────────────────────────
 
 _GRID_COLS = [
-    {"field": "ticket_number", "headerName": "Ticket #", "width": 100},
+    ticket_number_column(width=100, pinned=None),
     {"field": "ticket_name", "headerName": "Name", "minWidth": 200, "flex": 1},
     {"field": "product_name", "headerName": "Product", "width": 130},
     {"field": "customer", "headerName": "Customer", "width": 150},

@@ -130,6 +130,20 @@ def _normalize_action_list(data: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def _normalize_customer_list(data: Any) -> List[Dict[str, Any]]:
+    if not isinstance(data, dict):
+        return []
+    c = data.get("Customers") or data.get("Customer")
+    if isinstance(c, list):
+        return c
+    if isinstance(c, dict):
+        if c.get("RecordsReturned") == "0":
+            return []
+        if any(k in c for k in ("ID", "Name", "DateModified", "KeyAcct")):
+            return [c]
+    return []
+
+
 # ── Public API ───────────────────────────────────────────────────────
 
 def fetch_open_tickets(ticket_numbers: List[str] | None = None) -> List[Dict[str, Any]]:
@@ -216,6 +230,29 @@ def fetch_ticket_by_id(ticket_id: str) -> List[Dict[str, Any]]:
             items = [data]
     print(f"[ts] Fetched {len(items)} ticket(s) for id={ticket_id}.", flush=True)
     return items
+
+
+def fetch_all_customers() -> List[Dict[str, Any]]:
+    """Return all TeamSupport customers (paginated)."""
+    all_customers: List[Dict[str, Any]] = []
+    page, page_size = 1, 500
+
+    while True:
+        params = {
+            "pageNumber": page,
+            "pageSize": page_size,
+        }
+        data = ts_get(f"{TS_BASE}/Customers", params=params)
+        page_items = _normalize_customer_list(data)
+        if not page_items:
+            break
+        all_customers.extend(page_items)
+        if len(page_items) < page_size:
+            break
+        page += 1
+
+    print(f"[ts] Fetched {len(all_customers)} customer record(s).", flush=True)
+    return all_customers
 
 
 def fetch_all_activities(ticket_id: str) -> List[Dict[str, Any]]:

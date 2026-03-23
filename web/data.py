@@ -130,6 +130,7 @@ def get_filtered_backlog_daily(filters):
          AND t.date_created::date <= d.snapshot_date
          AND COALESCE(t.status, '') != 'Open'
          AND COALESCE(t.assignee, '') != 'Marketing'
+         AND COALESCE(t.group_name, '') != 'Marketing'
          AND (
              (t.closed_at IS NOT NULL AND t.closed_at::date > d.snapshot_date)
              OR
@@ -157,6 +158,7 @@ def get_filtered_backlog_daily(filters):
          AND t.date_created::date <= d.snapshot_date
          AND COALESCE(t.status, '') != 'Open'
          AND COALESCE(t.assignee, '') != 'Marketing'
+         AND COALESCE(t.group_name, '') != 'Marketing'
          AND (
              (t.closed_at IS NOT NULL AND t.closed_at::date > d.snapshot_date)
              OR
@@ -228,6 +230,7 @@ def get_open_by_status():
         WHERE closed_at IS NULL
           AND COALESCE(status, '') != 'Open'
           AND COALESCE(assignee, '') != 'Marketing'
+          AND COALESCE(group_name, '') != 'Marketing'
         GROUP BY status
         ORDER BY count DESC
     """)
@@ -307,10 +310,32 @@ def get_customer_health():
                 JOIN latest_date d ON d.as_of_date = c.as_of_date
                 WHERE c.score_formula_version = %s
                   AND {exclusion_sql}
+            ),
+            customer_metadata AS (
+                SELECT
+                    customer_name AS customer,
+                    BOOL_OR(COALESCE(is_active, FALSE)) AS is_active,
+                    BOOL_OR(COALESCE(key_acct, FALSE)) AS is_key_account
+                FROM customer_attributes
+                GROUP BY customer_name
+            ),
+            display_customers AS (
+                SELECT customer, is_key_account
+                FROM customer_metadata
+                WHERE is_active IS TRUE
+
+                UNION
+
+                SELECT DISTINCT filtered.customer, FALSE AS is_key_account
+                FROM filtered
+                LEFT JOIN customer_metadata
+                  ON customer_metadata.customer = filtered.customer
+                WHERE customer_metadata.customer IS NULL
             )
             SELECT
-                MAX(as_of_date) AS as_of_date,
-                customer,
+                latest_date.as_of_date AS as_of_date,
+                display_customers.customer,
+                CASE WHEN COALESCE(display_customers.is_key_account, FALSE) THEN 'Yes' ELSE '' END AS key_account,
                 COUNT(*) FILTER (WHERE pressure_contribution >= 1.0) AS open_ticket_count,
                 COUNT(*) FILTER (
                     WHERE priority IS NOT NULL
@@ -322,39 +347,43 @@ def get_customer_health():
                       AND overall_complexity >= 4
                       AND LOWER(COALESCE(status, '')) NOT IN ('closed', 'resolved', 'open')
                 ) AS high_complexity_count,
-                ROUND(AVG(overall_complexity)::numeric, 2) AS avg_complexity,
+                COALESCE(ROUND(AVG(overall_complexity)::numeric, 2), 0) AS avg_complexity,
                 NULL::numeric AS avg_elapsed_drag,
                 0 AS reopen_count_90d,
                 COUNT(*) FILTER (WHERE frustrated = 'Yes') AS frustration_count_90d,
                 jsonb_agg(DISTINCT cluster_id) FILTER (WHERE cluster_id IS NOT NULL) AS top_cluster_ids,
                 jsonb_agg(DISTINCT product_name) FILTER (WHERE product_name IS NOT NULL) AS top_products,
-                ROUND(SUM(pressure_contribution), 2) AS ticket_load_pressure_score,
-                ROUND(SUM(total_contribution), 2) AS customer_health_score,
+                COALESCE(ROUND(SUM(pressure_contribution), 2), 0) AS ticket_load_pressure_score,
+                COALESCE(ROUND(SUM(total_contribution), 2), 0) AS customer_health_score,
                 CASE
-                    WHEN ROUND(SUM(total_contribution), 2) < 15 THEN 'healthy'
-                    WHEN ROUND(SUM(total_contribution), 2) < 30 THEN 'watch'
-                    WHEN ROUND(SUM(total_contribution), 2) < 50 THEN 'at_risk'
+                    WHEN COALESCE(ROUND(SUM(total_contribution), 2), 0) < 15 THEN 'healthy'
+                    WHEN COALESCE(ROUND(SUM(total_contribution), 2), 0) < 30 THEN 'watch'
+                    WHEN COALESCE(ROUND(SUM(total_contribution), 2), 0) < 50 THEN 'at_risk'
                     ELSE 'critical'
                 END AS customer_health_band,
-                ROUND(SUM(pressure_contribution), 2) AS pressure_score,
-                ROUND(SUM(aging_contribution), 2) AS aging_score,
-                ROUND(SUM(friction_contribution), 2) AS friction_score,
-                ROUND(SUM(concentration_contribution), 2) AS concentration_score,
-                ROUND(SUM(breadth_contribution), 2) AS breadth_score,
+                COALESCE(ROUND(SUM(pressure_contribution), 2), 0) AS pressure_score,
+                COALESCE(ROUND(SUM(aging_contribution), 2), 0) AS aging_score,
+                COALESCE(ROUND(SUM(friction_contribution), 2), 0) AS friction_score,
+                COALESCE(ROUND(SUM(concentration_contribution), 2), 0) AS concentration_score,
+                COALESCE(ROUND(SUM(breadth_contribution), 2), 0) AS breadth_score,
                 NULL::jsonb AS factor_summary_json,
                 %s AS score_formula_version
-            FROM filtered
-            GROUP BY customer
+            FROM latest_date
+            JOIN display_customers ON TRUE
+            LEFT JOIN filtered
+              ON filtered.customer = display_customers.customer
+            GROUP BY latest_date.as_of_date, display_customers.customer, display_customers.is_key_account
             ORDER BY customer_health_score DESC NULLS LAST, ticket_load_pressure_score DESC NULLS LAST
         """, ("v1", "v1", *exclusion_params, "v1"))
-    except psycopg2_errors.UndefinedColumn:
+    except (psycopg2_errors.UndefinedColumn, psycopg2_errors.UndefinedTable):
         return query("""
-            SELECT *
+            SELECT *,
+                   ''::text AS key_account
             FROM customer_ticket_health
             WHERE as_of_date = (SELECT MAX(as_of_date) FROM customer_ticket_health)
             ORDER BY ticket_load_pressure_score DESC NULLS LAST
         """)
-    except (psycopg2_errors.UndefinedTable, psycopg2.OperationalError):
+    except psycopg2.OperationalError:
         return []
 
 
@@ -1131,12 +1160,13 @@ def get_saved_reports():
 
 
 def save_report(name, filter_model):
-    """Upsert a saved report by name."""
-    _execute("""
+    """Upsert a saved report by name and return the saved row."""
+    return _execute_returning("""
         INSERT INTO saved_reports (name, filter_model)
         VALUES (%s, %s)
         ON CONFLICT (name) DO UPDATE SET filter_model = EXCLUDED.filter_model,
                                          created_at = now()
+        RETURNING id, name, filter_model, created_at
     """, (name, json.dumps(filter_model)))
 
 

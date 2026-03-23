@@ -64,6 +64,7 @@ def process_ticket_pass(
     build_success_update: Callable[[Any], Dict[str, Any]],
     build_result_update: Optional[Callable[[Any], Dict[str, Any]]] = None,
     validate_parsed: Optional[Callable[[Any], None]] = None,
+    call_matcha_fn: Optional[Callable[[str], str]] = None,
 ) -> Dict[str, Any]:
     """Run a single ticket through the standard LLM pass lifecycle."""
     import db
@@ -100,9 +101,10 @@ def process_ticket_pass(
 
     raw_response = None
     try:
-        from matcha_client import call_matcha
+        if call_matcha_fn is None:
+            from matcha_client import call_matcha as call_matcha_fn
 
-        raw_response = call_matcha(prompt_text)
+        raw_response = call_matcha_fn(prompt_text)
         parsed_output = parse_response(raw_response)
         if validate_parsed:
             validate_parsed(parsed_output)

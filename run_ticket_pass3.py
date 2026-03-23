@@ -22,29 +22,39 @@ import sys
 import time
 
 from config import MATCHA_MISSION_ID
-from passes.runtime import load_prompt_template, process_ticket_pass
+from matcha_client import call_matcha
+from passes.runtime import process_ticket_pass
 from pass3_parser import parse_pass3_response, validate_mechanism
 from pipeline_stages import stage_title
-
-PROMPT_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "prompts", "pass3_mechanism.txt"
-)
+from prompt_store import get_prompt
 
 PASS_NAME = "pass3_mechanism"
-PROMPT_VERSION = "3"
+DEFAULT_PROMPT_VERSION = "3"
 MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
 
 # Upstream dependency — source canonical_failure from Pass 1 v2
 PASS2_PASS_NAME = "pass1_phenomenon"
-PASS2_PROMPT_VERSION = "2"
+DEFAULT_PASS2_PROMPT_VERSION = "2"
 
 
 def _log(msg: str) -> None:
     print(msg, flush=True)
 
 
+def _load_prompt_record() -> dict:
+    return get_prompt(PASS_NAME, allow_fallback=False)
+
+
 def _load_prompt_template() -> str:
-    return load_prompt_template(PROMPT_PATH)
+    return _load_prompt_record()["content"]
+
+
+def _coerce_prompt_version(value, default: str) -> str:
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return value
+    return default
 
 
 def _build_prompt(template: str, canonical_failure: str, thread_context: str = "") -> str:
@@ -60,6 +70,7 @@ def process_ticket(
     ticket_id: int,
     canonical_failure: str,
     prompt_template: str,
+    prompt_version: str = DEFAULT_PROMPT_VERSION,
     *,
     thread_context: str = "",
     force: bool = False,
@@ -88,7 +99,7 @@ def process_ticket(
     return process_ticket_pass(
         ticket_id,
         pass_name=PASS_NAME,
-        prompt_version=PROMPT_VERSION,
+        prompt_version=prompt_version,
         model_name=MODEL_NAME,
         input_text=canonical_failure,
         prompt_text=full_prompt,
@@ -98,6 +109,7 @@ def process_ticket(
         build_success_update=_success_update,
         build_result_update=_result_update,
         validate_parsed=_validate_parsed,
+        call_matcha_fn=call_matcha,
     )
 
 
@@ -124,16 +136,19 @@ def main(
         from run_rollups import run_full_rollups
         run_full_rollups()
 
+    prompt_record = _load_prompt_record()
+    upstream_prompt = get_prompt(PASS2_PASS_NAME, allow_fallback=False)
     prompt_template = _load_prompt_template()
-    _log(f"[pass3] Loaded prompt from {PROMPT_PATH}")
-    _log(f"[pass3] Stage: {stage_title('mechanism')}  Internal pass: {PASS_NAME}  Prompt version: {PROMPT_VERSION}  Model: {MODEL_NAME}")
-    _log(f"[pass3] Requires Pass 1: {PASS2_PASS_NAME} v{PASS2_PROMPT_VERSION}")
+    prompt_version = _coerce_prompt_version(prompt_record.get("version"), DEFAULT_PROMPT_VERSION)
+    pass2_prompt_version = _coerce_prompt_version(upstream_prompt.get("version"), DEFAULT_PASS2_PROMPT_VERSION)
+    _log(f"[pass3] Stage: {stage_title('mechanism')}  Internal pass: {PASS_NAME}  Prompt version: {prompt_version}  Model: {MODEL_NAME}")
+    _log(f"[pass3] Requires Pass 1: {PASS2_PASS_NAME} v{pass2_prompt_version}")
 
     # Fetch eligible tickets (those with successful Pass 1 canonical_failure)
     rows = db.fetch_pending_pass3_tickets(
-        PROMPT_VERSION,
+        prompt_version,
         pass2_pass_name=PASS2_PASS_NAME,
-        pass2_prompt_version=PASS2_PROMPT_VERSION,
+        pass2_prompt_version=pass2_prompt_version,
         limit=limit,
         ticket_ids=ticket_ids,
         failed_only=failed_only,
@@ -162,6 +177,7 @@ def main(
             ticket_id,
             canonical_failure,
             prompt_template,
+            prompt_version,
             thread_context=thread_context,
             force=force,
         )
