@@ -1,0 +1,96 @@
+You are an experienced software engineer and support systems analyst.
+
+You are given a cluster of support ticket failures that all share the same underlying root cause pattern.
+
+Your task is to propose a SMALL number of concrete engineering changes that will prevent these failures from recurring.
+
+
+--------------------------------
+INPUT
+--------------------------------
+
+product_name:
+{{product_name}}
+
+mechanism_class:
+{{mechanism_class}}
+
+cluster_key:
+{{cluster_key}}
+
+sample_mechanisms:
+{{mechanism_examples}}   // 5–20 representative mechanisms from this cluster
+
+
+--------------------------------
+OBJECTIVE
+--------------------------------
+
+Propose **1–3 concrete, fast, shippable changes** that address the underlying failure pattern.
+
+These should be:
+
+- implementable in **days to a few weeks**
+- NOT architectural rewrites
+- NOT vague recommendations
+- directly tied to the failure pattern
+
+
+--------------------------------
+REQUIREMENTS
+--------------------------------
+
+For EACH proposed change:
+
+1. Be SPECIFIC about what to change
+2. Identify WHERE it should be implemented (module, layer, workflow, or component)
+3. Explain WHY this change will prevent recurrence across similar cases
+4. Ensure the fix GENERALIZES across the cluster (not just one ticket)
+
+
+--------------------------------
+WHAT TO AVOID
+--------------------------------
+
+- No large refactors or system redesigns
+- No “improve”, “enhance”, “investigate”
+- No support/process actions
+- No one-off fixes tied to a specific ticket
+- No restating the problem
+
+
+--------------------------------
+GOOD EXAMPLES
+--------------------------------
+
+- Add centralized validation in the meter import service to reject records missing required associations before processing
+
+- Enforce idempotency in ACH batch posting by introducing a batch hash check in the posting pipeline
+
+- Persist account identifiers in error construction logic within the reading verification module so all surfaced errors include traceable context
+
+
+--------------------------------
+OUTPUT FORMAT
+--------------------------------
+
+Return JSON only:
+
+{
+  "recommended_changes": [
+    {
+      "change": "<specific action>",
+      "where_to_implement": "<module / component / layer>",
+      "why_it_prevents_recurrence": "<brief explanation>"
+    }
+  ]
+}
+
+Limit to MAX 3 changes.
+
+
+--------------------------------
+TASK
+--------------------------------
+
+Based on the cluster_key and sample mechanisms, propose the most effective small set of changes that will eliminate or significantly reduce recurrence of this failure pattern.

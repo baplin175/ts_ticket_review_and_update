@@ -93,7 +93,7 @@ def download(job_id, filename):
         return jsonify({"error": "Unknown job"}), 404
 
     # Only allow downloading specific result files
-    allowed_files = {"pass1_results.csv", "pass3_results.csv", "pass4_results.csv"}
+    allowed_files = {"pass1_results.csv", "pass3_results.csv", "pass4_results.csv", "pass5_results.csv"}
     if filename not in allowed_files:
         return jsonify({"error": "Invalid filename"}), 400
 

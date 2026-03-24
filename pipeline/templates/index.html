@@ -66,6 +66,7 @@
   <a id="dl1" href="#">pass1_results.csv</a>
   <a id="dl3" href="#">pass3_results.csv</a>
   <a id="dl4" href="#">pass4_results.csv</a>
+  <a id="dl5" href="#">pass5_results.csv</a>
 </div>
 
 <p class="error" id="errorText"></p>
@@ -175,6 +176,7 @@ function showDownloads() {
   document.getElementById('dl1').href = '/download/' + jobId + '/pass1_results.csv';
   document.getElementById('dl3').href = '/download/' + jobId + '/pass3_results.csv';
   document.getElementById('dl4').href = '/download/' + jobId + '/pass4_results.csv';
+  document.getElementById('dl5').href = '/download/' + jobId + '/pass5_results.csv';
 }
 
 // On page load, check for active/recent jobs
@@ -215,6 +217,7 @@ function checkActiveJobs() {
           links = '<a href="/download/' + j.id + '/pass1_results.csv">P1</a>'
                 + '<a href="/download/' + j.id + '/pass3_results.csv">P3</a>'
                 + '<a href="/download/' + j.id + '/pass4_results.csv">P4</a>'
+                + '<a href="/download/' + j.id + '/pass5_results.csv">P5</a>'
                 + '<a href="/files?prefix=' + j.id + '/">Files</a>';
         }
         if (j.status === 'failed' || j.status === 'complete') {

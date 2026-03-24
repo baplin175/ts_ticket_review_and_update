@@ -9,6 +9,7 @@ import time
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
 from dash import callback, ctx, dcc, html, Input, Output, State, no_update
+from dash.exceptions import PreventUpdate
 from dash_iconify import DashIconify
 
 from .. import data
@@ -83,6 +84,13 @@ COLUMN_DEFS = [
         "field": "days_opened",
         "headerName": "Age (d)",
         "width": 90,
+        "type": "numericColumn",
+        "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"},
+    },
+    {
+        "field": "days_since_modified",
+        "headerName": "Days Idle",
+        "width": 100,
         "type": "numericColumn",
         "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"},
     },
@@ -173,7 +181,7 @@ def normalize_saved_reports(reports):
         return []
     if isinstance(reports, dict):
         reports = list(reports.values())
-    return sorted(reports, key=lambda r: (r.get("name") or "").lower())
+    return sorted(reports, key=lambda r: (r.get("sort_order") or 0, (r.get("name") or "").lower()))
 
 
 def build_report_tabs(reports):
@@ -240,6 +248,22 @@ def tickets_layout():
                                 variant="subtle",
                                 color="red",
                                 size="compact-sm",
+                                disabled=True,
+                            ),
+                            dmc.ActionIcon(
+                                DashIconify(icon="tabler:chevron-left", width=16),
+                                id="move-tab-left-btn",
+                                variant="subtle",
+                                color="gray",
+                                size="sm",
+                                disabled=True,
+                            ),
+                            dmc.ActionIcon(
+                                DashIconify(icon="tabler:chevron-right", width=16),
+                                id="move-tab-right-btn",
+                                variant="subtle",
+                                color="gray",
+                                size="sm",
                                 disabled=True,
                             ),
                             dmc.Button(
@@ -506,15 +530,42 @@ def render_saved_report_navigation(saved_reports):
 @callback(
     Output("delete-report-btn", "disabled"),
     Output("delete-report-btn", "children"),
+    Output("move-tab-left-btn", "disabled"),
+    Output("move-tab-right-btn", "disabled"),
     Input("ticket-view-tabs", "value"),
     State("saved-reports-store", "data"),
 )
 def update_delete_report_button(tab_value, saved_reports):
     if not tab_value or not str(tab_value).startswith("report:"):
-        return True, "Delete Report"
+        return True, "Delete Report", True, True
     report_id = str(tab_value).split(":", 1)[1]
     report = (saved_reports or {}).get(report_id) or (saved_reports or {}).get(int(report_id), {})
     report_name = (report or {}).get("name")
     if not report_name:
-        return True, "Delete Report"
-    return False, f"Delete {report_name}"
+        return True, "Delete Report", True, True
+    return False, f"Delete {report_name}", False, False
+
+
+@callback(
+    Output("saved-reports-store", "data", allow_duplicate=True),
+    Input("move-tab-left-btn", "n_clicks"),
+    Input("move-tab-right-btn", "n_clicks"),
+    State("ticket-view-tabs", "value"),
+    State("saved-reports-store", "data"),
+    prevent_initial_call=True,
+)
+def reorder_tab(left_clicks, right_clicks, tab_value, saved_reports):
+    if not tab_value or not str(tab_value).startswith("report:"):
+        raise PreventUpdate
+    triggered = ctx.triggered_id
+    if triggered == "move-tab-left-btn":
+        direction = "left"
+    elif triggered == "move-tab-right-btn":
+        direction = "right"
+    else:
+        raise PreventUpdate
+    report_id = int(str(tab_value).split(":", 1)[1])
+    data.reorder_report(report_id, direction)
+    # Refresh store with updated order
+    rows = data.get_saved_reports()
+    return {str(r["id"]): r for r in rows}

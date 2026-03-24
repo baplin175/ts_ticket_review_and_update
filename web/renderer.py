@@ -209,6 +209,8 @@ def ticket_number_column(width=110, header_name="Ticket #", pinned="left", **kwa
         "headerName": header_name,
         "width": width,
         "cellStyle": _TICKET_NUMBER_CELL_STYLE,
+        "type": "numericColumn",
+        "valueGetter": {"function": "Number(params.data.ticket_number)"},
     }
     if pinned is not None:
         col["pinned"] = pinned

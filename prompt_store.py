@@ -71,7 +71,7 @@ PROMPT_SEEDS: tuple[PromptSeed, ...] = (
         title="Pass 5 Cluster Key",
         description="Mechanism-to-cluster-key normalization prompt.",
         filename="pass5_cluster_key.txt",
-        version=2,
+        version=3,
     ),
     PromptSeed(
         key="customer_health_explanation",

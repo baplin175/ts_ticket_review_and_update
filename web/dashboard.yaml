@@ -57,6 +57,18 @@ pages:
     module: web.pages.tickets
     layout_func: tickets_layout
 
+  - label: Operations
+    route: /operations
+    icon: tabler:zoom-scan
+    module: web.pages.operations
+    layout_func: operations_layout
+
+  - label: Deep Dive
+    route: /deep-dive
+    icon: tabler:microscope
+    module: web.pages.deep_dive
+    layout_func: deep_dive_layout
+
   # ── YAML-driven pages ────────────────────────────────────────────
 
   - label: Health

@@ -3,73 +3,160 @@ You are normalizing technical root causes into reusable clustering keys.
 Task:
 Convert the mechanism into a short, standardized label.
 
-The cluster_key MUST be derived from the mechanism (root cause), not from the intervention wording.
+The cluster_key MUST represent the underlying failure pattern and MUST be reusable across many tickets.
 
 
-CLUSTER KEY NORMALIZATION RULES
+--------------------------------
+CORE OBJECTIVE
+--------------------------------
 
-The cluster_key must represent the core failure pattern in a generalized, reusable form.
+Maximize grouping across similar failures.
 
-Rules:
+Prefer FEWER, broader clusters over many specific ones.
+
+If two mechanisms differ only by object detail, they MUST map to the same cluster_key.
+
+
+--------------------------------
+HARD CONSTRAINTS
+--------------------------------
 
 - Output MUST be a single snake_case phrase
 - Max 6 words
-- Focus on the SYSTEM cause (not the symptom)
-- Use consistent vocabulary across similar cases
-- Remove unnecessary specificity (e.g., "identifier", "details", "message", "records") unless essential to the failure
-- Focus on the relationship or failure pattern, not the specific implementation detail
-- Remove context-specific words (customer names, cities, etc.)
-- Do NOT include product names
-- Do NOT include verbs like "update", "fix", "handle"
-- Prefer stable, repeatable patterns that will group similar issues together
-
-Prefer canonical patterns (e.g., X_not_linked_to_Y) over descriptive phrases.
+- NO punctuation except underscores
+- NO product names
+- NO implementation-specific details
+- NO variable names, field names, or identifiers unless essential
+- NO verbs like: update, fix, handle, process
+- MUST describe a failure pattern, not a specific instance
 
 
-PREFERRED PATTERNS:
+--------------------------------
+ANTI-FRAGMENTATION RULE (CRITICAL)
+--------------------------------
 
-- X_not_linked_to_Y
-- wrong_X_selected
-- missing_X_association
-- duplicate_X_created
-- invalid_X_state
-- X_not_persisted
-- X_not_propagated
-- missing_X_validation
+If the mechanism contains a specific object (account, employee, meter, payment, etc.):
 
+→ REMOVE the object unless it changes the failure category
 
-GENERALIZATION RULE:
+Examples:
 
-If multiple ways exist to describe the issue, choose the form that will best group similar failures across tickets, even if it is less specific.
+- missing_employee_hours_calculation
+- missing_payment_amount_calculation
+→ BOTH become:
+missing_calculation_logic
 
-Example transformations:
+---
 
-"missing_account_identifier_in_error_message"
-→ "error_not_linked_to_account"
+- missing_account_identifier_in_error
+- missing_customer_id_in_error
+→ BOTH become:
+error_not_linked_to_entity
 
-"error message does not include account number"
-→ "error_not_linked_to_account"
+---
 
-"fails to associate error with account"
-→ "error_not_linked_to_account"
+- meter_not_linked_to_account
+- payment_not_linked_to_customer
+→ BOTH become:
+entity_not_linked
 
-"missing customer id in validation error"
-→ "error_not_linked_to_account"
-
-
-NORMALIZATION GUIDANCE:
-
-- "fails to associate X with Y" → X_not_linked_to_Y
-- "does not validate X" → missing_X_validation
-- "selects wrong X" → wrong_X_selected
-- "allows duplicate X" → duplicate_X_created
-- "uses incorrect X" → incorrect_X_used
-- "X not persisted" → X_not_persisted
-- "X not propagated" → X_not_propagated
+Use generic placeholders when possible:
+- entity
+- record
+- data
+- value
 
 
-Input:
+--------------------------------
+CANONICAL PATTERNS (PREFERRED)
+--------------------------------
+
+Always map to one of these if possible:
+
+- entity_not_linked
+- wrong_entity_selected
+- missing_entity_association
+- duplicate_records_created
+- invalid_state
+- state_not_persisted
+- state_not_propagated
+- missing_validation
+- missing_idempotency_validation
+- incorrect_calculation_logic
+- incorrect_configuration_used
+- invalid_configuration_state
+- missing_dependency
+- invalid_input_handling
+- stale_state_used
+- inconsistent_state
+
+
+--------------------------------
+NORMALIZATION RULES
+--------------------------------
+
+Map aggressively:
+
+- "fails to associate X with Y"
+  → entity_not_linked
+
+- "missing identifier / reference"
+  → entity_not_linked
+
+- "wrong record / account / meter selected"
+  → wrong_entity_selected
+
+- "duplicate creation / applied twice"
+  → duplicate_records_created
+
+- "missing validation"
+  → missing_validation
+
+- "missing idempotency"
+  → missing_idempotency_validation
+
+- "incorrect logic / miscalculation"
+  → incorrect_calculation_logic
+
+- "configuration issue"
+  → invalid_configuration_state
+
+- "not saved / not retained"
+  → state_not_persisted
+
+- "not reflected / not updated downstream"
+  → state_not_propagated
+
+- "stale / cached / outdated data"
+  → stale_state_used
+
+
+--------------------------------
+GENERALIZATION PRIORITY
+--------------------------------
+
+When choosing between:
+
+- Specific → generic
+- Narrow → broad
+- Descriptive → reusable
+
+ALWAYS choose:
+
+→ generic, broad, reusable
+
+
+--------------------------------
+INPUT
+--------------------------------
+
 {{mechanism}}
 
-Output:
+
+--------------------------------
+OUTPUT
+--------------------------------
+
+Return ONLY the cluster key:
+
 <snake_case_key_only>

@@ -24,18 +24,22 @@ if __package__ in (None, ""):
     import web.renderer as renderer                               # noqa: E402
     from web.pages.dashboard_editor import register_callbacks as dashboard_editor_callbacks  # noqa: E402
     from web.pages.health import register_health_callbacks as health_callbacks  # noqa: E402
+    from web.pages.operations import register_operations_callbacks as ops_callbacks  # noqa: E402
     from web.pages.overview import register_overview_callbacks as ov_callbacks  # noqa: E402
     from web.pages.root_cause import register_callbacks as rc_callbacks  # noqa: E402
     from web.pages.ticket_detail import ticket_detail_layout, register_callbacks as td_callbacks  # noqa: E402
+    from web.pages.deep_dive import register_deep_dive_callbacks as dd_callbacks  # noqa: E402
 else:
     from . import data                                             # noqa: E402
     from . import dashboard_registry                               # noqa: E402
     from . import renderer                                         # noqa: E402
     from .pages.dashboard_editor import register_callbacks as dashboard_editor_callbacks  # noqa: E402
     from .pages.health import register_health_callbacks as health_callbacks  # noqa: E402
+    from .pages.operations import register_operations_callbacks as ops_callbacks  # noqa: E402
     from .pages.overview import register_overview_callbacks as ov_callbacks  # noqa: E402
     from .pages.root_cause import register_callbacks as rc_callbacks  # noqa: E402
     from .pages.ticket_detail import ticket_detail_layout, register_callbacks as td_callbacks  # noqa: E402
+    from .pages.deep_dive import register_deep_dive_callbacks as dd_callbacks  # noqa: E402
 
 # Import custom page modules declared in dashboard.yaml
 renderer.import_custom_layouts()
@@ -58,6 +62,8 @@ rc_callbacks(app)
 td_callbacks(app)
 ov_callbacks(app)
 health_callbacks(app)
+ops_callbacks(app)
+dd_callbacks(app)
 dashboard_editor_callbacks(app)
 
 # ── Navigation items (static + DB-backed) ────────────────────────────
@@ -660,6 +666,7 @@ def _collect_grid_ids():
         "health-drilldown-grid",
         "health-contributors-grid",
         "rc-fixes-drilldown-grid",
+        "ops-swooper-grid",
     ])
     return ids
 

@@ -26,6 +26,7 @@ from pass4.mechanism_classifier import (
     validate_intervention_action,
     Pass4ParseError,
 )
+from pass5.cluster_key_parser import parse_pass5_response, Pass5ParseError
 from prompt_store import get_prompt
 from pipeline.blob_store import (
     upload_file as blob_upload_file,
@@ -46,8 +47,21 @@ _VIOLATION_RE = re.compile(
 )
 
 
-def _load_prompt(prompt_key: str) -> str:
-    return get_prompt(prompt_key, allow_fallback=True)["content"]
+import logging as _logging
+
+_log_csv = _logging.getLogger("csv_pipeline")
+
+
+def _load_prompt(prompt_key: str) -> tuple[str, str]:
+    """Return (content, version) for the prompt.  Warns on file fallback."""
+    rec = get_prompt(prompt_key, allow_fallback=True)
+    version = rec.get("version", "file")
+    if version == "file" or rec.get("source_path"):
+        _log_csv.warning(
+            "Prompt '%s' loaded from flat-file fallback — DB prompt store may be unavailable",
+            prompt_key,
+        )
+    return rec["content"], version
 
 
 def _strip_violation_warnings(text: str) -> str:
@@ -58,7 +72,8 @@ def _strip_violation_warnings(text: str) -> str:
 
 PASS1_COLUMNS = [
     "ticket_id", "ticket_name", "phenomenon", "component", "operation",
-    "unexpected_state", "canonical_failure", "confidence", "status", "error",
+    "unexpected_state", "canonical_failure", "confidence",
+    "prompt_version", "status", "error",
 ]
 
 
@@ -73,7 +88,7 @@ def run_pass1_csv(
 
     Returns the number of rows processed.
     """
-    template = _load_prompt("pass1_phenomenon")
+    template, prompt_version = _load_prompt("pass1_phenomenon")
     rows = _read_csv(input_csv)
     total = len(rows)
 
@@ -95,6 +110,7 @@ def run_pass1_csv(
                 "unexpected_state": None,
                 "canonical_failure": None,
                 "confidence": None,
+                "prompt_version": prompt_version,
                 "status": "pending",
                 "error": None,
             }
@@ -130,7 +146,8 @@ def run_pass1_csv(
 # ── Pass 3 ───────────────────────────────────────────────────────────
 
 PASS3_COLUMNS = [
-    "ticket_id", "mechanism", "evidence", "category", "status", "error",
+    "ticket_id", "mechanism", "evidence", "category",
+    "prompt_version", "status", "error",
 ]
 
 
@@ -147,7 +164,7 @@ def run_pass3_csv(
     Skips rows with LOW confidence or missing canonical_failure.
     Returns the number of rows processed.
     """
-    template = _load_prompt("pass3_mechanism")
+    template, prompt_version = _load_prompt("pass3_mechanism")
 
     pass1_rows = _read_csv(pass1_csv)
     thread_map = {r["ticket_id"]: r.get("full_thread_text", "") for r in _read_csv(input_csv)}
@@ -167,6 +184,7 @@ def run_pass3_csv(
                 "mechanism": None,
                 "evidence": None,
                 "category": None,
+                "prompt_version": prompt_version,
                 "status": "pending",
                 "error": None,
             }
@@ -211,7 +229,7 @@ def run_pass3_csv(
 
 PASS4_COLUMNS = [
     "ticket_id", "mechanism_class", "intervention_type", "intervention_action",
-    "proposed_class", "proposed_type", "status", "error",
+    "proposed_class", "proposed_type", "prompt_version", "status", "error",
 ]
 
 
@@ -227,7 +245,7 @@ def run_pass4_csv(
     Skips rows that did not succeed in Pass 3.
     Returns the number of rows processed.
     """
-    template = _load_prompt("pass4_intervention")
+    template, prompt_version = _load_prompt("pass4_intervention")
 
     pass3_rows = _read_csv(pass3_csv)
     total = len(pass3_rows)
@@ -248,6 +266,7 @@ def run_pass4_csv(
                 "intervention_action": None,
                 "proposed_class": None,
                 "proposed_type": None,
+                "prompt_version": prompt_version,
                 "status": "pending",
                 "error": None,
             }
@@ -285,6 +304,75 @@ def run_pass4_csv(
     return total
 
 
+# ── Pass 5 ───────────────────────────────────────────────────────────
+
+PASS5_COLUMNS = [
+    "ticket_id", "cluster_key", "prompt_version", "status", "error",
+]
+
+
+def run_pass5_csv(
+    pass3_csv: str,
+    output_csv: str,
+    progress_cb: Optional[Callable] = None,
+    inference_server: Optional[int] = None,
+    log_cb: Optional[Callable] = None,
+) -> int:
+    """Run Pass 5 on successful rows from *pass3_csv*.
+
+    Skips rows that did not succeed in Pass 3 (mechanism inference).
+    Returns the number of rows processed.
+    """
+    template, prompt_version = _load_prompt("pass5_cluster_key")
+
+    pass3_rows = _read_csv(pass3_csv)
+    total = len(pass3_rows)
+
+    with open(output_csv, "w", newline="", encoding="utf-8") as fout:
+        writer = csv.DictWriter(fout, fieldnames=PASS5_COLUMNS)
+        writer.writeheader()
+
+        for idx, p3 in enumerate(pass3_rows, 1):
+            ticket_id = p3["ticket_id"]
+            mechanism = p3.get("mechanism") or ""
+            p3_status = p3.get("status", "")
+
+            result = {
+                "ticket_id": ticket_id,
+                "cluster_key": None,
+                "prompt_version": prompt_version,
+                "status": "pending",
+                "error": None,
+            }
+
+            if p3_status != "success" or not mechanism.strip():
+                result["status"] = "skipped"
+                writer.writerow(result)
+                if progress_cb:
+                    progress_cb(5, idx, total)
+                continue
+
+            try:
+                prompt = template.replace("{{mechanism}}", mechanism)
+
+                raw = call_matcha(prompt, inference_server=inference_server)
+                parsed, cluster_key = parse_pass5_response(raw)
+
+                result["cluster_key"] = cluster_key
+                result["status"] = "success"
+            except (Pass5ParseError, Exception) as exc:
+                result["status"] = "failed"
+                result["error"] = str(exc)
+                if log_cb:
+                    log_cb(f"Pass5 ticket {ticket_id} FAILED: {exc}")
+
+            writer.writerow(result)
+            if progress_cb:
+                progress_cb(5, idx, total)
+
+    return total
+
+
 # ── Full pipeline ────────────────────────────────────────────────────
 
 def run_full_pipeline(
@@ -295,19 +383,20 @@ def run_full_pipeline(
     job_id: Optional[str] = None,
     log_cb: Optional[Callable] = None,
 ) -> dict:
-    """Orchestrate Pass 1 → 3 → 4, writing CSVs to *output_dir*.
+    """Orchestrate Pass 1 → 3 → 4 → 5, writing CSVs to *output_dir*.
 
     *progress_cb(pass_num, processed, total)* is called after each row.
     If *job_id* is provided, output CSVs are uploaded to blob storage
     after each pass completes.
 
-    Returns dict with paths to the three output CSVs.
+    Returns dict with paths to the four output CSVs.
     """
     os.makedirs(output_dir, exist_ok=True)
 
     p1_csv = os.path.join(output_dir, "pass1_results.csv")
     p3_csv = os.path.join(output_dir, "pass3_results.csv")
     p4_csv = os.path.join(output_dir, "pass4_results.csv")
+    p5_csv = os.path.join(output_dir, "pass5_results.csv")
 
     run_pass1_csv(input_csv, p1_csv, progress_cb, inference_server, log_cb=log_cb)
     if job_id:
@@ -321,7 +410,11 @@ def run_full_pipeline(
     if job_id:
         blob_upload_file(job_id, "pass4_results.csv", p4_csv)
 
-    return {"pass1": p1_csv, "pass3": p3_csv, "pass4": p4_csv}
+    run_pass5_csv(p3_csv, p5_csv, progress_cb, inference_server, log_cb=log_cb)
+    if job_id:
+        blob_upload_file(job_id, "pass5_results.csv", p5_csv)
+
+    return {"pass1": p1_csv, "pass3": p3_csv, "pass4": p4_csv, "pass5": p5_csv}
 
 
 # ── CSV helper ───────────────────────────────────────────────────────
@@ -469,8 +562,8 @@ def submit_job(input_csv: str, output_dir: str, inference_server: Optional[int] 
             # Count total rows once for progress tracking
             rows = _read_csv(input_csv)
             row_count = len(rows)
-            # Total work = rows * 3 passes
-            job.total = row_count * 3
+            # Total work = rows * 4 passes
+            job.total = row_count * 4
             jlog.log(f"Loaded {row_count} row(s). Total work units: {job.total}")
 
             def _on_progress(pass_num: int, processed: int, total: int):
@@ -481,6 +574,8 @@ def submit_job(input_csv: str, output_dir: str, inference_server: Optional[int] 
                     job.processed = row_count + processed
                 elif pass_num == 4:
                     job.processed = row_count * 2 + processed
+                elif pass_num == 5:
+                    job.processed = row_count * 3 + processed
                 if processed == 1 or processed == total:
                     jlog.log(f"Pass {pass_num}: {processed}/{total}")
 

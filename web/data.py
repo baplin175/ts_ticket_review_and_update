@@ -645,6 +645,240 @@ def save_customer_health_explanation(
     ))
 
 
+# ── Operations / Analyst behaviour ──────────────────────────────────
+
+_ANALYST_EXCLUSIONS = ("Customer Support (CS)", "Cogsdale Support",
+                       "Development (D)", "Professional Services (PS)",
+                       "Cogsdale GP Support (GP)")
+
+_SUPPORT_ANALYSTS_CACHE = None
+
+
+def _get_support_analysts():
+    """Return tuple of analyst names whose TeamSupport title contains 'Support' (cached)."""
+    global _SUPPORT_ANALYSTS_CACHE
+    if _SUPPORT_ANALYSTS_CACHE is not None:
+        return _SUPPORT_ANALYSTS_CACHE
+    try:
+        from ts_client import ts_get, TS_BASE
+        data = ts_get(f"{TS_BASE}/Users", params={"Organization": "inHANCE"})
+        users = data.get("Users") or data.get("User") or []
+        if isinstance(users, dict):
+            users = [users]
+        names = []
+        for u in users:
+            title = (u.get("Title") or "").strip()
+            if "support" not in title.lower():
+                continue
+            fn = (u.get("FirstName") or "").strip()
+            ln = (u.get("LastName") or "").strip()
+            name = f"{fn} {ln}".strip()
+            if name:
+                names.append(name)
+        _SUPPORT_ANALYSTS_CACHE = tuple(names) if names else ("__NO_MATCH__",)
+    except Exception as e:
+        print(f"[data] Failed to fetch support analysts: {e}", flush=True)
+        _SUPPORT_ANALYSTS_CACHE = ("__NO_MATCH__",)
+    return _SUPPORT_ANALYSTS_CACHE
+
+
+def get_analyst_scorecard(months=6):
+    """Per-analyst summary: closures, complexity, own-work ratio, cherry-pick signals."""
+    cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
+    support_analysts = _get_support_analysts()
+    support_ph = ",".join(["%s"] * len(support_analysts))
+    return query(f"""
+        WITH closed AS (
+            SELECT v.ticket_id, v.assignee, v.overall_complexity,
+                   v.intrinsic_complexity, v.days_opened, v.frustrated,
+                   v.priority, v.severity, v.closed_at
+            FROM vw_ticket_analytics_core v
+            WHERE v.closed_at IS NOT NULL
+              AND v.closed_at >= CURRENT_DATE - (%s || ' months')::interval
+              AND v.assignee IS NOT NULL
+              AND {cust_sql}
+              AND v.assignee IN ({support_ph})
+        ),
+        inh_actions AS (
+            SELECT ta.ticket_id, ta.creator_name,
+                   COUNT(*) FILTER (WHERE NOT COALESCE(ta.is_empty, FALSE)) AS nonempty
+            FROM ticket_actions ta
+            JOIN closed c ON c.ticket_id = ta.ticket_id
+            WHERE ta.party = 'inh'
+            GROUP BY ta.ticket_id, ta.creator_name
+        ),
+        ticket_work AS (
+            SELECT c.ticket_id, c.assignee,
+                   COALESCE(SUM(ia.nonempty), 0) AS total_inh,
+                   COALESCE(SUM(CASE WHEN ia.creator_name = c.assignee THEN ia.nonempty ELSE 0 END), 0) AS own,
+                   COUNT(DISTINCT ia.creator_name) FILTER (WHERE ia.creator_name != c.assignee) AS others
+            FROM closed c
+            LEFT JOIN inh_actions ia ON ia.ticket_id = c.ticket_id
+            GROUP BY c.ticket_id, c.assignee
+        )
+        SELECT
+            c.assignee,
+            COUNT(*)::int AS tickets_closed,
+            ROUND(AVG(c.overall_complexity), 2) AS avg_complexity,
+            ROUND(AVG(c.days_opened), 1) AS avg_days_open,
+            COUNT(*) FILTER (WHERE c.overall_complexity >= 4)::int AS high_complexity_count,
+            ROUND(100.0 * COUNT(*) FILTER (WHERE c.overall_complexity >= 4) / NULLIF(COUNT(*), 0), 1) AS pct_high_complexity,
+            COUNT(*) FILTER (WHERE c.priority IS NOT NULL AND c.priority <= 3)::int AS high_priority_count,
+            COUNT(*) FILTER (WHERE c.frustrated = 'Yes')::int AS frustrated_count,
+            ROUND(AVG(CASE WHEN tw.total_inh > 0 THEN tw.own::numeric / tw.total_inh ELSE 1 END), 3) AS avg_own_work_ratio,
+            ROUND(AVG(tw.others), 2) AS avg_other_contributors,
+            COUNT(*) FILTER (WHERE tw.total_inh > 0 AND tw.own = 0)::int AS zero_contribution_closes,
+            ROUND(100.0 * COUNT(*) FILTER (
+                WHERE tw.total_inh > 0 AND tw.own::numeric / tw.total_inh < 0.25
+            ) / NULLIF(COUNT(*), 0), 1) AS pct_low_contribution
+        FROM closed c
+        JOIN ticket_work tw ON tw.ticket_id = c.ticket_id AND tw.assignee = c.assignee
+        GROUP BY c.assignee
+        HAVING COUNT(*) >= 10
+        ORDER BY tickets_closed DESC
+    """, (str(months), *cust_params, *support_analysts))
+
+
+def get_analyst_complexity_distribution(months=6):
+    """Complexity score distribution per analyst for closed tickets."""
+    cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
+    support_analysts = _get_support_analysts()
+    support_ph = ",".join(["%s"] * len(support_analysts))
+    return query(f"""
+        SELECT v.assignee, v.overall_complexity, COUNT(*)::int AS cnt
+        FROM vw_ticket_analytics_core v
+        WHERE v.closed_at IS NOT NULL
+          AND v.closed_at >= CURRENT_DATE - (%s || ' months')::interval
+          AND v.assignee IS NOT NULL
+          AND v.overall_complexity IS NOT NULL
+          AND {cust_sql}
+          AND v.assignee IN ({support_ph})
+        GROUP BY v.assignee, v.overall_complexity
+        ORDER BY v.assignee, v.overall_complexity
+    """, (str(months), *cust_params, *support_analysts))
+
+
+def get_analyst_monthly_closures(months=12):
+    """Monthly closure counts per analyst."""
+    cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
+    support_analysts = _get_support_analysts()
+    support_ph = ",".join(["%s"] * len(support_analysts))
+    return query(f"""
+        SELECT TO_CHAR(v.closed_at, 'YYYY-MM') AS month,
+               v.assignee,
+               COUNT(*)::int AS closed_count
+        FROM vw_ticket_analytics_core v
+        WHERE v.closed_at IS NOT NULL
+          AND v.closed_at >= CURRENT_DATE - (%s || ' months')::interval
+          AND v.assignee IS NOT NULL
+          AND {cust_sql}
+          AND v.assignee IN ({support_ph})
+        GROUP BY 1, 2
+        ORDER BY 1, 3 DESC
+    """, (str(months), *cust_params, *support_analysts))
+
+
+def get_analyst_swooper_tickets(assignee, months=6):
+    """Tickets where <assignee> closed but did < 25%% of InHance actions."""
+    cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
+    return query(f"""
+        WITH inh_actions AS (
+            SELECT ta.ticket_id, ta.creator_name,
+                   COUNT(*) FILTER (WHERE NOT COALESCE(ta.is_empty, FALSE)) AS nonempty
+            FROM ticket_actions ta
+            WHERE ta.party = 'inh'
+            GROUP BY ta.ticket_id, ta.creator_name
+        ),
+        ticket_work AS (
+            SELECT v.ticket_id,
+                   COALESCE(SUM(ia.nonempty), 0) AS total_inh,
+                   COALESCE(SUM(CASE WHEN ia.creator_name = %s THEN ia.nonempty ELSE 0 END), 0) AS own
+            FROM vw_ticket_analytics_core v
+            LEFT JOIN inh_actions ia ON ia.ticket_id = v.ticket_id
+            WHERE v.closed_at IS NOT NULL
+              AND v.closed_at >= CURRENT_DATE - (%s || ' months')::interval
+              AND v.assignee = %s
+              AND {cust_sql}
+            GROUP BY v.ticket_id
+        )
+        SELECT v.ticket_id, v.ticket_number, v.ticket_name, v.status, v.severity,
+               v.product_name, v.assignee, v.customer, v.days_opened, v.priority,
+               v.overall_complexity, v.frustrated, v.date_modified, v.closed_at,
+               tw.total_inh, tw.own,
+               CASE WHEN tw.total_inh > 0 THEN ROUND(tw.own::numeric / tw.total_inh, 3) ELSE 1 END AS own_ratio
+        FROM ticket_work tw
+        JOIN vw_ticket_analytics_core v ON v.ticket_id = tw.ticket_id
+        WHERE tw.total_inh > 0 AND tw.own::numeric / tw.total_inh < 0.25
+        ORDER BY v.closed_at DESC NULLS LAST
+    """, (assignee, str(months), assignee, *cust_params))
+
+
+def get_analyst_action_profile(months=6):
+    """Per analyst: % of own actions that are technical_work vs scheduling."""
+    cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
+    support_analysts = _get_support_analysts()
+    support_ph = ",".join(["%s"] * len(support_analysts))
+    return query(f"""
+        WITH closed AS (
+            SELECT v.ticket_id, v.assignee
+            FROM vw_ticket_analytics_core v
+            WHERE v.closed_at IS NOT NULL
+              AND v.closed_at >= CURRENT_DATE - (%s || ' months')::interval
+              AND v.assignee IS NOT NULL
+              AND {cust_sql}
+              AND v.assignee IN ({support_ph})
+        ),
+        own_actions AS (
+            SELECT c.assignee,
+                   ta.action_class,
+                   COUNT(*) AS cnt
+            FROM closed c
+            JOIN ticket_actions ta ON ta.ticket_id = c.ticket_id
+                                   AND ta.creator_name = c.assignee
+                                   AND ta.party = 'inh'
+                                   AND NOT COALESCE(ta.is_empty, FALSE)
+            GROUP BY c.assignee, ta.action_class
+        ),
+        totals AS (
+            SELECT assignee, SUM(cnt) AS total FROM own_actions GROUP BY assignee
+        )
+        SELECT t.assignee,
+               ROUND(100.0 * COALESCE(SUM(oa.cnt) FILTER (WHERE oa.action_class = 'technical_work'), 0) / NULLIF(t.total, 0), 1) AS pct_technical,
+               ROUND(100.0 * COALESCE(SUM(oa.cnt) FILTER (WHERE oa.action_class = 'scheduling'), 0) / NULLIF(t.total, 0), 1) AS pct_scheduling
+        FROM totals t
+        LEFT JOIN own_actions oa ON oa.assignee = t.assignee
+        WHERE t.total >= 20
+        GROUP BY t.assignee, t.total
+        ORDER BY pct_technical
+    """, (str(months), *cust_params, *support_analysts))
+
+
+def get_analyst_severity_profile(months=6):
+    """Per analyst: % of closures that were high severity (Sev 1)."""
+    cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
+    support_analysts = _get_support_analysts()
+    support_ph = ",".join(["%s"] * len(support_analysts))
+    return query(f"""
+        SELECT v.assignee,
+               COUNT(*)::int AS total_closed,
+               ROUND(100.0 * COUNT(*) FILTER (
+                   WHERE v.severity LIKE '1%%' OR LOWER(v.severity) LIKE '%%high%%'
+               ) / NULLIF(COUNT(*), 0), 1) AS pct_high_severity,
+               ROUND(100.0 * COUNT(*) FILTER (
+                   WHERE v.severity LIKE '3%%' OR LOWER(v.severity) LIKE '%%low%%'
+               ) / NULLIF(COUNT(*), 0), 1) AS pct_low_severity
+        FROM vw_ticket_analytics_core v
+        WHERE v.closed_at IS NOT NULL
+          AND v.closed_at >= CURRENT_DATE - (%s || ' months')::interval
+          AND v.assignee IS NOT NULL
+          AND {cust_sql}
+          AND v.assignee IN ({support_ph})
+        GROUP BY v.assignee
+        HAVING COUNT(*) >= 10
+        ORDER BY pct_high_severity
+    """, (str(months), *cust_params, *support_analysts))
+
+
 # ── Drill-down ───────────────────────────────────────────────────────
 
 AGE_BUCKET_RANGES = {
@@ -1162,25 +1396,62 @@ def _execute(sql, params=()):
 
 def get_saved_reports():
     return query("""
-        SELECT id, name, filter_model, created_at
+        SELECT id, name, filter_model, created_at, sort_order
         FROM saved_reports
-        ORDER BY name
+        ORDER BY sort_order, name
     """)
 
 
 def save_report(name, filter_model):
     """Upsert a saved report by name and return the saved row."""
+    # Assign next sort_order
+    max_row = query_one("SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM saved_reports")
+    next_order = max_row["next_order"] if max_row else 1
     return _execute_returning("""
-        INSERT INTO saved_reports (name, filter_model)
-        VALUES (%s, %s)
+        INSERT INTO saved_reports (name, filter_model, sort_order)
+        VALUES (%s, %s, %s)
         ON CONFLICT (name) DO UPDATE SET filter_model = EXCLUDED.filter_model,
                                          created_at = now()
-        RETURNING id, name, filter_model, created_at
-    """, (name, json.dumps(filter_model)))
+        RETURNING id, name, filter_model, created_at, sort_order
+    """, (name, json.dumps(filter_model), next_order))
 
 
 def delete_report(report_id):
     _execute("DELETE FROM saved_reports WHERE id = %s", (report_id,))
+
+
+def reorder_report(report_id, direction):
+    """Move a saved report tab left (-1) or right (+1).
+
+    Swaps sort_order with the adjacent report in the given direction.
+    """
+    current = query_one(
+        "SELECT id, sort_order FROM saved_reports WHERE id = %s", (report_id,)
+    )
+    if not current:
+        return
+    cur_order = current["sort_order"]
+    if direction in (-1, "left"):  # move left
+        neighbor = query_one(
+            "SELECT id, sort_order FROM saved_reports WHERE sort_order < %s ORDER BY sort_order DESC LIMIT 1",
+            (cur_order,)
+        )
+    else:  # move right
+        neighbor = query_one(
+            "SELECT id, sort_order FROM saved_reports WHERE sort_order > %s ORDER BY sort_order ASC LIMIT 1",
+            (cur_order,)
+        )
+    if not neighbor:
+        return
+    # Swap
+    _execute(
+        "UPDATE saved_reports SET sort_order = %s WHERE id = %s",
+        (neighbor["sort_order"], current["id"]),
+    )
+    _execute(
+        "UPDATE saved_reports SET sort_order = %s WHERE id = %s",
+        (cur_order, neighbor["id"]),
+    )
 
 
 # ── Runtime dashboards (shared in v1, ownership-ready for future) ───
@@ -1447,3 +1718,272 @@ def update_dashboard_widget(widget_id, widget_type, title=None, query_key=None,
 
 def delete_dashboard_widget(widget_id):
     _execute("DELETE FROM dashboard_widgets WHERE id = %s", (widget_id,))
+
+
+# ── Cluster Rollup Analysis ─────────────────────────────────────────
+
+def get_top_clusters(product_names=None, top_n=5):
+    """Return top N L1 clusters per product using a window function.
+
+    Parameters
+    ----------
+    product_names : list[str] | None
+        Optional list of product names to filter on. None = all products.
+    top_n : int
+        Number of top clusters to return per product (default 5).
+    """
+    base = """
+        SELECT *
+        FROM (
+            SELECT
+                product_name,
+                mechanism_class,
+                cluster_key_l1,
+                ticket_count,
+                ROW_NUMBER() OVER (
+                    PARTITION BY product_name
+                    ORDER BY ticket_count DESC
+                ) AS rn
+            FROM v_cluster_summary_l1
+        ) t
+        WHERE rn <= %s
+    """
+    params = [top_n]
+    if product_names:
+        placeholders = ",".join(["%s"] * len(product_names))
+        base += f" AND product_name IN ({placeholders})"
+        params.extend(product_names)
+    base += " ORDER BY product_name, rn"
+    return query(base, tuple(params))
+
+
+def get_cluster_examples(product_name, mechanism_class, cluster_key_l1):
+    """Return example tickets for a specific L1 cluster."""
+    return query("""
+        SELECT
+            ticket_id,
+            product_name,
+            mechanism_class,
+            cluster_key_l1,
+            cluster_key_l2,
+            mechanism,
+            intervention_action
+        FROM v_cluster_examples
+        WHERE product_name = %s
+          AND mechanism_class = %s
+          AND cluster_key_l1 = %s
+    """, (product_name, mechanism_class, cluster_key_l1))
+
+
+def save_cluster_recommendation(product_name, mechanism_class, cluster_key_l1,
+                                ticket_count, recommended_change,
+                                where_to_implement, why_it_prevents_recurrence,
+                                confidence=None, source_model=None):
+    """Persist a cluster-level recommendation."""
+    return _execute_returning("""
+        INSERT INTO cluster_recommendations (
+            product_name, mechanism_class, cluster_key_l1, ticket_count,
+            recommended_change, where_to_implement, why_it_prevents_recurrence,
+            confidence, source_model
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id, product_name, mechanism_class, cluster_key_l1,
+                  ticket_count, recommended_change, where_to_implement,
+                  why_it_prevents_recurrence, confidence, source_model, created_at
+    """, (
+        product_name, mechanism_class, cluster_key_l1, ticket_count,
+        recommended_change, where_to_implement, why_it_prevents_recurrence,
+        confidence, source_model,
+    ))
+
+
+def get_cluster_recommendations(product_name=None, cluster_key_l1=None):
+    """Fetch saved cluster recommendations, optionally filtered."""
+    sql = "SELECT * FROM cluster_recommendations WHERE 1=1"
+    params = []
+    if product_name:
+        sql += " AND product_name = %s"
+        params.append(product_name)
+    if cluster_key_l1:
+        sql += " AND cluster_key_l1 = %s"
+        params.append(cluster_key_l1)
+    sql += " ORDER BY created_at DESC"
+    return query(sql, tuple(params))
+
+
+def get_cluster_summary_l2():
+    """Return L2-level cluster summary (current cluster_key granularity)."""
+    return query("""
+        SELECT product_name, mechanism_class, cluster_key, ticket_count
+        FROM v_cluster_summary_l2
+        ORDER BY ticket_count DESC
+    """)
+
+
+def get_cluster_summary_l1():
+    """Return L1-level cluster summary (rolled-up broader buckets)."""
+    return query("""
+        SELECT product_name, mechanism_class, cluster_key_l1, ticket_count
+        FROM v_cluster_summary_l1
+        ORDER BY ticket_count DESC
+    """)
+
+
+# ── Deep Dive (per-analyst / per-product) ────────────────────────────
+
+def _deep_dive_base_conditions(assignees=None, products=None, months=12):
+    """Build shared WHERE conditions + params for deep-dive queries.
+
+    Always restricts to support analysts (title contains 'Support').
+    """
+    conditions = ["v.closed_at >= CURRENT_DATE - (%s || ' months')::interval"]
+    params = [months]
+    cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
+    conditions.append(cust_sql)
+    params.extend(cust_params)
+    # Restrict to support analysts
+    support_analysts = _get_support_analysts()
+    support_ph = ",".join(["%s"] * len(support_analysts))
+    conditions.append(f"v.assignee IN ({support_ph})")
+    params.extend(support_analysts)
+    if assignees:
+        ph = ",".join(["%s"] * len(assignees))
+        conditions.append(f"v.assignee IN ({ph})")
+        params.extend(assignees)
+    if products:
+        ph = ",".join(["%s"] * len(products))
+        conditions.append(f"v.product_name IN ({ph})")
+        params.extend(products)
+    return " AND ".join(conditions), params
+
+
+def get_deep_dive_filter_options():
+    """Return distinct assignee and product_name lists for filter dropdowns (support analysts only)."""
+    cust_sql, cust_params = _customer_exclusion_clause(column="customer")
+    support_analysts = _get_support_analysts()
+    support_ph = ",".join(["%s"] * len(support_analysts))
+    assignees = query(f"""
+        SELECT DISTINCT assignee FROM vw_ticket_analytics_core
+        WHERE assignee IS NOT NULL AND {cust_sql}
+          AND assignee IN ({support_ph})
+        ORDER BY assignee
+    """, tuple(cust_params) + support_analysts)
+    products = query(f"""
+        SELECT DISTINCT product_name FROM vw_ticket_analytics_core
+        WHERE product_name IS NOT NULL AND {cust_sql}
+        ORDER BY product_name
+    """, tuple(cust_params))
+    return (
+        [r["assignee"] for r in assignees],
+        [r["product_name"] for r in products],
+    )
+
+
+def get_deep_dive_kpis(assignees=None, products=None, months=12):
+    """Return aggregate KPIs for selected analysts/products."""
+    where, params = _deep_dive_base_conditions(assignees, products, months)
+    return query_one(f"""
+        SELECT
+            COUNT(*)::int                                            AS total_closed,
+            ROUND(AVG(v.days_opened), 1)                             AS avg_days_open,
+            ROUND(AVG(v.overall_complexity), 2)                      AS avg_complexity,
+            ROUND(AVG(v.hours_to_first_response), 1)                 AS avg_hours_first_response,
+            COUNT(*) FILTER (WHERE v.frustrated = 'Yes')::int        AS frustrated_count,
+            ROUND(100.0 * COUNT(*) FILTER (WHERE v.frustrated = 'Yes')
+                  / NULLIF(COUNT(*), 0), 1)                          AS pct_frustrated,
+            COUNT(*) FILTER (WHERE v.priority <= 3)::int             AS high_priority_count,
+            ROUND(AVG(v.handoff_count), 1)                           AS avg_handoffs,
+            COUNT(DISTINCT v.customer)::int                          AS distinct_customers,
+            COUNT(DISTINCT v.assignee)::int                          AS distinct_analysts
+        FROM vw_ticket_analytics_core v
+        WHERE {where}
+    """, tuple(params))
+
+
+def get_deep_dive_severity_breakdown(assignees=None, products=None, months=12):
+    """Return ticket counts by severity for selected filters."""
+    where, params = _deep_dive_base_conditions(assignees, products, months)
+    return query(f"""
+        SELECT COALESCE(v.severity, 'Unknown') AS severity,
+               COUNT(*)::int AS ticket_count
+        FROM vw_ticket_analytics_core v
+        WHERE {where}
+        GROUP BY 1 ORDER BY ticket_count DESC
+    """, tuple(params))
+
+
+def get_deep_dive_action_mix(assignees=None, products=None, months=12):
+    """Return action class distribution for selected filters."""
+    where, params = _deep_dive_base_conditions(assignees, products, months)
+    return query(f"""
+        SELECT COALESCE(ta.action_class, 'unknown') AS action_class,
+               COUNT(*)::int AS action_count
+        FROM ticket_actions ta
+        JOIN vw_ticket_analytics_core v ON v.ticket_id = ta.ticket_id
+        WHERE ta.party = 'inh' AND NOT COALESCE(ta.is_empty, FALSE)
+          AND {where}
+        GROUP BY 1 ORDER BY action_count DESC
+    """, tuple(params))
+
+
+def get_deep_dive_volume_trend(assignees=None, products=None, months=12):
+    """Return monthly closed ticket counts for selected filters."""
+    where, params = _deep_dive_base_conditions(assignees, products, months)
+    return query(f"""
+        SELECT TO_CHAR(v.closed_at, 'YYYY-MM') AS month,
+               COUNT(*)::int AS closed_count
+        FROM vw_ticket_analytics_core v
+        WHERE {where}
+        GROUP BY 1 ORDER BY 1
+    """, tuple(params))
+
+
+def get_deep_dive_product_analyst_heatmap(assignees=None, products=None, months=12):
+    """Return ticket counts by product × analyst for heatmap."""
+    where, params = _deep_dive_base_conditions(assignees, products, months)
+    return query(f"""
+        SELECT v.assignee, v.product_name,
+               COUNT(*)::int AS ticket_count,
+               ROUND(AVG(v.days_opened), 1) AS avg_days_open,
+               ROUND(AVG(v.overall_complexity), 1) AS avg_complexity,
+               COUNT(*) FILTER (WHERE v.frustrated = 'Yes')::int AS frustrated
+        FROM vw_ticket_analytics_core v
+        WHERE v.assignee IS NOT NULL AND v.product_name IS NOT NULL
+          AND {where}
+        GROUP BY v.assignee, v.product_name
+        ORDER BY ticket_count DESC
+    """, tuple(params))
+
+
+def get_deep_dive_tickets(assignees=None, products=None, months=12):
+    """Return ticket list matching deep-dive filters."""
+    where, params = _deep_dive_base_conditions(assignees, products, months)
+    return query(f"""
+        SELECT v.ticket_id, v.ticket_number, v.ticket_name, v.status,
+               v.severity, v.product_name, v.assignee, v.customer,
+               v.days_opened, v.priority, v.overall_complexity,
+               v.frustrated, v.handoff_count, v.action_count,
+               v.hours_to_first_response, v.date_modified, v.closed_at
+        FROM vw_ticket_analytics_core v
+        WHERE {where}
+        ORDER BY v.closed_at DESC NULLS LAST
+    """, tuple(params))
+
+
+def get_deep_dive_resolution_distribution(assignees=None, products=None, months=12):
+    """Return resolution time buckets for histogram."""
+    where, params = _deep_dive_base_conditions(assignees, products, months)
+    return query(f"""
+        SELECT
+            CASE
+                WHEN v.days_opened < 1  THEN '< 1 day'
+                WHEN v.days_opened < 7  THEN '1-7 days'
+                WHEN v.days_opened < 30 THEN '7-30 days'
+                WHEN v.days_opened < 90 THEN '30-90 days'
+                ELSE '90+ days'
+            END AS bucket,
+            COUNT(*)::int AS ticket_count
+        FROM vw_ticket_analytics_core v
+        WHERE v.days_opened IS NOT NULL AND {where}
+        GROUP BY 1
+        ORDER BY MIN(v.days_opened)
+    """, tuple(params))

@@ -139,6 +139,7 @@ def _build_dashboard_tab():
     by_product = data.get_root_cause_by_product()
     sankey_data = data.get_root_cause_sankey()
     funnel = data.get_pipeline_completion_funnel()
+    top_clusters = data.get_top_clusters(top_n=5)
 
     children = []
 
@@ -216,8 +217,17 @@ def _build_dashboard_tab():
                     dmc.Group(
                         [
                             dmc.Text("Subcluster Breakdown", fw=600),
+                            dmc.SegmentedControl(
+                                id="rc-subcluster-group-by",
+                                data=[
+                                    {"value": "component", "label": "By Component"},
+                                    {"value": "component_operation", "label": "Component → Operation"},
+                                ],
+                                value="component",
+                                size="xs",
+                            ),
                             dmc.Text(
-                                "Select a cluster to see its dominant component/operation slices.",
+                                "Select a cluster to see its dominant slices.",
                                 size="sm",
                                 c="dimmed",
                             ),
@@ -231,6 +241,80 @@ def _build_dashboard_tab():
                         children=_subcluster_chart(cluster_catalog[0] if cluster_catalog else None),
                     ),
                 ], withBorder=True, p="md", radius="md", shadow="sm"),
+            ],
+        )
+    )
+
+    # ── Top Failure Patterns by Product (L1 clusters) ──────────────────
+    children.append(
+        dmc.Paper([
+            dmc.Group(
+                [
+                    dmc.Text("Top Failure Patterns by Product", fw=600),
+                    dmc.Text(
+                        "Top 5 L1 cluster keys per product, ranked by ticket count. "
+                        "Click a row to see example tickets.",
+                        size="xs", c="dimmed",
+                    ),
+                ],
+                justify="space-between",
+                align="flex-end",
+                mb="xs",
+            ),
+            dmc.SimpleGrid(
+                cols={"base": 1, "xl": 2},
+                children=[
+                    _top_failure_patterns_chart(top_clusters),
+                    _top_failure_patterns_grid(top_clusters),
+                ],
+            ),
+        ], withBorder=True, p="md", radius="md", shadow="sm")
+    )
+
+    # Drill-down modal for cluster examples
+    children.append(
+        dmc.Modal(
+            id="rc-cluster-drilldown-modal",
+            title="Cluster — Example Tickets",
+            size="90%",
+            centered=True,
+            children=[
+                dmc.Text(id="rc-cluster-drilldown-subtitle", size="sm", c="dimmed", mb="sm"),
+                grid_with_export(
+                    dag.AgGrid(
+                        id="rc-cluster-drilldown-grid",
+                        rowData=[],
+                        columnDefs=[
+                            {"field": "ticket_id", "headerName": "Ticket ID", "width": 120},
+                            {"field": "product_name", "headerName": "Product", "width": 160},
+                            {"field": "mechanism_class", "headerName": "Mechanism Class", "width": 180,
+                             "valueFormatter": {"function": "params.value ? params.value.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase()) : ''"}},
+                            {"field": "cluster_key_l1", "headerName": "Cluster (L1)", "width": 200,
+                             "valueFormatter": {"function": "params.value ? params.value.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase()) : ''"}},
+                            {"field": "cluster_key_l2", "headerName": "Cluster (L2)", "width": 200,
+                             "valueFormatter": {"function": "params.value ? params.value.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase()) : ''"}},
+                            {"field": "mechanism", "headerName": "Mechanism", "minWidth": 300, "flex": 1,
+                             "tooltipField": "mechanism"},
+                            {"field": "intervention_action", "headerName": "Intervention", "minWidth": 250, "flex": 1,
+                             "tooltipField": "intervention_action"},
+                        ],
+                        defaultColDef={
+                            "sortable": True, "filter": True,
+                            "resizable": True, "floatingFilter": True,
+                            "filterParams": {"caseSensitive": False},
+                        },
+                        dashGridOptions={
+                            "rowSelection": "single",
+                            "pagination": True,
+                            "paginationPageSize": 25,
+                            "animateRows": True,
+                            "enableCellTextSelection": True,
+                        },
+                        style={"height": "60vh"},
+                        className="ag-theme-quartz",
+                    ),
+                    "rc-cluster-drilldown-grid",
+                ),
             ],
         )
     )
@@ -524,7 +608,7 @@ def _cluster_catalog_grid(rows):
     return grid_with_export(grid, "rc-cluster-catalog-grid")
 
 
-def _subcluster_chart(cluster_row):
+def _subcluster_chart(cluster_row, group_by="component"):
     """Horizontal bar chart of component/operation subclusters for one cluster."""
     if not cluster_row:
         return dmc.Text("No cluster catalog data yet.", c="dimmed", ta="center", py="xl")
@@ -535,19 +619,36 @@ def _subcluster_chart(cluster_row):
 
     display_limit = 12
     total_tickets = int(cluster_row.get("ticket_count") or 0)
-    top_subclusters = list(subclusters[:display_limit])
-    shown_ticket_count = sum(int(item.get("ticket_count", 0) or 0) for item in top_subclusters)
-    other_ticket_count = max(total_tickets - shown_ticket_count, 0)
 
-    labels = []
-    values = []
-    percents = []
-    for item in reversed(top_subclusters):
-        component = item.get("component") or "Unknown"
-        operation = item.get("operation") or "Unknown"
-        labels.append(f"{component} -> {operation}")
-        values.append(item.get("ticket_count", 0))
-        percents.append(item.get("percent_within_cluster", 0))
+    if group_by == "component":
+        # Aggregate by component only — collapses operation detail
+        agg: dict[str, int] = {}
+        for item in subclusters:
+            key = item.get("component") or "Unknown"
+            agg[key] = agg.get(key, 0) + int(item.get("ticket_count", 0) or 0)
+        sorted_items = sorted(agg.items(), key=lambda x: x[1], reverse=True)
+        top_items = sorted_items[:display_limit]
+        shown_ticket_count = sum(v for _, v in top_items)
+        other_ticket_count = max(total_tickets - shown_ticket_count, 0)
+        labels = [k for k, _ in reversed(top_items)]
+        values = [v for _, v in reversed(top_items)]
+        percents = [v / total_tickets if total_tickets else 0 for v in values]
+        slice_label = "component"
+    else:
+        # Original component → operation granularity
+        top_subclusters = list(subclusters[:display_limit])
+        shown_ticket_count = sum(int(item.get("ticket_count", 0) or 0) for item in top_subclusters)
+        other_ticket_count = max(total_tickets - shown_ticket_count, 0)
+        labels = []
+        values = []
+        percents = []
+        for item in reversed(top_subclusters):
+            component = item.get("component") or "Unknown"
+            operation = item.get("operation") or "Unknown"
+            labels.append(f"{component} -> {operation}")
+            values.append(item.get("ticket_count", 0))
+            percents.append(item.get("percent_within_cluster", 0))
+        slice_label = "component/operation"
 
     if other_ticket_count:
         labels.insert(0, "Other")
@@ -567,7 +668,7 @@ def _subcluster_chart(cluster_row):
         template="plotly_white",
         title={
             "text": (
-                f"{_pretty(cluster_row.get('cluster_id'))}: top component/operation slices"
+                f"{_pretty(cluster_row.get('cluster_id'))}: top {slice_label} slices"
                 f"<br><sup>Showing {shown_ticket_count} of {total_tickets} tickets"
                 f"{' + Other' if other_ticket_count else ''}</sup>"
             ),
@@ -694,6 +795,78 @@ def _product_mechanism_chart(rows):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+
+def _top_failure_patterns_chart(rows):
+    """Grouped horizontal bar chart: top L1 clusters per product."""
+    if not rows:
+        return dmc.Text("No cluster data yet — run Pass 4 on tickets first.",
+                        c="dimmed", ta="center", py="xl")
+
+    # Group by product → list of (cluster_key_l1, ticket_count)
+    products = OrderedDict()
+    for r in rows:
+        p = r["product_name"]
+        products.setdefault(p, []).append(r)
+
+    # Build one trace per product
+    # Flatten into a single grouped bar: y = "product | cluster", x = ticket_count
+    y_labels = []
+    x_values = []
+    colors = []
+    color_cycle = _MECH_COLORS
+    product_list = list(products.keys())
+
+    for pi, (product, clusters) in enumerate(products.items()):
+        pc = color_cycle[pi % len(color_cycle)]
+        for c in reversed(clusters):
+            label = _pretty(c["cluster_key_l1"])
+            y_labels.append(f"{product}  ·  {label}")
+            x_values.append(c["ticket_count"])
+            colors.append(pc)
+
+    fig = go.Figure(go.Bar(
+        x=x_values, y=y_labels, orientation="h",
+        marker_color=colors,
+        text=x_values, textposition="auto",
+        hovertemplate="%{y}<br>Tickets: %{x}<extra></extra>",
+    ))
+    fig.update_layout(
+        template="plotly_white",
+        margin=dict(l=10, r=20, t=10, b=10),
+        height=max(320, len(y_labels) * 30),
+        yaxis=dict(automargin=True, categoryorder="array", categoryarray=y_labels),
+        xaxis_title="Tickets",
+    )
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+
+def _top_failure_patterns_grid(rows):
+    """AG Grid of top L1 clusters per product with row-click drill-down."""
+    grid = dag.AgGrid(
+        id="rc-top-clusters-grid",
+        rowData=rows,
+        columnDefs=[
+            {"field": "product_name", "headerName": "Product", "width": 200},
+            {"field": "mechanism_class", "headerName": "Mechanism Class", "width": 180,
+             "valueFormatter": {"function": "params.value ? params.value.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase()) : ''"}},
+            {"field": "cluster_key_l1", "headerName": "Cluster (L1)", "minWidth": 220, "flex": 1,
+             "valueFormatter": {"function": "params.value ? params.value.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase()) : ''"}},
+            {"field": "ticket_count", "headerName": "Tickets", "width": 100,
+             "type": "numericColumn", "sort": "desc"},
+            {"field": "rn", "headerName": "Rank", "width": 80, "type": "numericColumn"},
+        ],
+        defaultColDef={"sortable": True, "filter": True, "resizable": True},
+        dashGridOptions={
+            "rowSelection": "single",
+            "pagination": True,
+            "paginationPageSize": 10,
+            "animateRows": True,
+        },
+        style={"height": "420px", "cursor": "pointer"},
+        className="ag-theme-alpine",
+    )
+    return grid_with_export(grid, "rc-top-clusters-grid")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -896,12 +1069,12 @@ def register_callbacks(app):
     @app.callback(
         Output("rc-cluster-subcluster-chart", "children"),
         Input("rc-cluster-catalog-grid", "selectedRows"),
+        Input("rc-subcluster-group-by", "value"),
         State("rc-cluster-catalog-grid", "rowData"),
     )
-    def show_cluster_subclusters(selected, rows):
-        if selected:
-            return _subcluster_chart(selected[0])
-        return _subcluster_chart(rows[0] if rows else None)
+    def show_cluster_subclusters(selected, group_by, rows):
+        row = selected[0] if selected else (rows[0] if rows else None)
+        return _subcluster_chart(row, group_by=group_by or "component")
 
     @app.callback(
         Output("root-cause-detail", "children"),
@@ -1065,4 +1238,29 @@ def register_callbacks(app):
         tickets = data.get_tickets_by_fixes(fix_keys)
         labels = [f"{r['mechanism_class']} / {r['intervention_type']}" for r in selected]
         subtitle = f"{len(tickets)} ticket{'s' if len(tickets) != 1 else ''} matching: {', '.join(labels)}"
+        return True, tickets, subtitle
+
+    # ── Cluster patterns drill-down callback ─────────────────────────
+
+    @app.callback(
+        Output("rc-cluster-drilldown-modal", "opened"),
+        Output("rc-cluster-drilldown-grid", "rowData"),
+        Output("rc-cluster-drilldown-subtitle", "children"),
+        Input("rc-top-clusters-grid", "selectedRows"),
+        prevent_initial_call=True,
+    )
+    def open_cluster_drilldown(selected):
+        if not selected:
+            return no_update, no_update, no_update
+        row = selected[0]
+        product = row.get("product_name")
+        mech_class = row.get("mechanism_class")
+        cluster_l1 = row.get("cluster_key_l1")
+        if not (product and mech_class and cluster_l1):
+            return no_update, no_update, no_update
+        tickets = data.get_cluster_examples(product, mech_class, cluster_l1)
+        subtitle = (
+            f"{len(tickets)} ticket{'s' if len(tickets) != 1 else ''} in "
+            f"{_pretty(cluster_l1)} · {product} · {_pretty(mech_class)}"
+        )
         return True, tickets, subtitle

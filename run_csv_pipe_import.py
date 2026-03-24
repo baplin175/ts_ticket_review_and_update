@@ -1,9 +1,10 @@
 """
-Import CSV pipeline results (pass1 / pass3 / pass4) into the database.
+Import CSV pipeline results (pass1 / pass3 / pass4 / pass5) into the database.
 
 Reads CSVs produced by the standalone CSV pipeline and inserts them into
 ticket_llm_pass_results, matching the same schema used by the DB-backed
-pass runners (run_ticket_pass1.py, run_ticket_pass3.py, run_pass4.py).
+pass runners (run_ticket_pass1.py, run_ticket_pass3.py, run_pass4.py,
+run_pass5.py).
 
 Only rows with status='success' are imported.  Rows whose ticket_id does
 not exist in the tickets table are skipped with a warning.
@@ -11,7 +12,7 @@ not exist in the tickets table are skipped with a warning.
 Usage:
     python run_csv_pipe_import.py --dir csv_pipe_runs
     python run_csv_pipe_import.py --dir csv_pipe_runs --pass1 pass1_results.csv
-    python run_csv_pipe_import.py --dir csv_pipe_runs --pass1 p1.csv --pass3 p3.csv --pass4 p4.csv
+    python run_csv_pipe_import.py --dir csv_pipe_runs --pass1 p1.csv --pass3 p3.csv --pass4 p4.csv --pass5 p5.csv
     python run_csv_pipe_import.py --dir csv_pipe_runs --force   # overwrite existing success rows
 """
 
@@ -32,6 +33,9 @@ PASS3_PROMPT_VERSION = "3"
 
 PASS4_PASS_NAME = "pass4_intervention"
 PASS4_PROMPT_VERSION = "2"
+
+PASS5_PASS_NAME = "pass5_cluster_key"
+PASS5_PROMPT_VERSION = "3"
 
 MODEL_NAME = "csv-pipeline-import"
 
@@ -297,12 +301,83 @@ def import_pass4(csv_path: str, known_ids: set[int], force: bool = False) -> tup
     return imported, skipped_no_ticket, skipped_status
 
 
+def import_pass5(csv_path: str, known_ids: set[int], force: bool = False) -> tuple[int, int, int]:
+    """Import Pass 5 results.  Returns (imported, skipped_no_ticket, skipped_not_success)."""
+    import db
+
+    rows = _read_csv(csv_path)
+    imported = 0
+    skipped_no_ticket = 0
+    skipped_status = 0
+    now = datetime.now(timezone.utc)
+
+    for row in rows:
+        ticket_id = int(row["ticket_id"])
+        status = row.get("status", "")
+
+        if status != "success":
+            skipped_status += 1
+            continue
+
+        if ticket_id not in known_ids:
+            _log(f"  [pass5] SKIP ticket_id={ticket_id} \u2014 not in tickets table")
+            skipped_no_ticket += 1
+            continue
+
+        cluster_key = (row.get("cluster_key") or "").strip().lower() or None
+
+        parsed_json = {
+            "cluster_key": cluster_key,
+        }
+
+        if force:
+            db.delete_prior_failed_pass(ticket_id, PASS5_PASS_NAME, PASS5_PROMPT_VERSION)
+            conn = db.get_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        DELETE FROM ticket_llm_pass_results
+                         WHERE ticket_id = %s AND pass_name = %s
+                           AND prompt_version = %s AND status = 'success';
+                    """, (ticket_id, PASS5_PASS_NAME, PASS5_PROMPT_VERSION))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                db.put_conn(conn)
+        else:
+            existing = db.get_latest_pass_result(ticket_id, PASS5_PASS_NAME, PASS5_PROMPT_VERSION)
+            if existing and existing.get("status") == "success":
+                continue
+
+        row_id = db.insert_pass_result(
+            ticket_id,
+            pass_name=PASS5_PASS_NAME,
+            prompt_version=PASS5_PROMPT_VERSION,
+            model_name=MODEL_NAME,
+            status="pending",
+            started_at=now,
+        )
+        db.update_pass_result(
+            row_id,
+            status="success",
+            parsed_json=parsed_json,
+            cluster_key=cluster_key,
+            completed_at=now,
+        )
+        imported += 1
+
+    return imported, skipped_no_ticket, skipped_status
+
+
 def main(
     csv_dir: str,
     *,
     pass1_file: str = "pass1_results.csv",
     pass3_file: str = "pass3_results.csv",
     pass4_file: str = "pass4_results.csv",
+    pass5_file: str = "pass5_results.csv",
     force: bool = False,
 ) -> None:
     import db
@@ -354,6 +429,16 @@ def main(
     else:
         _log(f"[csv-import] Pass 4 file not found: {p4_path}")
 
+    # Pass 5
+    p5_path = os.path.join(csv_dir, pass5_file)
+    if os.path.isfile(p5_path):
+        _log(f"[csv-import] Importing Pass 5 from {pass5_file} \u2026")
+        imp, skip_t, skip_s = import_pass5(p5_path, known_ids, force)
+        _log(f"[csv-import]   Pass 5: {imp} imported, {skip_s} skipped (non-success), {skip_t} skipped (no ticket)")
+        total_imported += imp
+    else:
+        _log(f"[csv-import] Pass 5 file not found: {p5_path}")
+
     _log("=" * 60)
     _log(f"[csv-import] Done. Total rows imported: {total_imported}")
 
@@ -371,6 +456,7 @@ if __name__ == "__main__":
     parser.add_argument("--pass1", type=str, default="pass1_results.csv", help="Pass 1 CSV filename.")
     parser.add_argument("--pass3", type=str, default="pass3_results.csv", help="Pass 3 CSV filename.")
     parser.add_argument("--pass4", type=str, default="pass4_results.csv", help="Pass 4 CSV filename.")
+    parser.add_argument("--pass5", type=str, default="pass5_results.csv", help="Pass 5 CSV filename.")
     parser.add_argument(
         "--force",
         action="store_true",
@@ -383,5 +469,6 @@ if __name__ == "__main__":
         pass1_file=args.pass1,
         pass3_file=args.pass3,
         pass4_file=args.pass4,
+        pass5_file=args.pass5,
         force=args.force,
     )
