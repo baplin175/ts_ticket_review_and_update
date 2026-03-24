@@ -940,37 +940,28 @@ def fetch_ticket_numbers_by_status(status: str, *, exclude_closed: bool = False)
     """
     if exclude_closed:
         rows = fetch_all(
-            """SELECT t.ticket_number
-                 FROM tickets t
-                 JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
-                WHERE COALESCE(t.status, '') NOT IN ('Closed', 'Closed with Survey', 'Open')
-                  AND COALESCE(t.assignee, '') != 'Marketing'
-                  AND COALESCE(t.group_name, '') != 'Marketing'
-                  AND r.thread_hash IS NOT NULL
-                ORDER BY t.ticket_number;""",
+            """SELECT v.ticket_number
+                 FROM vw_operational_open_tickets v
+                 JOIN ticket_thread_rollups r ON r.ticket_id = v.ticket_id
+                WHERE r.thread_hash IS NOT NULL
+                ORDER BY v.ticket_number;""",
         )
     elif status == "Open":
         rows = fetch_all(
-            """SELECT t.ticket_number
-                 FROM tickets t
-                 JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
-                WHERE t.closed_at IS NULL
-                  AND COALESCE(t.status, '') NOT IN ('Closed', 'Closed with Survey', 'Open')
-                  AND COALESCE(t.assignee, '') != 'Marketing'
-                  AND COALESCE(t.group_name, '') != 'Marketing'
-                  AND r.thread_hash IS NOT NULL
-                ORDER BY t.ticket_number;""",
+            """SELECT v.ticket_number
+                 FROM vw_operational_open_tickets v
+                 JOIN ticket_thread_rollups r ON r.ticket_id = v.ticket_id
+                WHERE r.thread_hash IS NOT NULL
+                ORDER BY v.ticket_number;""",
         )
     else:
         rows = fetch_all(
-            """SELECT t.ticket_number
-                 FROM tickets t
-                 JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
-                WHERE t.status = %s AND t.status != 'Open'
-                  AND COALESCE(t.assignee, '') != 'Marketing'
-                  AND COALESCE(t.group_name, '') != 'Marketing'
+            """SELECT v.ticket_number
+                 FROM vw_operational_open_tickets v
+                 JOIN ticket_thread_rollups r ON r.ticket_id = v.ticket_id
+                WHERE v.status = %s
                   AND r.thread_hash IS NOT NULL
-                ORDER BY t.ticket_number;""",
+                ORDER BY v.ticket_number;""",
             (status,),
         )
     return [str(r[0]) for r in rows]
@@ -984,17 +975,13 @@ def fetch_open_ticket_numbers_missing_sentiment() -> list[str]:
                FROM ticket_sentiment
                ORDER BY ticket_id, scored_at DESC
            )
-           SELECT t.ticket_number
-             FROM tickets t
-             JOIN ticket_thread_rollups r ON r.ticket_id = t.ticket_id
-             LEFT JOIN latest_sentiment s ON s.ticket_id = t.ticket_id
-            WHERE t.closed_at IS NULL
-              AND COALESCE(t.status, '') NOT IN ('Closed', 'Closed with Survey', 'Open')
-              AND COALESCE(t.assignee, '') != 'Marketing'
-              AND COALESCE(t.group_name, '') != 'Marketing'
-              AND r.thread_hash IS NOT NULL
+           SELECT v.ticket_number
+             FROM vw_operational_open_tickets v
+             JOIN ticket_thread_rollups r ON r.ticket_id = v.ticket_id
+             LEFT JOIN latest_sentiment s ON s.ticket_id = v.ticket_id
+            WHERE r.thread_hash IS NOT NULL
               AND NULLIF(COALESCE(s.frustrated, ''), '') IS NULL
-            ORDER BY t.ticket_number;""",
+            ORDER BY v.ticket_number;""",
     )
     return [str(r[0]) for r in rows]
 
@@ -1007,15 +994,11 @@ def fetch_open_ticket_numbers_missing_complexity() -> list[str]:
                FROM ticket_complexity_scores
                ORDER BY ticket_id, scored_at DESC
            )
-           SELECT t.ticket_number
-             FROM tickets t
-             LEFT JOIN latest_complexity c ON c.ticket_id = t.ticket_id
-            WHERE t.closed_at IS NULL
-              AND COALESCE(t.status, '') NOT IN ('Closed', 'Closed with Survey', 'Open')
-              AND COALESCE(t.assignee, '') != 'Marketing'
-              AND COALESCE(t.group_name, '') != 'Marketing'
-              AND c.overall_complexity IS NULL
-            ORDER BY t.ticket_number;""",
+           SELECT v.ticket_number
+             FROM vw_operational_open_tickets v
+             LEFT JOIN latest_complexity c ON c.ticket_id = v.ticket_id
+            WHERE c.overall_complexity IS NULL
+            ORDER BY v.ticket_number;""",
     )
     return [str(r[0]) for r in rows]
 
@@ -1026,7 +1009,7 @@ def get_open_ticket_ids() -> list[int]:
     Excludes status='Open' tickets which are user test tickets.
     """
     rows = fetch_all(
-        "SELECT ticket_id FROM tickets WHERE closed_at IS NULL AND COALESCE(status, '') != 'Open' AND COALESCE(assignee, '') != 'Marketing' AND COALESCE(group_name, '') != 'Marketing' ORDER BY ticket_id;"
+        "SELECT ticket_id FROM vw_operational_open_tickets ORDER BY ticket_id;"
     )
     return [r[0] for r in rows]
 
@@ -1407,13 +1390,15 @@ def update_pass_result(
     mechanism_class: Optional[str] = None,
     intervention_type: Optional[str] = None,
     intervention_action: Optional[str] = None,
+    cluster_key: Optional[str] = None,
 ) -> None:
     """Update an existing pass result row (e.g. pending → success/failed).
 
     Pass 1 callers use *phenomenon*; Pass 2 callers use *component*,
     *operation*, *unexpected_state*, *canonical_failure*; Pass 3 callers
     use *mechanism*; Pass 4 callers use *mechanism_class*,
-    *intervention_type*, *intervention_action*.
+    *intervention_type*, *intervention_action*; Pass 5 callers use
+    *cluster_key*.
     Unused kwargs default to None and are written as NULL.
     """
     conn = get_conn()
@@ -1435,6 +1420,7 @@ def update_pass_result(
                        mechanism_class    = %s,
                        intervention_type  = %s,
                        intervention_action = %s,
+                       cluster_key        = %s,
                        updated_at         = now()
                  WHERE id = %s;
             """, (
@@ -1444,6 +1430,7 @@ def update_pass_result(
                 component, operation, unexpected_state, canonical_failure,
                 mechanism,
                 mechanism_class, intervention_type, intervention_action,
+                cluster_key,
                 row_id,
             ))
         conn.commit()
@@ -1853,6 +1840,124 @@ def invalidate_stale_pass4(
            );
     """
     params = list(ticket_ids) + [pass3_pass_name, pass3_prompt_version]
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, tuple(params))
+            updated = cur.rowcount
+        conn.commit()
+        return updated
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def fetch_pending_pass5_tickets(
+    pass5_prompt_version: str,
+    *,
+    upstream_pass_name: str = "pass3_mechanism",
+    upstream_prompt_version: str = "3",
+    limit: int = 0,
+    ticket_ids: Optional[List[int]] = None,
+    failed_only: bool = False,
+    force: bool = False,
+) -> List[Tuple]:
+    """Return (ticket_id, mechanism) rows eligible for Pass 5.
+
+    Selection logic:
+      - ticket has a successful upstream result with non-null mechanism
+      - no successful pass5_cluster_key result for current prompt_version
+        (unless *force* is True)
+      - optionally filtered to specific ticket_ids
+      - optionally limited to failed-only reruns
+
+    Returns list of (ticket_id, mechanism) tuples.
+    """
+    conditions = [
+        "p3.pass_name = %s",
+        "p3.prompt_version = %s",
+        "p3.status = 'success'",
+        "p3.mechanism IS NOT NULL",
+        "p3.mechanism != ''",
+        "t.closed_at IS NOT NULL",
+    ]
+    params: list = [upstream_pass_name, upstream_prompt_version]
+
+    if ticket_ids:
+        placeholders = ",".join(["%s"] * len(ticket_ids))
+        conditions.append(f"t.ticket_id IN ({placeholders})")
+        params.extend(ticket_ids)
+
+    if not force:
+        conditions.append("""
+            NOT EXISTS (
+                SELECT 1 FROM ticket_llm_pass_results lp
+                 WHERE lp.ticket_id = t.ticket_id
+                   AND lp.pass_name = 'pass5_cluster_key'
+                   AND lp.prompt_version = %s
+                   AND lp.status = 'success'
+            )
+        """)
+        params.append(pass5_prompt_version)
+
+    if failed_only:
+        conditions.append("""
+            EXISTS (
+                SELECT 1 FROM ticket_llm_pass_results lp
+                 WHERE lp.ticket_id = t.ticket_id
+                   AND lp.pass_name = 'pass5_cluster_key'
+                   AND lp.prompt_version = %s
+                   AND lp.status = 'failed'
+            )
+        """)
+        params.append(pass5_prompt_version)
+
+    where_clause = " AND ".join(conditions)
+    sql = (
+        f"SELECT t.ticket_id, p3.mechanism "
+        f"FROM tickets t "
+        f"JOIN ticket_llm_pass_results p3 ON p3.ticket_id = t.ticket_id "
+        f"WHERE {where_clause} "
+        f"ORDER BY t.ticket_id"
+    )
+    if limit > 0:
+        sql += f" LIMIT {limit}"
+    sql += ";"
+
+    return fetch_all(sql, tuple(params))
+
+
+def invalidate_stale_pass5(
+    ticket_ids: List[int],
+    upstream_pass_name: str = "pass3_mechanism",
+    upstream_prompt_version: str = "3",
+) -> int:
+    """Mark existing P5 results as 'skipped' for tickets that lack a valid upstream mechanism.
+
+    Returns the number of rows updated.
+    """
+    if not ticket_ids:
+        return 0
+    placeholders = ",".join(["%s"] * len(ticket_ids))
+    sql = f"""
+        UPDATE ticket_llm_pass_results
+           SET status = 'skipped',
+               error_message = 'upstream mechanism missing for required version'
+         WHERE pass_name = 'pass5_cluster_key'
+           AND ticket_id IN ({placeholders})
+           AND NOT EXISTS (
+               SELECT 1 FROM ticket_llm_pass_results p3
+                WHERE p3.ticket_id = ticket_llm_pass_results.ticket_id
+                  AND p3.pass_name = %s
+                  AND p3.prompt_version = %s
+                  AND p3.status = 'success'
+                  AND p3.mechanism IS NOT NULL
+                  AND p3.mechanism != ''
+           );
+    """
+    params = list(ticket_ids) + [upstream_pass_name, upstream_prompt_version]
     conn = get_conn()
     try:
         with conn.cursor() as cur:

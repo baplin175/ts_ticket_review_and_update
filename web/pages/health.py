@@ -11,11 +11,27 @@ from ..health_explainer import generate_customer_health_explanation
 from ..renderer import grid_with_export, ticket_number_column
 
 
+_HEALTH_BAND_COLORS = {
+    "healthy": "green",
+    "watch": "yellow",
+    "at_risk": "orange",
+    "critical": "red",
+}
+
+
+def _health_band_color(band):
+    return _HEALTH_BAND_COLORS.get(str(band or "").strip().lower(), "gray")
+
+
 # ── Customer health columns ──────────────────────────────────────────
 
 CUSTOMER_COLS = [
     {"field": "customer", "headerName": "Customer", "minWidth": 150, "flex": 1.5, "pinned": "left",
      "checkboxSelection": True, "headerCheckboxSelection": True},
+    {"field": "customer_health_score", "headerName": "Distress", "minWidth": 80, "flex": 0.55, "type": "numericColumn",
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
+    {"field": "customer_health_band", "headerName": "Band", "minWidth": 70, "flex": 0.5,
+     "cellStyle": {"function": "params.value === 'critical' ? {'color': '#e03131', 'fontWeight': 'bold'} : params.value === 'at_risk' ? {'color': '#f08c00', 'fontWeight': 'bold'} : params.value === 'watch' ? {'color': '#e6a700', 'fontWeight': 'bold'} : params.value === 'healthy' ? {'color': '#2b8a3e', 'fontWeight': 'bold'} : {'fontWeight': 'bold'}"}},
     {"field": "key_account", "headerName": "Key Acct", "minWidth": 85, "flex": 0.55,
      "cellStyle": {"function": "params.value ? {'color': '#2b8a3e', 'fontWeight': 'bold'} : {}"}},
     {"field": "open_ticket_count", "headerName": "Open", "minWidth": 65, "flex": 0.45, "type": "numericColumn"},
@@ -38,9 +54,6 @@ CUSTOMER_COLS = [
     {"field": "breadth_score", "headerName": "Breadth", "minWidth": 75, "flex": 0.5, "type": "numericColumn",
      "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"},
      "cellStyle": {"function": "params.value != null && params.value > 5 ? {'color': '#0b7285', 'fontWeight': 'bold'} : {}"}},
-    {"field": "customer_health_score", "headerName": "Distress", "minWidth": 80, "flex": 0.55, "type": "numericColumn",
-     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
-    {"field": "customer_health_band", "headerName": "Band", "minWidth": 70, "flex": 0.5},
     {"field": "as_of_date", "headerName": "As Of", "minWidth": 90, "flex": 0.55,
      "valueFormatter": {"function": "params.value ? new Date(params.value).toLocaleDateString() : ''"}},
 ]
@@ -213,11 +226,12 @@ def _history_summary(latest_row):
     if not latest_row:
         return dmc.Text("No additive customer health history is available for this customer.", c="dimmed")
 
+    band = str(latest_row.get("customer_health_band") or "—").replace("_", " ").title()
     return dmc.SimpleGrid(
         cols={"base": 2, "lg": 6},
         children=[
             _history_stat("Latest Distress Score", f'{round(latest_row.get("customer_health_score", 0))}', "blue"),
-            _history_stat("Band", str(latest_row.get("customer_health_band") or "—").replace("_", " ").title(), "grape"),
+            _history_stat("Band", band, _health_band_color(latest_row.get("customer_health_band"))),
             _history_stat("Pressure", f'{round(latest_row.get("pressure_score", 0))}', "red"),
             _history_stat("Aging", f'{round(latest_row.get("aging_score", 0))}', "orange"),
             _history_stat("Friction", f'{round(latest_row.get("friction_score", 0))}', "pink"),

@@ -1,0 +1,75 @@
+You are normalizing technical root causes into reusable clustering keys.
+
+Task:
+Convert the mechanism into a short, standardized label.
+
+The cluster_key MUST be derived from the mechanism (root cause), not from the intervention wording.
+
+
+CLUSTER KEY NORMALIZATION RULES
+
+The cluster_key must represent the core failure pattern in a generalized, reusable form.
+
+Rules:
+
+- Output MUST be a single snake_case phrase
+- Max 6 words
+- Focus on the SYSTEM cause (not the symptom)
+- Use consistent vocabulary across similar cases
+- Remove unnecessary specificity (e.g., "identifier", "details", "message", "records") unless essential to the failure
+- Focus on the relationship or failure pattern, not the specific implementation detail
+- Remove context-specific words (customer names, cities, etc.)
+- Do NOT include product names
+- Do NOT include verbs like "update", "fix", "handle"
+- Prefer stable, repeatable patterns that will group similar issues together
+
+Prefer canonical patterns (e.g., X_not_linked_to_Y) over descriptive phrases.
+
+
+PREFERRED PATTERNS:
+
+- X_not_linked_to_Y
+- wrong_X_selected
+- missing_X_association
+- duplicate_X_created
+- invalid_X_state
+- X_not_persisted
+- X_not_propagated
+- missing_X_validation
+
+
+GENERALIZATION RULE:
+
+If multiple ways exist to describe the issue, choose the form that will best group similar failures across tickets, even if it is less specific.
+
+Example transformations:
+
+"missing_account_identifier_in_error_message"
+→ "error_not_linked_to_account"
+
+"error message does not include account number"
+→ "error_not_linked_to_account"
+
+"fails to associate error with account"
+→ "error_not_linked_to_account"
+
+"missing customer id in validation error"
+→ "error_not_linked_to_account"
+
+
+NORMALIZATION GUIDANCE:
+
+- "fails to associate X with Y" → X_not_linked_to_Y
+- "does not validate X" → missing_X_validation
+- "selects wrong X" → wrong_X_selected
+- "allows duplicate X" → duplicate_X_created
+- "uses incorrect X" → incorrect_X_used
+- "X not persisted" → X_not_persisted
+- "X not propagated" → X_not_propagated
+
+
+Input:
+{{mechanism}}
+
+Output:
+<snake_case_key_only>

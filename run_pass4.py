@@ -44,7 +44,7 @@ from prompt_store import get_prompt
 
 # Upstream dependency: user-facing Pass 2, internal pass3_mechanism
 PASS3_PASS_NAME = "pass3_mechanism"
-DEFAULT_PROMPT_VERSION = "2"
+DEFAULT_PROMPT_VERSION = "4"
 DEFAULT_PASS3_PROMPT_VERSION = "3"
 
 

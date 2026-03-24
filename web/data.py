@@ -56,6 +56,12 @@ def query_one(sql, params=()):
 
 
 EXCLUDED_HEALTH_GROUPS = ("Marketing", "Sales (S)")
+EXCLUDED_CUSTOMERS = ("InHance Internal",)
+
+
+def _customer_exclusion_clause(*, column="customer"):
+    placeholders = ",".join(["%s"] * len(EXCLUDED_CUSTOMERS))
+    return f"COALESCE({column}, '') NOT IN ({placeholders})", list(EXCLUDED_CUSTOMERS)
 
 
 def _group_filter_clause(group_names, *, column="group_name"):
@@ -74,15 +80,16 @@ def _default_group_exclusion_clause(*, column="group_name"):
 # ── Overview ─────────────────────────────────────────────────────────
 
 def get_open_ticket_stats():
-    return query_one("""
+    cust_sql, cust_params = _customer_exclusion_clause(column="customer")
+    return query_one(f"""
         SELECT
             COUNT(*) AS total_open,
             COUNT(*) FILTER (WHERE priority IS NOT NULL AND priority <= 3) AS high_priority,
             COUNT(*) FILTER (WHERE overall_complexity >= 4) AS high_complexity,
             COUNT(*) FILTER (WHERE frustrated = 'Yes') AS frustrated
-        FROM vw_ticket_analytics_core
-        WHERE closed_at IS NULL
-    """) or {"total_open": 0, "high_priority": 0, "high_complexity": 0, "frustrated": 0}
+        FROM vw_operational_open_tickets
+        WHERE {cust_sql}
+    """, tuple(cust_params)) or {"total_open": 0, "high_priority": 0, "high_complexity": 0, "frustrated": 0}
 
 
 def get_backlog_daily():
@@ -131,6 +138,7 @@ def get_filtered_backlog_daily(filters):
          AND COALESCE(t.status, '') != 'Open'
          AND COALESCE(t.assignee, '') != 'Marketing'
          AND COALESCE(t.group_name, '') != 'Marketing'
+         AND COALESCE(t.customer, '') NOT IN ({','.join(['%s'] * len(EXCLUDED_CUSTOMERS))})
          AND (
              (t.closed_at IS NOT NULL AND t.closed_at::date > d.snapshot_date)
              OR
@@ -139,7 +147,7 @@ def get_filtered_backlog_daily(filters):
         WHERE d.snapshot_date >= '2024-07-01'
         GROUP BY d.snapshot_date
         ORDER BY d.snapshot_date
-    """, tuple(params))
+    """, tuple(list(EXCLUDED_CUSTOMERS) + params))
 
     # Severity breakdown per day (same filter)
     severity_rows = query(f"""
@@ -159,6 +167,7 @@ def get_filtered_backlog_daily(filters):
          AND COALESCE(t.status, '') != 'Open'
          AND COALESCE(t.assignee, '') != 'Marketing'
          AND COALESCE(t.group_name, '') != 'Marketing'
+         AND COALESCE(t.customer, '') NOT IN ({','.join(['%s'] * len(EXCLUDED_CUSTOMERS))})
          AND (
              (t.closed_at IS NOT NULL AND t.closed_at::date > d.snapshot_date)
              OR
@@ -167,7 +176,7 @@ def get_filtered_backlog_daily(filters):
         WHERE d.snapshot_date >= '2024-07-01'
         GROUP BY d.snapshot_date, 2
         ORDER BY d.snapshot_date, severity_tier
-    """, tuple(params))
+    """, tuple(list(EXCLUDED_CUSTOMERS) + params))
 
     return daily_rows, severity_rows
 
@@ -224,22 +233,21 @@ def get_open_by_product():
 
 
 def get_open_by_status():
-    return query("""
+    cust_sql, cust_params = _customer_exclusion_clause(column="customer")
+    return query(f"""
         SELECT COALESCE(status, 'Unknown') AS status, COUNT(*) AS count
-        FROM tickets
-        WHERE closed_at IS NULL
-          AND COALESCE(status, '') != 'Open'
-          AND COALESCE(assignee, '') != 'Marketing'
-          AND COALESCE(group_name, '') != 'Marketing'
+        FROM vw_operational_open_tickets
+        WHERE {cust_sql}
         GROUP BY status
         ORDER BY count DESC
-    """)
+    """, tuple(cust_params))
 
 
 # ── Ticket list ──────────────────────────────────────────────────────
 
 def get_ticket_list():
-    return query("""
+    cust_sql, cust_params = _customer_exclusion_clause(column="customer")
+    return query(f"""
         SELECT ticket_id, ticket_number, ticket_name, status, severity,
                product_name, assignee, customer,
                date_created, date_modified, days_opened, days_since_modified,
@@ -247,8 +255,9 @@ def get_ticket_list():
                priority, priority_explanation,
                overall_complexity, frustrated
         FROM vw_ticket_analytics_core
+        WHERE {cust_sql}
         ORDER BY date_modified DESC NULLS LAST
-    """)
+    """, tuple(cust_params))
 
 
 # ── Ticket detail ───────────────────────────────────────────────────
@@ -323,6 +332,7 @@ def get_customer_health():
                 SELECT customer, is_key_account
                 FROM customer_metadata
                 WHERE is_active IS TRUE
+                  AND customer NOT IN (SELECT unnest(%s::text[]))
 
                 UNION
 
@@ -331,6 +341,7 @@ def get_customer_health():
                 LEFT JOIN customer_metadata
                   ON customer_metadata.customer = filtered.customer
                 WHERE customer_metadata.customer IS NULL
+                  AND filtered.customer NOT IN (SELECT unnest(%s::text[]))
             )
             SELECT
                 latest_date.as_of_date AS as_of_date,
@@ -374,7 +385,7 @@ def get_customer_health():
               ON filtered.customer = display_customers.customer
             GROUP BY latest_date.as_of_date, display_customers.customer, display_customers.is_key_account
             ORDER BY customer_health_score DESC NULLS LAST, ticket_load_pressure_score DESC NULLS LAST
-        """, ("v1", "v1", *exclusion_params, "v1"))
+        """, ("v1", "v1", *exclusion_params, list(EXCLUDED_CUSTOMERS), list(EXCLUDED_CUSTOMERS), "v1"))
     except (psycopg2_errors.UndefinedColumn, psycopg2_errors.UndefinedTable):
         return query("""
             SELECT *,
@@ -437,21 +448,18 @@ def get_tickets_by_customers(customer_names, group_names=None):
     params = list(customer_names)
     group_extra = ""
     if group_names is None:
-        exclusion_sql, exclusion_params = _default_group_exclusion_clause(column="t.group_name")
+        exclusion_sql, exclusion_params = _default_group_exclusion_clause(column="v.group_name")
         group_extra = f" AND {exclusion_sql}"
         params.extend(exclusion_params)
     else:
-        group_extra, group_params = _group_filter_clause(group_names, column="t.group_name")
+        group_extra, group_params = _group_filter_clause(group_names, column="v.group_name")
         params.extend(group_params)
     return query(f"""
         SELECT v.ticket_id, v.ticket_number, v.ticket_name, v.status, v.severity,
-               t.group_name, v.product_name, v.assignee, v.customer, v.days_opened, v.priority,
+               v.group_name, v.product_name, v.assignee, v.customer, v.days_opened, v.priority,
                v.overall_complexity, v.frustrated, v.date_modified
-        FROM tickets t
-        JOIN vw_ticket_analytics_core v ON v.ticket_id = t.ticket_id
-        WHERE t.customer IN ({placeholders})
-          AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved', 'Open')
-          AND COALESCE(t.assignee, '') != 'Marketing'
+        FROM vw_operational_open_tickets v
+        WHERE v.customer IN ({placeholders})
           {group_extra}
         ORDER BY v.date_modified DESC NULLS LAST
     """, tuple(params))
@@ -663,11 +671,7 @@ KPI_FILTERS = {
 def get_drilldown_tickets(product=None, severity_tier=None, age_bucket=None,
                           kpi_filter=None):
     """Return open tickets matching chart drill-down filters."""
-    conditions = [
-        "t.closed_at IS NULL",
-        "COALESCE(t.status, '') NOT IN ('Closed', 'Resolved', 'Open')",
-        "COALESCE(t.assignee, '') != 'Marketing'",
-    ]
+    conditions = ["TRUE"]
     params = []
 
     if kpi_filter and kpi_filter in KPI_FILTERS:
@@ -676,10 +680,10 @@ def get_drilldown_tickets(product=None, severity_tier=None, age_bucket=None,
     if product:
         if product == "PowerMan":
             conditions.append(
-                "(LOWER(t.product_name) LIKE 'pm%%' OR LOWER(t.product_name) LIKE '%%power%%')"
+                "(LOWER(v.product_name) LIKE 'pm%%' OR LOWER(v.product_name) LIKE '%%power%%')"
             )
         else:
-            conditions.append("t.product_name = %s")
+            conditions.append("v.product_name = %s")
             params.append(product)
 
     if severity_tier and severity_tier in SEVERITY_TIER_SQL:
@@ -687,19 +691,22 @@ def get_drilldown_tickets(product=None, severity_tier=None, age_bucket=None,
 
     if age_bucket and age_bucket in AGE_BUCKET_RANGES:
         lo, hi = AGE_BUCKET_RANGES[age_bucket]
-        conditions.append("EXTRACT(DAY FROM now() - t.date_created)::int >= %s")
+        conditions.append("EXTRACT(DAY FROM now() - v.date_created)::int >= %s")
         params.append(lo)
         if hi is not None:
-            conditions.append("EXTRACT(DAY FROM now() - t.date_created)::int < %s")
+            conditions.append("EXTRACT(DAY FROM now() - v.date_created)::int < %s")
             params.append(hi)
+
+    cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
+    conditions.append(cust_sql)
+    params.extend(cust_params)
 
     where = " AND ".join(conditions)
     return query(f"""
         SELECT v.ticket_id, v.ticket_number, v.ticket_name, v.status, v.severity,
                v.product_name, v.assignee, v.customer, v.days_opened, v.priority,
                v.overall_complexity, v.frustrated, v.date_modified
-        FROM tickets t
-        JOIN vw_ticket_analytics_core v ON v.ticket_id = t.ticket_id
+        FROM vw_operational_open_tickets v
         WHERE {where}
         ORDER BY v.date_modified DESC NULLS LAST
     """, tuple(params))
@@ -804,8 +811,9 @@ def get_root_cause_tickets():
         WHERE tc.cluster_id IS NOT NULL
           AND COALESCE(t.status, '') != 'Open'
           AND COALESCE(t.assignee, '') != 'Marketing'
+          AND COALESCE(t.customer, '') NOT IN %s
         ORDER BY COALESCE(p4.completed_at, p3.completed_at, p1.completed_at) DESC NULLS LAST
-    """)
+    """, (EXCLUDED_CUSTOMERS,))
 
 
 def get_root_cause_detail(ticket_id):
@@ -862,6 +870,7 @@ def get_root_cause_stats():
             FROM tickets
             WHERE COALESCE(status, '') != 'Open'
               AND COALESCE(assignee, '') != 'Marketing'
+              AND COALESCE(customer, '') NOT IN %s
         )
         SELECT
             COUNT(DISTINCT st.ticket_id)
@@ -880,7 +889,7 @@ def get_root_cause_stats():
         LEFT JOIN latest_p3 p3 ON p3.ticket_id = st.ticket_id
         LEFT JOIN vw_latest_mechanism_ticket_clusters tc ON tc.ticket_id = st.ticket_id
         LEFT JOIN vw_latest_mechanism_cluster_catalog cc ON cc.cluster_id = tc.cluster_id
-    """) or {
+    """, (EXCLUDED_CUSTOMERS,)) or {
         "pass1_success": 0, "pass3_success": 0, "pass4_success": 0,
         "distinct_mechanism_classes": 0, "distinct_components": 0,
     }

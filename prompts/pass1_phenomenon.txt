@@ -205,6 +205,43 @@ A short description of the incorrect observable system behavior.
 Keep this concise, factual, and behavior-focused.
 The unexpected_state should be SHORTER than the phenomenon.
 
+--------------------------------
+OPERATION NORMALIZATION (STRICT)
+--------------------------------
+
+The operation MUST be selected from this exact list:
+
+display, save, upload, import, export, print, load, transfer, calculate,
+generate, create, remove, post, validate, sync, update
+
+STRICT RULES:
+
+• You MUST choose exactly one value from this list
+• DO NOT invent new operations
+• DO NOT paraphrase operations
+• DO NOT switch operations based on wording differences
+• If multiple operations seem possible, choose the PRIMARY system action
+
+FALLBACK RULE:
+
+If no operation clearly matches, default to "process"
+(but only as a last resort)
+
+CONSISTENCY OVERRIDE:
+
+If the same type of issue appears across tickets, the SAME operation MUST be used each time, even if wording differs.
+
+Examples:
+
+"fails during verification" → validate  
+"error when checking readings" → validate  
+"verification step errors" → validate  
+
+"screen does not open" → load  
+"module fails to start" → load  
+
+"bill is wrong" → generate  
+"invoice incorrect" → generate
 
 --------------------------------
 OUTPUT FORMAT

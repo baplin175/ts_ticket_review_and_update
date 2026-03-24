@@ -1,16 +1,13 @@
-"""Pass 4 — Intervention Mapper."""
+"""Pass 5 — Cluster Key Mapper."""
 
 from config import MATCHA_MISSION_ID
 from matcha_client import call_matcha
 from passes.runtime import process_ticket_pass
-from pass4.mechanism_classifier import (
-    parse_pass4_response,
-    validate_intervention_action,
-)
+from pass5.cluster_key_parser import parse_pass5_response
 from prompt_store import get_prompt
 
-PASS_NAME = "pass4_intervention"
-DEFAULT_PROMPT_VERSION = "4"
+PASS_NAME = "pass5_cluster_key"
+DEFAULT_PROMPT_VERSION = "2"
 MODEL_NAME = f"matcha-{MATCHA_MISSION_ID}"
 
 
@@ -35,32 +32,22 @@ def process_ticket(
     *,
     force: bool = False,
 ) -> dict:
-    """Process a single ticket through Pass 4.
+    """Process a single ticket through Pass 5.
 
     Returns a result dict with status, parsed fields, timing, etc.
     """
     full_prompt = _build_prompt(prompt_template, mechanism)
 
     def _success_update(parsed_output):
-        parsed_json, mechanism_class, intervention_type, intervention_action = parsed_output
+        parsed_json, cluster_key = parsed_output
         return {
             "parsed_json": parsed_json,
-            "mechanism_class": mechanism_class,
-            "intervention_type": intervention_type,
-            "intervention_action": intervention_action,
+            "cluster_key": cluster_key,
         }
 
     def _result_update(parsed_output):
-        _, mechanism_class, intervention_type, intervention_action = parsed_output
-        return {
-            "mechanism_class": mechanism_class,
-            "intervention_type": intervention_type,
-            "intervention_action": intervention_action,
-        }
-
-    def _validate_parsed(parsed_output):
-        _, _, _, intervention_action = parsed_output
-        validate_intervention_action(intervention_action, mechanism)
+        _, cluster_key = parsed_output
+        return {"cluster_key": cluster_key}
 
     return process_ticket_pass(
         ticket_id,
@@ -70,14 +57,9 @@ def process_ticket(
         input_text=mechanism,
         prompt_text=full_prompt,
         force=force,
-        initial_result={
-            "mechanism_class": None,
-            "intervention_type": None,
-            "intervention_action": None,
-        },
-        parse_response=parse_pass4_response,
+        initial_result={"cluster_key": None},
+        parse_response=parse_pass5_response,
         build_success_update=_success_update,
         build_result_update=_result_update,
-        validate_parsed=_validate_parsed,
         call_matcha_fn=call_matcha,
     )

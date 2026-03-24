@@ -853,16 +853,8 @@ def snapshot_tickets_daily(
             t.date_created, t.date_modified, t.source_updated_at,
             p.priority, c.overall_complexity
         FROM tickets t
-        LEFT JOIN (
-            SELECT DISTINCT ON (ticket_id) ticket_id, priority
-            FROM ticket_priority_scores
-            ORDER BY ticket_id, scored_at DESC, id DESC
-        ) p ON p.ticket_id = t.ticket_id
-        LEFT JOIN (
-            SELECT DISTINCT ON (ticket_id) ticket_id, overall_complexity
-            FROM ticket_complexity_scores
-            ORDER BY ticket_id, scored_at DESC, id DESC
-        ) c ON c.ticket_id = t.ticket_id
+        LEFT JOIN vw_latest_ticket_priority p ON p.ticket_id = t.ticket_id
+        LEFT JOIN vw_latest_ticket_complexity c ON c.ticket_id = t.ticket_id
         WHERE TRUE {tid_clause};
     """, tuple(params))
 

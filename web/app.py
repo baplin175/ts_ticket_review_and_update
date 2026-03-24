@@ -76,17 +76,36 @@ app.layout = dmc.MantineProvider(
     children=[
         dcc.Location(id="url", refresh=False),
         dcc.Store(id="ticket-filter-session", storage_type="session"),
+        dcc.Store(id="dark-mode-store", storage_type="local", data=False),
         dmc.AppShell(
             [
                 dmc.AppShellHeader(
                     dmc.Group(
                         [
-                            DashIconify(icon="tabler:chart-dots-3", width=28, color="#1c7ed6"),
-                            dmc.Text("CS Analytics", fw=700, size="lg"),
+                            dmc.Group(
+                                [
+                                    DashIconify(icon="tabler:chart-dots-3", width=28, color="#1c7ed6"),
+                                    dmc.Text("CS Analytics", fw=700, size="lg"),
+                                ],
+                                gap="xs",
+                            ),
+                            dmc.Group(
+                                [
+                                    DashIconify(icon="tabler:sun", width=18, id="dark-mode-sun-icon"),
+                                    dmc.Switch(
+                                        id="dark-mode-toggle",
+                                        size="md",
+                                        offLabel="",
+                                        onLabel="",
+                                    ),
+                                    DashIconify(icon="tabler:moon", width=18, id="dark-mode-moon-icon"),
+                                ],
+                                gap=6,
+                            ),
                         ],
                         h="100%",
                         px="md",
-                        gap="xs",
+                        justify="space-between",
                     ),
                 ),
                 dmc.AppShellNavbar(
@@ -103,6 +122,23 @@ app.layout = dmc.MantineProvider(
     ],
 )
 
+
+# ── Dark mode toggle ─────────────────────────────────────────────────
+
+app.clientside_callback(
+    """
+    function(checked) {
+        if (checked) {
+            document.body.classList.add('dark-mode');
+        } else {
+            document.body.classList.remove('dark-mode');
+        }
+        return checked;
+    }
+    """,
+    Output("dark-mode-store", "data"),
+    Input("dark-mode-toggle", "checked"),
+)
 
 # ── URL routing ──────────────────────────────────────────────────────
 

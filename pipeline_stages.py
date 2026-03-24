@@ -11,6 +11,7 @@ STAGES = {
     "grammar_legacy": {"sequence": None, "name": "Grammar", "internal": "pass2_grammar"},
     "mechanism": {"sequence": 2, "name": "Mechanism", "internal": "pass3_mechanism"},
     "intervention": {"sequence": 3, "name": "Intervention", "internal": "pass4_intervention"},
+    "cluster_key": {"sequence": 4, "name": "Cluster Key", "internal": "pass5_cluster_key"},
 }
 
 

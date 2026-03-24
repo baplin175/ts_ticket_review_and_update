@@ -64,6 +64,13 @@ PROMPT_SEEDS: tuple[PromptSeed, ...] = (
         title="Pass 4 Intervention",
         description="Intervention classification prompt.",
         filename="pass4_intervention.txt",
+        version=4,
+    ),
+    PromptSeed(
+        key="pass5_cluster_key",
+        title="Pass 5 Cluster Key",
+        description="Mechanism-to-cluster-key normalization prompt.",
+        filename="pass5_cluster_key.txt",
         version=2,
     ),
     PromptSeed(

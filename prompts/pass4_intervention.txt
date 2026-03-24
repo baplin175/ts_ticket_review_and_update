@@ -40,6 +40,29 @@ Select exactly one:
 - other                       (use ONLY when none of the above fit; requires proposed_class)
 
 
+MECHANISM INTERPRETATION RULES
+
+Classify based on the SYSTEM FAILURE PATTERN, not surface wording.
+
+Guidance:
+
+- calculation_logic_error → incorrect calculations, selection logic, or formula behavior
+- data_validation_failure → invalid input not rejected or validated
+- schema_mismatch → structural mismatch between expected and actual data shape
+- field_mapping_error → incorrect mapping between source and target fields (typically import/export/integration)
+- state_inconsistency → system state is missing, stale, not persisted, not propagated, or not correctly associated across components
+- synchronization_failure → data not updated across systems or processes in time
+- integration_mapping_error → incorrect mapping between internal system and external system fields
+- integration_communication_failure → API, network, transport, or connection failures
+- configuration_mismatch → system configured incorrectly
+- dependency_missing → required data, reference, or resource is not present
+
+If the issue involves missing context, lost references, incorrect association between entities, or failure to carry required identifiers/details through the workflow, prefer:
+→ state_inconsistency
+
+Use field_mapping_error only when the failure is specifically about incorrect source-to-target field mapping.
+
+
 INTERVENTION TYPES
 
 Select exactly one:
@@ -61,6 +84,37 @@ INTERVENTION GUIDELINES
 - Prefer structural fixes over temporary workarounds.
 - Do NOT describe troubleshooting steps.
 - Do NOT mention tickets, users, or support processes.
+
+INTERVENTION NORMALIZATION RULES
+
+The intervention_action must be reusable across similar failures.
+
+Rules:
+
+- Remove excessive specificity
+- Do NOT include customer-specific, ticket-specific, or one-off contextual details
+- Prefer generalized corrective changes over narrow case-specific fixes
+- Focus on the underlying system change, not the exact incident wording
+- Keep the action concise and structurally reusable across similar tickets
+- intervention_action MUST be 12 words or fewer
+
+Normalization guidance:
+
+- Remove unnecessary qualifiers (e.g., "reading verification process", "specific report")
+- Prefer core system action + target
+
+Examples:
+
+"update reading verification process to correctly persist account association with error details"
+→ "persist account association in error records"
+
+"update billing logic to filter inactive customer records"
+→ "exclude inactive records in selection logic"
+
+"add validation to reject negative readings during import"
+→ "validate and reject invalid input values"
+
+Prefer shorter, reusable actions that can cluster with semantically similar interventions.
 
 ACTION VERB REQUIREMENTS
 
