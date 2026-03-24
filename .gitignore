@@ -16,3 +16,9 @@ venv/
 .pytest_cache/
 Activities.csv
 qma_more/
+pipeline_input_pm_bill.csv
+pm_bill_tickets.csv
+root_c_files/pass1_results (4).csv
+root_c_files/pass3_results (3).csv
+root_c_files/pass4_results (5).csv
+root_c_files/pass5_results.csv
