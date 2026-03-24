@@ -879,6 +879,39 @@ def get_analyst_severity_profile(months=6):
     """, (str(months), *cust_params, *support_analysts))
 
 
+def get_analyst_reassignment_profile(months=6):
+    """Avg within-InHance handoffs per closed ticket, by analyst and severity."""
+    cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
+    support_analysts = _get_support_analysts()
+    support_ph = ",".join(["%s"] * len(support_analysts))
+    return query(f"""
+        WITH closed AS (
+            SELECT v.ticket_id, v.assignee, v.severity
+            FROM vw_ticket_analytics_core v
+            WHERE v.closed_at IS NOT NULL
+              AND v.closed_at >= CURRENT_DATE - (%s || ' months')::interval
+              AND v.assignee IS NOT NULL
+              AND {cust_sql}
+              AND v.assignee IN ({support_ph})
+        ),
+        handoff_counts AS (
+            SELECT c.ticket_id, c.assignee, c.severity,
+                   COUNT(h.handoff_id)::int AS handoffs
+            FROM closed c
+            LEFT JOIN ticket_handoffs h
+                   ON h.ticket_id = c.ticket_id
+                  AND h.handoff_reason = 'participant_switch_within_inh'
+            GROUP BY c.ticket_id, c.assignee, c.severity
+        )
+        SELECT assignee, severity,
+               COUNT(*)::int AS tickets,
+               ROUND(AVG(handoffs), 2) AS avg_handoffs
+        FROM handoff_counts
+        GROUP BY assignee, severity
+        ORDER BY assignee, severity
+    """, (str(months), *cust_params, *support_analysts))
+
+
 # ── Drill-down ───────────────────────────────────────────────────────
 
 AGE_BUCKET_RANGES = {

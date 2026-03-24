@@ -1,4 +1,4 @@
-"""Operations dashboard — analyst behaviour analytics for detecting gaming."""
+"""Operations dashboard — analyst activity metrics and contribution patterns."""
 
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
@@ -152,7 +152,7 @@ def _severity_chart(severity_rows):
 
 
 def _swooper_chart(scorecard):
-    """Horizontal bar: own-work ratio per analyst (lower = more swooping)."""
+    """Horizontal bar: own-work ratio per analyst."""
     if not scorecard:
         return dmc.Text("No data.", c="dimmed", ta="center", py="xl")
 
@@ -182,6 +182,52 @@ def _swooper_chart(scorecard):
         paper_bgcolor="rgba(0,0,0,0)",
     )
     return dcc.Graph(figure=fig, id="swooper-chart", config={"displayModeBar": False})
+
+
+def _reassignment_chart(reassignment_rows):
+    """Grouped bar: avg within-InHance handoffs per ticket by analyst and severity."""
+    if not reassignment_rows:
+        return dmc.Text("No data.", c="dimmed", ta="center", py="xl")
+
+    # Pivot: {analyst: {severity: avg_handoffs}}
+    by_analyst = {}
+    all_sevs = sorted(set(r["severity"] or "Unknown" for r in reassignment_rows))
+    for r in reassignment_rows:
+        sev = r["severity"] or "Unknown"
+        by_analyst.setdefault(r["assignee"], {})[sev] = r["avg_handoffs"] or 0
+
+    # Sort analysts by overall avg desc
+    analyst_avgs = [
+        (a, sum(sv.values()) / max(len(sv), 1)) for a, sv in by_analyst.items()
+    ]
+    analyst_avgs.sort(key=lambda x: x[1], reverse=True)
+    names = [a for a, _ in analyst_avgs]
+
+    colors = ["#339af0", "#e03131", "#f08c00", "#40c057", "#be4bdb", "#868e96"]
+
+    fig = go.Figure()
+    for i, sev in enumerate(all_sevs):
+        fig.add_trace(go.Bar(
+            y=names,
+            x=[by_analyst[a].get(sev, 0) for a in names],
+            orientation="h",
+            name=sev,
+            marker_color=colors[i % len(colors)],
+            text=[f"{by_analyst[a].get(sev, 0):.1f}" for a in names],
+            textposition="outside",
+        ))
+
+    fig.update_layout(
+        barmode="group",
+        margin=dict(l=0, r=40, t=10, b=10),
+        height=max(300, len(names) * 40),
+        xaxis_title="Avg Handoffs per Ticket",
+        yaxis=dict(automargin=True),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+    )
+    return dcc.Graph(figure=fig, id="reassignment-chart", config={"displayModeBar": False})
 
 
 def _monthly_closure_chart(monthly_rows):
@@ -243,14 +289,15 @@ def operations_layout():
     monthly = data.get_analyst_monthly_closures(12)
     action_profile = data.get_analyst_action_profile(6)
     severity_profile = data.get_analyst_severity_profile(6)
+    reassignment_profile = data.get_analyst_reassignment_profile(6)
     scorecard = _merge_scorecard(scorecard, action_profile, severity_profile)
 
     return dmc.Stack(
         [
             dmc.Title("Operations", order=2),
             dmc.Text(
-                "Analyst behaviour patterns — identify free-riding, "
-                "severity avoidance, and workload imbalances.",
+                "Analyst activity metrics — team workload distribution, "
+                "skill mix, and contribution patterns.",
                 c="dimmed", size="sm",
             ),
 
@@ -266,9 +313,9 @@ def operations_layout():
                         mb="sm",
                     ),
                     dmc.Text(
-                        "Red highlights: Technical % below 18%, High Sev % below 15%, "
-                        "Own Work % < 50%, Low Contribution > 10%. "
-                        "Click a row to see that analyst's low-contribution tickets.",
+                        "Highlighted rows indicate metrics that differ notably "
+                        "from team averages. "
+                        "Click a row to view ticket details.",
                         c="dimmed", size="xs", mb="sm",
                     ),
                     grid_with_export(
@@ -306,10 +353,9 @@ def operations_layout():
                                 gap="xs", mb="xs",
                             ),
                             dmc.Text(
-                                "What fraction of each analyst's own actions are actual "
-                                "technical problem-solving vs scheduling/coordination. "
-                                "Red = technical work ≥ 20% below team average. "
-                                "Red = scheduling ≥ 30% above team average.",
+                                "Breakdown of each analyst's actions into technical "
+                                "problem-solving vs scheduling/coordination, "
+                                "compared to team averages.",
                                 c="dimmed", size="xs", mb="sm",
                             ),
                             _action_profile_chart(action_profile),
@@ -327,8 +373,8 @@ def operations_layout():
                             ),
                             dmc.Text(
                                 "Percentage of each analyst's closures that were "
-                                "high-severity (Sev 1) tickets. Red bars are ≥ 35% "
-                                "below team average — possible severity avoidance.",
+                                "high-severity (Sev 1) tickets, compared to "
+                                "team average.",
                                 c="dimmed", size="xs", mb="sm",
                             ),
                             _severity_chart(severity_profile),
@@ -336,6 +382,26 @@ def operations_layout():
                         withBorder=True, p="md", radius="md", shadow="sm",
                     ),
                 ],
+            ),
+
+            # ── Reassignment profile by severity
+            dmc.Paper(
+                [
+                    dmc.Group(
+                        [
+                            DashIconify(icon="tabler:arrows-transfer-down", width=22, color="#1c7ed6"),
+                            dmc.Text("Avg Handoffs per Ticket by Severity", fw=600, size="lg"),
+                        ],
+                        gap="xs", mb="xs",
+                    ),
+                    dmc.Text(
+                        "Average number of times a ticket was passed between "
+                        "InHance analysts before closure, broken down by severity.",
+                        c="dimmed", size="xs", mb="sm",
+                    ),
+                    _reassignment_chart(reassignment_profile),
+                ],
+                withBorder=True, p="md", radius="md", shadow="sm",
             ),
 
             # ── Monthly trend
@@ -356,7 +422,7 @@ def operations_layout():
             # ── Swooper drilldown (hidden until row click)
             dmc.Modal(
                 id="swooper-modal",
-                title="Low-Contribution Tickets",
+                title="Ticket Details",
                 size="90%",
                 opened=False,
                 children=[
@@ -406,6 +472,6 @@ def register_operations_callbacks(app):
         tickets = data.get_analyst_swooper_tickets(analyst, 6)
         subtitle = (
             f"{len(tickets)} ticket{'s' if len(tickets) != 1 else ''} "
-            f"where {analyst} closed but contributed < 25% of InHance actions"
+            f"closed by {analyst} with under 25% of InHance actions"
         )
-        return True, f"Low-Contribution Closes — {analyst}", subtitle, tickets
+        return True, f"Ticket Details — {analyst}", subtitle, tickets
