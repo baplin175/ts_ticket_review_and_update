@@ -7,17 +7,24 @@ DASHBOARD_ROUTE_PREFIX = "/dashboards/"
 
 
 def build_static_nav_items(pages):
-    return [
-        {
+    items = []
+    for page in pages:
+        if page.get("hidden"):
+            continue
+        item = {
             "kind": "static",
             "label": page["label"],
             "icon": page.get("icon", "tabler:point"),
             "href": page["route"],
             "aliases": page.get("aliases", []),
             "match_prefix": page.get("match_prefix"),
+            "children": [
+                {"label": c["label"], "href": c["route"]}
+                for c in page.get("children", [])
+            ],
         }
-        for page in pages
-    ]
+        items.append(item)
+    return items
 
 
 def list_dashboard_nav_items():
@@ -49,6 +56,9 @@ def nav_item_active(item, pathname):
         return True
     if item.get("match_prefix") and pathname:
         return pathname.startswith(item["match_prefix"])
+    # Mark parent active when a child route is active
+    if any(pathname == child["href"] for child in item.get("children", [])):
+        return True
     return False
 
 

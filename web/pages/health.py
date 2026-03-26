@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 
 from .. import data
 from ..health_explainer import generate_customer_health_explanation
+from ..health_planner import generate_customer_health_plan
 from ..renderer import grid_with_export, ticket_number_column
 
 
@@ -22,6 +23,31 @@ _HEALTH_BAND_COLORS = {
 def _health_band_color(band):
     return _HEALTH_BAND_COLORS.get(str(band or "").strip().lower(), "gray")
 
+
+_BAND_CELL_STYLE = (
+    "{'color': '#e03131', 'fontWeight': 'bold'} if params.value === 'critical' else "
+    "{'color': '#f08c00', 'fontWeight': 'bold'} if params.value === 'at_risk' else "
+    "{'color': '#e6a700', 'fontWeight': 'bold'} if params.value === 'watch' else "
+    "{'color': '#2b8a3e', 'fontWeight': 'bold'} if params.value === 'healthy' else "
+    "{'fontWeight': 'bold'}"
+)
+
+PLANS_COLS = [
+    {"field": "customer", "headerName": "Customer", "minWidth": 160, "flex": 1.5, "pinned": "left"},
+    {"field": "as_of_date", "headerName": "As Of", "width": 110,
+     "valueFormatter": {"function": "params.value ? new Date(params.value).toLocaleDateString() : ''"}},
+    {"field": "target_band", "headerName": "Target Band", "width": 120,
+     "cellStyle": {"function": _BAND_CELL_STYLE}},
+    {"field": "projected_band", "headerName": "Proj. Band", "width": 120,
+     "cellStyle": {"function": _BAND_CELL_STYLE}},
+    {"field": "projected_score", "headerName": "Proj. Score", "width": 110, "type": "numericColumn",
+     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
+    {"field": "tickets_to_resolve_count", "headerName": "Tickets", "width": 85, "type": "numericColumn"},
+    {"field": "group_filter_label", "headerName": "Groups", "minWidth": 160, "flex": 1,
+     "tooltipField": "group_filter_label"},
+    {"field": "created_at", "headerName": "Generated", "width": 160, "sort": "desc",
+     "valueFormatter": {"function": "params.value ? new Date(params.value).toLocaleDateString() : ''"}},
+]
 
 # ── Customer health columns ──────────────────────────────────────────
 
@@ -297,6 +323,303 @@ def _explanation_history(records):
     )
 
 
+def _plan_record_card(record):
+    created = record.get("created_at") or "—"
+    as_of_date = record.get("as_of_date") or "—"
+    target_band = str(record.get("target_band") or "—").replace("_", " ").title()
+    projected_band = str(record.get("projected_band") or "—").replace("_", " ").title()
+    projected_score = record.get("projected_score")
+    tickets = record.get("tickets_to_resolve") or []
+    return dmc.Paper(
+        [
+            dmc.Group(
+                [
+                    dmc.Text(f"As of {as_of_date}", fw=700),
+                    dmc.Badge(f"Target: {target_band}", variant="light", color="blue"),
+                    dmc.Badge(
+                        f"Projected: {projected_band} ({round(projected_score) if projected_score is not None else '—'})",
+                        variant="light",
+                        color=_health_band_color(record.get("projected_band")),
+                    ),
+                    dmc.Badge(record.get("group_filter_label") or "Unknown filter", variant="outline"),
+                    dmc.Text(created, size="sm", c="dimmed"),
+                ],
+                justify="space-between",
+                align="flex-start",
+                wrap="wrap",
+            ),
+            dcc.Markdown(record.get("plan_text") or "", style={"marginTop": "0.5rem"}),
+            dmc.Text(
+                f"{len(tickets)} ticket(s) identified for resolution.",
+                size="sm", c="dimmed", mt="xs",
+            ) if tickets else None,
+        ],
+        withBorder=True,
+        radius="md",
+        p="md",
+    )
+
+
+def _plan_history(records):
+    if not records:
+        return dmc.Text("No saved improvement plans for this customer yet.", c="dimmed")
+    items = []
+    for idx, record in enumerate(records):
+        as_of_date = record.get("as_of_date") or "—"
+        target_band = str(record.get("target_band") or "—").replace("_", " ").title()
+        projected_band = str(record.get("projected_band") or "—").replace("_", " ").title()
+        created = record.get("created_at") or "—"
+        label = dmc.Group(
+            [
+                dmc.Text(f"As of {as_of_date}", fw=700),
+                dmc.Badge(f"Target: {target_band}", variant="light", color="blue"),
+                dmc.Badge(
+                    f"→ {projected_band}",
+                    variant="light",
+                    color=_health_band_color(record.get("projected_band")),
+                ),
+                dmc.Text(created, size="sm", c="dimmed"),
+            ],
+            justify="space-between",
+            align="center",
+            w="100%",
+        )
+        items.append(
+            dmc.AccordionItem(
+                [
+                    dmc.AccordionControl(label),
+                    dmc.AccordionPanel(_plan_record_card(record)),
+                ],
+                value=f"plan-{idx}",
+            )
+        )
+    return dmc.Accordion(
+        items,
+        multiple=False,
+        value=[],
+        chevronPosition="left",
+        variant="separated",
+    )
+
+
+def _plan_detail_card(row):
+    target_band = str(row.get("target_band") or "—").replace("_", " ").title()
+    projected_band = str(row.get("projected_band") or "—").replace("_", " ").title()
+    projected_score = row.get("projected_score")
+
+    tickets = row.get("tickets_to_resolve") or []
+    if isinstance(tickets, str):
+        import json as _json
+        try:
+            tickets = _json.loads(tickets)
+        except Exception:
+            tickets = []
+
+    ticket_table = None
+    if tickets:
+        header = dmc.TableThead(
+            dmc.TableTr([
+                dmc.TableTh("#"),
+                dmc.TableTh("Ticket"),
+                dmc.TableTh("Product"),
+                dmc.TableTh("Assignee"),
+                dmc.TableTh("Age (d)"),
+                dmc.TableTh("Pri"),
+                dmc.TableTh("Frustrated"),
+                dmc.TableTh("Score Δ"),
+            ])
+        )
+        rows = []
+        for i, t in enumerate(tickets, 1):
+            frustrated = t.get("frustrated") or ""
+            rows.append(
+                dmc.TableTr([
+                    dmc.TableTd(str(i)),
+                    dmc.TableTd(
+                        dmc.Text(
+                            f"#{t.get('ticket_number') or '—'}  {t.get('ticket_name') or ''}",
+                            size="sm", truncate="end",
+                        ),
+                        style={"maxWidth": "340px"},
+                    ),
+                    dmc.TableTd(dmc.Text(t.get("product_name") or "—", size="sm")),
+                    dmc.TableTd(dmc.Text(t.get("assignee") or "—", size="sm")),
+                    dmc.TableTd(dmc.Text(str(round(t.get("days_opened") or 0)), size="sm")),
+                    dmc.TableTd(dmc.Text(str(t.get("priority") or "—"), size="sm")),
+                    dmc.TableTd(
+                        dmc.Badge("Yes", color="red", variant="light", size="sm")
+                        if frustrated == "Yes"
+                        else dmc.Text("—", size="sm", c="dimmed")
+                    ),
+                    dmc.TableTd(
+                        dmc.Text(
+                            f"−{round(t.get('total_contribution') or 0)}",
+                            size="sm", c="red", fw=600,
+                        )
+                    ),
+                ])
+            )
+        ticket_table = dmc.Table(
+            [header, dmc.TableTbody(rows)],
+            striped=True,
+            highlightOnHover=True,
+            withTableBorder=True,
+            withColumnBorders=True,
+            fz="sm",
+            mt="sm",
+        )
+
+    children = [
+        dmc.Group(
+            [
+                dmc.Badge(f"Target: {target_band}", variant="light", color="blue"),
+                dmc.Badge(
+                    f"Projected: {projected_band} ({round(projected_score) if projected_score is not None else '—'})",
+                    variant="light",
+                    color=_health_band_color(row.get("projected_band")),
+                ),
+                dmc.Badge(row.get("group_filter_label") or "Unknown filter", variant="outline"),
+            ],
+            wrap="wrap",
+        ),
+        dcc.Markdown(row.get("plan_text") or ""),
+    ]
+    if ticket_table is not None:
+        children.append(dmc.Divider(my="xs"))
+        children.append(dmc.Text(f"{len(tickets)} ticket(s) to resolve:", fw=600, size="sm"))
+        children.append(ticket_table)
+
+    return dmc.Stack(children, gap="sm")
+
+
+def _build_plans_accordion(plans):
+    """Render a list of plan rows as an Accordion."""
+    if not plans:
+        return dmc.Text("No plans match the current filters.", c="dimmed", ta="center", py="xl")
+    items = []
+    for i, row in enumerate(plans):
+        customer = row.get("customer") or "—"
+        as_of = str(row.get("as_of_date") or "—")
+        target_band = str(row.get("target_band") or "—").replace("_", " ").title()
+        projected_band = str(row.get("projected_band") or "—").replace("_", " ").title()
+        current_score = row.get("current_score")
+        projected_score = row.get("projected_score")
+        current_str = str(round(float(current_score))) if current_score is not None else "?"
+        projected_str = str(round(float(projected_score))) if projected_score is not None else "?"
+        projected_band = str(row.get("projected_band") or "—").replace("_", " ").title()
+        n_tickets = row.get("tickets_to_resolve_count") or 0
+        groups = row.get("group_filter_label") or "—"
+        created = str(row.get("created_at") or "—")[:10]
+        control = dmc.Group(
+            [
+                dmc.Text(customer, fw=600, size="sm", style={"minWidth": "160px"}),
+                dmc.Text(as_of, size="sm", c="dimmed", style={"minWidth": "95px"}),
+                dmc.Badge(
+                    f"{current_str} → {projected_str}",
+                    color="gray", variant="light", size="sm",
+                    style={"fontVariantNumeric": "tabular-nums"},
+                ),
+                dmc.Badge(
+                    f"{projected_band}",
+                    color=_health_band_color(row.get("projected_band")),
+                    variant="light",
+                    size="sm",
+                ),
+                dmc.Text(f"{n_tickets} ticket{'s' if n_tickets != 1 else ''}", size="sm", c="dimmed", style={"minWidth": "65px"}),
+                dmc.Text(groups, size="xs", c="dimmed", style={"flex": "1", "overflow": "hidden", "textOverflow": "ellipsis", "whiteSpace": "nowrap"}),
+                dmc.Text(created, size="xs", c="dimmed"),
+            ],
+            wrap="nowrap",
+            gap="md",
+            style={"width": "100%"},
+        )
+        items.append(
+            dmc.AccordionItem(
+                [
+                    dmc.AccordionControl(control),
+                    dmc.AccordionPanel(_plan_detail_card(row)),
+                ],
+                value=f"plan-{i}",
+            )
+        )
+    return dmc.Accordion(
+        items,
+        multiple=False,
+        chevronPosition="right",
+        variant="separated",
+    )
+
+
+def plans_layout():
+    import json as _json
+    plans = data.get_all_health_plans()
+    if not plans:
+        return dmc.Stack(
+            [
+                dmc.Title("Improvement Plans", order=2),
+                dmc.Text(
+                    "No improvement plans have been generated yet. Open a customer's health history and click Generate Plan.",
+                    c="dimmed", ta="center", py="xl",
+                ),
+            ],
+            gap="sm",
+        )
+
+    customer_opts = sorted({r.get("customer") for r in plans if r.get("customer")})
+
+    return dmc.Stack(
+        [
+            dmc.Title("Improvement Plans", order=2),
+            dmc.Group(
+                [
+                    dmc.Select(
+                        id="plans-customer-filter",
+                        placeholder="Filter by customer…",
+                        data=[{"value": c, "label": c} for c in customer_opts],
+                        value=None,
+                        clearable=True,
+                        searchable=True,
+                        w=300,
+                        size="sm",
+                    ),
+                    dmc.Select(
+                        id="plans-band-filter",
+                        placeholder="Target band…",
+                        data=[
+                            {"value": "at_risk", "label": "At Risk"},
+                            {"value": "watch",   "label": "Watch"},
+                            {"value": "healthy", "label": "Healthy"},
+                        ],
+                        value=None,
+                        clearable=True,
+                        w=150,
+                        size="sm",
+                    ),
+                    dmc.Select(
+                        id="plans-sort",
+                        data=[
+                            {"value": "newest",   "label": "Newest first"},
+                            {"value": "oldest",   "label": "Oldest first"},
+                            {"value": "customer", "label": "Customer A→Z"},
+                            {"value": "score",    "label": "Projected score ↑"},
+                        ],
+                        value="newest",
+                        w=180,
+                        size="sm",
+                    ),
+                ],
+                gap="sm",
+            ),
+            dcc.Store(id="plans-data-store", data=_json.dumps(plans, default=str)),
+            html.Div(
+                id="plans-accordion-container",
+                children=_build_plans_accordion(plans),
+            ),
+        ],
+        gap="sm",
+    )
+
+
 # ── Layout ───────────────────────────────────────────────────────────
 
 def health_layout():
@@ -379,6 +702,7 @@ def health_layout():
             ),
             dcc.Store(id="health-history-selection"),
             dcc.Store(id="health-history-selected-date"),
+            dcc.Store(id="health-drilldown-customers-store"),
             # Drill-down modal for customer tickets
             dmc.Modal(
                 id="health-drilldown-modal",
@@ -387,6 +711,20 @@ def health_layout():
                 centered=True,
                 children=[
                     dmc.Text(id="health-drilldown-subtitle", size="sm", c="dimmed", mb="sm"),
+                    dmc.Group(
+                        [
+                            dmc.Text("Top Issue Clusters", size="sm", fw=600),
+                            dmc.Switch(
+                                id="health-cluster-scope-toggle",
+                                label="Open only",
+                                checked=True,
+                                size="xs",
+                            ),
+                        ],
+                        justify="space-between",
+                        mb="xs",
+                    ),
+                    html.Div(id="health-cluster-cards", style={"marginBottom": "12px"}),
                     grid_with_export(
                         dag.AgGrid(
                             id="health-drilldown-grid",
@@ -439,7 +777,36 @@ def health_layout():
                                 size="compact-sm",
                             ),
                             dmc.Text(
-                                "Generates a saved Matcha explanation using the currently selected groups and date.",
+                                "Generates a Matcha explanation for the selected date and groups.",
+                                size="sm",
+                                c="dimmed",
+                            ),
+                        ],
+                        mb="xs",
+                    ),
+                    dmc.Group(
+                        [
+                            dmc.Button(
+                                "Generate Plan",
+                                id="health-plan-btn",
+                                leftSection=DashIconify(icon="tabler:checklist", width=16),
+                                variant="light",
+                                color="teal",
+                                size="compact-sm",
+                            ),
+                            dmc.Select(
+                                id="health-plan-target-band",
+                                data=[
+                                    {"value": "at_risk", "label": "At Risk  (score < 50)"},
+                                    {"value": "watch",   "label": "Watch    (score < 30)"},
+                                    {"value": "healthy", "label": "Healthy  (score < 15)"},
+                                ],
+                                value="watch",
+                                w=200,
+                                size="xs",
+                            ),
+                            dmc.Text(
+                                "Simulate which tickets to resolve to reach the target band.",
                                 size="sm",
                                 c="dimmed",
                             ),
@@ -464,12 +831,12 @@ def health_layout():
                                 "filterParams": {"caseSensitive": False},
                             },
                             dashGridOptions={
+                                "rowSelection": "single",
                                 "pagination": True,
                                 "paginationPageSize": 25,
                                 "animateRows": True,
-                                "enableCellTextSelection": True,
                             },
-                            style={"height": "42vh"},
+                            style={"height": "42vh", "cursor": "pointer"},
                             className="ag-theme-quartz",
                         ),
                         "health-contributors-grid",
@@ -477,7 +844,17 @@ def health_layout():
                     dmc.Divider(my="md"),
                     dmc.Title("Past Explanations", order=4),
                     html.Div(id="health-explanations-list"),
+                    dmc.Divider(my="md"),
+                    dmc.Title("Improvement Plans", order=4),
+                    html.Div(id="health-plans-list"),
                 ],
+            ),
+            dmc.Modal(
+                id="health-plan-modal",
+                title="Improvement Plan",
+                size="lg",
+                centered=True,
+                children=html.Div(id="health-plan-modal-body"),
             ),
             dmc.Modal(
                 id="health-explain-modal",
@@ -516,18 +893,75 @@ def register_health_callbacks(app):
         Output("health-drilldown-modal", "opened"),
         Output("health-drilldown-grid", "rowData"),
         Output("health-drilldown-subtitle", "children"),
+        Output("health-drilldown-customers-store", "data"),
         Input("health-drilldown-btn", "n_clicks"),
         State("customer-health-grid", "selectedRows"),
         prevent_initial_call=True,
     )
     def open_drilldown(n_clicks, selected):
         if not n_clicks or not selected:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
         names = [r["customer"] for r in selected if r.get("customer")]
         tickets = data.get_tickets_by_customers(names)
         label = ", ".join(names)
         subtitle = f"{len(tickets)} open ticket{'s' if len(tickets) != 1 else ''} for: {label}"
-        return True, tickets, subtitle
+        return True, tickets, subtitle, names
+
+    @app.callback(
+        Output("health-cluster-cards", "children"),
+        Input("health-cluster-scope-toggle", "checked"),
+        Input("health-drilldown-customers-store", "data"),
+        prevent_initial_call=True,
+    )
+    def update_cluster_cards(open_only, customer_names):
+        if not customer_names:
+            return []
+        clusters = data.get_top_clusters_for_customer(
+            customer_names, top_n=3, open_only=bool(open_only),
+        )
+        if not clusters:
+            return dmc.Text(
+                "No cluster data available",
+                size="sm", c="dimmed", fs="italic",
+            )
+        rank_colors = ["blue", "teal", "grape"]
+        cards = []
+        for i, c in enumerate(clusters):
+            label = (c["cluster_key_l1"] or "").replace("_", " ").title()
+            mech = (c["mechanism_class"] or "").replace("_", " ").title()
+            cards.append(
+                dmc.Paper(
+                    [
+                        dmc.Group(
+                            [
+                                dmc.Badge(
+                                    f"#{i + 1}",
+                                    color=rank_colors[i % len(rank_colors)],
+                                    size="sm",
+                                    variant="filled",
+                                ),
+                                dmc.Badge(
+                                    mech,
+                                    color="gray",
+                                    size="xs",
+                                    variant="light",
+                                ),
+                            ],
+                            justify="space-between",
+                            mb=4,
+                        ),
+                        dmc.Text(label, size="sm", fw=500, lineClamp=2),
+                        dmc.Text(
+                            f"{c['ticket_count']} ticket{'s' if c['ticket_count'] != 1 else ''}",
+                            size="xs", c="dimmed",
+                        ),
+                    ],
+                    p="sm",
+                    radius="md",
+                    withBorder=True,
+                )
+            )
+        return dmc.SimpleGrid(cols=3, spacing="sm", children=cards)
 
     @app.callback(
         Output("health-history-modal", "opened"),
@@ -539,6 +973,7 @@ def register_health_callbacks(app):
         Output("health-contributors-grid", "rowData"),
         Output("health-contributors-subtitle", "children"),
         Output("health-explanations-list", "children"),
+        Output("health-plans-list", "children"),
         Output("health-history-selection", "data"),
         Output("health-history-selected-date", "data"),
         Input("health-history-btn", "n_clicks"),
@@ -547,12 +982,13 @@ def register_health_callbacks(app):
     )
     def open_health_history(n_clicks, selected):
         if not n_clicks or not selected or len(selected) != 1:
-            return no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
+            return (no_update,) * 12
 
         customer = selected[0]["customer"]
         groups = data.get_customer_groups(customer)
         history = data.get_customer_health_history(customer, groups)
         explanations = data.get_customer_health_explanations(customer)
+        plans = data.get_customer_health_plans(customer)
         selected_label = customer
         if not history:
             subtitle = f"No additive health history is available yet for {selected_label}."
@@ -566,6 +1002,7 @@ def register_health_callbacks(app):
                 [],
                 "No ticket-level contributors available.",
                 _explanation_history(explanations),
+                _plan_history(plans),
                 {"customer": customer},
                 None,
             )
@@ -588,6 +1025,7 @@ def register_health_callbacks(app):
             contributors,
             contributor_label,
             _explanation_history(explanations),
+            _plan_history(plans),
             {"customer": customer},
             latest["as_of_date"],
         )
@@ -623,6 +1061,32 @@ def register_health_callbacks(app):
             else f"No ticket drivers recorded on {latest['as_of_date']}"
         )
         return _history_summary(latest), _history_figure(history), contributors, subtitle, latest["as_of_date"]
+
+    @app.callback(
+        Output("health-plan-modal", "opened"),
+        Output("health-plan-modal-body", "children"),
+        Output("health-plans-list", "children", allow_duplicate=True),
+        Input("health-plan-btn", "n_clicks"),
+        State("health-history-selection", "data"),
+        State("health-history-selected-date", "data"),
+        State("health-history-group-filter", "value"),
+        State("health-plan-target-band", "value"),
+        prevent_initial_call=True,
+    )
+    def generate_plan(n_clicks, selection, as_of_date, group_names, target_band):
+        if not n_clicks or not selection or not selection.get("customer") or not as_of_date:
+            return no_update, no_update, no_update
+        customer = selection["customer"]
+        available_groups = data.get_customer_groups(customer)
+        record = generate_customer_health_plan(
+            customer=customer,
+            as_of_date=as_of_date,
+            selected_groups=group_names or [],
+            available_groups=available_groups,
+            target_band=target_band or "watch",
+        )
+        all_records = data.get_customer_health_plans(customer)
+        return True, _plan_record_card(record), _plan_history(all_records)
 
     @app.callback(
         Output("health-explain-modal", "opened"),
@@ -697,3 +1161,29 @@ def register_health_callbacks(app):
             if tid is not None:
                 return f"/ticket/{tid}"
         return no_update
+
+    @app.callback(
+        Output("plans-accordion-container", "children"),
+        Input("plans-customer-filter", "value"),
+        Input("plans-band-filter", "value"),
+        Input("plans-sort", "value"),
+        State("plans-data-store", "data"),
+        prevent_initial_call=True,
+    )
+    def filter_plans(customer, band, sort, store_data):
+        import json as _json
+        plans = _json.loads(store_data or "[]")
+        if customer:
+            plans = [p for p in plans if p.get("customer") == customer]
+        if band:
+            plans = [p for p in plans if p.get("target_band") == band]
+        if sort == "oldest":
+            plans = sorted(plans, key=lambda p: str(p.get("created_at") or ""))
+        elif sort == "customer":
+            plans = sorted(plans, key=lambda p: (p.get("customer") or "").lower())
+        elif sort == "score":
+            plans = sorted(plans, key=lambda p: float(p.get("projected_score") or 0))
+        else:  # newest (default — already ordered DESC from DB)
+            plans = sorted(plans, key=lambda p: str(p.get("created_at") or ""), reverse=True)
+        return _build_plans_accordion(plans)
+

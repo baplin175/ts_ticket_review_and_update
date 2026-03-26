@@ -184,6 +184,45 @@ def _resolution_histogram(rows):
     return dcc.Graph(figure=fig, config={"displayModeBar": False})
 
 
+def _time_by_resource_chart(rows):
+    """Heatmap: analyst × month, colour = total hours logged."""
+    if not rows:
+        return dmc.Text("No data.", c="dimmed", ta="center", py="xl")
+
+    months = sorted(set(r["month"] for r in rows))
+    analysts = sorted(set(r["assignee"] for r in rows))
+    lookup = {(r["month"], r["assignee"]): float(r["total_hours"] or 0) for r in rows}
+
+    z, hover = [], []
+    for analyst in analysts:
+        z_row, h_row = [], []
+        for m in months:
+            val = lookup.get((m, analyst), 0)
+            z_row.append(val)
+            h_row.append(f"<b>{analyst}</b><br>{m}: {val:.1f}h")
+        z.append(z_row)
+        hover.append(h_row)
+
+    fig = go.Figure(go.Heatmap(
+        z=z,
+        x=months,
+        y=analysts,
+        colorscale="Blues",
+        hoverinfo="text",
+        text=hover,
+        texttemplate="%{z:.0f}",
+        colorbar=dict(title="Hours", thickness=12),
+    ))
+    fig.update_layout(
+        template="plotly_white",
+        margin=dict(l=10, r=10, t=10, b=50),
+        height=max(240, len(analysts) * 32 + 60),
+        xaxis=dict(title="Month", tickangle=-30, automargin=True, side="bottom"),
+        yaxis=dict(autorange="reversed", automargin=True),
+    )
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+
 def _heatmap_chart(rows):
     if not rows:
         return dmc.Text("No data.", c="dimmed", ta="center", py="xl")
@@ -289,6 +328,7 @@ def _build_content(assignees, products, months):
     action_mix = data.get_deep_dive_action_mix(assignees, products, months)
     trend = data.get_deep_dive_volume_trend(assignees, products, months)
     resolution = data.get_deep_dive_resolution_distribution(assignees, products, months)
+    time_by_resource = data.get_deep_dive_time_by_resource(assignees, products, months)
     heatmap = data.get_deep_dive_product_analyst_heatmap(assignees, products, months)
     tickets = data.get_deep_dive_tickets(assignees, products, months)
 
@@ -351,6 +391,19 @@ def _build_content(assignees, products, months):
             ],
         )
     )
+
+    # ── Time by Resource ─────────────────────────────────────────────
+    if time_by_resource:
+        children.append(
+            dmc.Paper([
+                dmc.Text("Hours Entered by Analyst", fw=600, mb="xs"),
+                dmc.Text(
+                    "Total hours logged per analyst per month, from action time entries.",
+                    size="xs", c="dimmed", mb="xs",
+                ),
+                _time_by_resource_chart(time_by_resource),
+            ], withBorder=True, p="md", radius="md", shadow="sm")
+        )
 
     # ── Heatmap: Analyst × Product ───────────────────────────────────
     if heatmap:

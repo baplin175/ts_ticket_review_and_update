@@ -22,6 +22,7 @@ _FILTER_FIELDS = [
     {"field": "product_name", "label": "Product"},
     {"field": "assignee",     "label": "Assignee"},
     {"field": "customer",     "label": "Customer"},
+    {"field": "group_name",   "label": "Group"},
     {"field": "frustrated",   "label": "Frustrated"},
 ]
 
@@ -268,6 +269,36 @@ def _product_chart(rows):
                      style={"cursor": "pointer"})
 
 
+def _frustrated_by_group_chart(open_tickets):
+    """Horizontal bar chart: frustrated open ticket count by group."""
+    from collections import Counter
+    counts = Counter()
+    for r in open_tickets:
+        if r.get("frustrated") == "Yes":
+            g = r.get("group_name") or "Unassigned"
+            counts[g] += 1
+    if not counts:
+        return dmc.Text("No frustrated open tickets.", c="dimmed", ta="center", py="xl")
+    sorted_groups = sorted(counts, key=counts.get, reverse=True)
+    sorted_groups = list(reversed(sorted_groups))  # largest at top
+    values = [counts[g] for g in sorted_groups]
+    fig = go.Figure(go.Bar(
+        y=sorted_groups, x=values, orientation="h",
+        marker_color="#e03131",
+        text=values, textposition="auto",
+        hovertemplate="%{y}: %{x} frustrated<extra></extra>",
+    ))
+    fig.update_layout(
+        template="plotly_white",
+        margin=dict(l=180, r=20, t=10, b=40),
+        height=max(200, len(sorted_groups) * 32),
+        xaxis_title="Frustrated Tickets", yaxis_title=None,
+    )
+    return dcc.Graph(id="frustrated-group-chart", figure=fig,
+                     config={"displayModeBar": False},
+                     style={"cursor": "pointer"})
+
+
 # ── Filter bar helpers ───────────────────────────────────────────────
 
 def _distinct_values(rows, field):
@@ -467,6 +498,16 @@ def overview_layout():
                 style={"display": "none", "transition": "all 0.3s ease"},
             ),
 
+            # Frustrated by group
+            dmc.Paper(
+                [
+                    dmc.Text("Frustrated Open Tickets by Group", fw=600, mb="xs"),
+                    html.Div(_frustrated_by_group_chart(open_tickets),
+                             id="overview-frustrated-group-chart"),
+                ],
+                withBorder=True, p="md", radius="md", shadow="sm",
+            ),
+
             # Drill-down modal (hidden until a chart bar is clicked)
             dcc.Store(id="drilldown-store", data=None),
             dcc.Store(id="overview-active-filters", data={}),
@@ -519,6 +560,7 @@ def register_overview_callbacks(app):
         Output("overview-backlog-chart", "children"),
         Output("overview-aging-chart", "children"),
         Output("overview-product-chart", "children"),
+        Output("overview-frustrated-group-chart", "children"),
         Output("overview-filter-indicator", "children"),
         Output("overview-active-filters", "data"),
         *[Input({"type": "overview-filter-select", "field": f["field"]}, "value")
@@ -532,7 +574,7 @@ def register_overview_callbacks(app):
         filter_values = args[:-1]
 
         if not all_rows:
-            return (no_update,) * 9
+            return (no_update,) * 10
 
         # Check if any filters are actually active
         any_active = any(v for v in filter_values if v)
@@ -541,6 +583,7 @@ def register_overview_callbacks(app):
             stats = data.get_open_ticket_stats()
             backlog = data.get_backlog_daily()
             backlog_sev = data.get_backlog_daily_by_severity()
+            all_open = [r for r in all_rows if (r.get("status") or "").lower() != "closed"]
             return (
                 str(stats["total_open"]),
                 str(stats["high_priority"]),
@@ -549,6 +592,7 @@ def register_overview_callbacks(app):
                 _backlog_chart(backlog, backlog_sev),
                 _aging_chart(data.get_backlog_aging()),
                 _product_chart(data.get_open_by_product()),
+                _frustrated_by_group_chart(all_open),
                 None,
                 {},
             )
@@ -601,6 +645,8 @@ def register_overview_callbacks(app):
             withCloseButton=False,
         ) if active_filters else None
 
+        frustrated_chart = _frustrated_by_group_chart(filtered)
+
         return (
             str(stats["total_open"]),
             str(stats["high_priority"]),
@@ -609,6 +655,7 @@ def register_overview_callbacks(app):
             backlog_chart,
             aging_chart,
             product_chart,
+            frustrated_chart,
             indicator,
             filter_dict,
         )

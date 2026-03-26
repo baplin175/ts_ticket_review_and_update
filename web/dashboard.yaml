@@ -62,12 +62,18 @@ pages:
     icon: tabler:zoom-scan
     module: web.pages.operations
     layout_func: operations_layout
+    children:
+      - label: Overview
+        route: /operations
+      - label: Deep Dive
+        route: /deep-dive
 
   - label: Deep Dive
     route: /deep-dive
     icon: tabler:microscope
     module: web.pages.deep_dive
     layout_func: deep_dive_layout
+    hidden: true
 
   # ── YAML-driven pages ────────────────────────────────────────────
 
@@ -76,6 +82,18 @@ pages:
     icon: tabler:heart-rate-monitor
     module: web.pages.health
     layout_func: health_layout
+    children:
+      - label: Customer Health
+        route: /health
+      - label: Plans
+        route: /health/plans
+
+  - label: Health Plans
+    route: /health/plans
+    icon: tabler:checklist
+    module: web.pages.health
+    layout_func: plans_layout
+    hidden: true
 
   - label: Root Cause
     route: /root-cause

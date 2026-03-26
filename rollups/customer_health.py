@@ -113,6 +113,73 @@ def health_band(score: float) -> str:
     return "critical"
 
 
+# Score must be strictly below this threshold to be "in" the band.
+_BAND_THRESHOLDS: dict[str, float] = {"healthy": 15.0, "watch": 30.0, "at_risk": 50.0}
+
+
+def simulate_improvement_to_band(
+    contributors: list[dict[str, Any]],
+    current_score: float,
+    target_band: str,
+) -> dict[str, Any]:
+    """Greedy simulation: which tickets to resolve to bring the distress score
+    below the target_band threshold.
+
+    Tickets are sorted by total_contribution descending and removed one at a
+    time until the running total falls below the threshold.  Concentration and
+    breadth contributions are slightly shared across tickets; treating each
+    row's stored total_contribution as independent is a conservative
+    approximation that may modestly overstate the improvement.
+    """
+    threshold = _BAND_THRESHOLDS.get(target_band)
+    if threshold is None:
+        raise ValueError(
+            f"Invalid target_band {target_band!r}. Must be one of: "
+            + ", ".join(_BAND_THRESHOLDS)
+        )
+
+    if float(current_score) < threshold:
+        return {
+            "target_band": target_band,
+            "target_threshold": threshold,
+            "current_score": current_score,
+            "projected_score": current_score,
+            "projected_band": health_band(float(current_score)),
+            "score_reduction": 0.0,
+            "tickets_to_resolve": [],
+            "already_at_or_better": True,
+        }
+
+    sorted_contribs = sorted(
+        contributors,
+        key=lambda r: (
+            -float(r.get("total_contribution") or 0),
+            int(r.get("ticket_id") or 0),
+        ),
+    )
+    tickets_to_resolve: list[dict[str, Any]] = []
+    running = float(current_score)
+    for ticket in sorted_contribs:
+        if running < threshold:
+            break
+        contrib = float(ticket.get("total_contribution") or 0)
+        if contrib > 0:
+            tickets_to_resolve.append(ticket)
+            running = round(running - contrib, 2)
+
+    projected = max(0.0, running)
+    return {
+        "target_band": target_band,
+        "target_threshold": threshold,
+        "current_score": current_score,
+        "projected_score": projected,
+        "projected_band": health_band(projected),
+        "score_reduction": round(float(current_score) - projected, 2),
+        "tickets_to_resolve": tickets_to_resolve,
+        "already_at_or_better": False,
+    }
+
+
 def _build_contributor_row(
     row: dict[str, Any],
     *,

@@ -118,6 +118,7 @@ def get_filtered_backlog_daily(filters):
         "product_name": "t.product_name",
         "assignee": "t.assignee",
         "customer": "t.customer",
+        "group_name": "t.group_name",
     }
     for field, values in (filters or {}).items():
         col = _FIELD_MAP.get(field)
@@ -249,7 +250,7 @@ def get_ticket_list():
     cust_sql, cust_params = _customer_exclusion_clause(column="customer")
     return query(f"""
         SELECT ticket_id, ticket_number, ticket_name, status, severity,
-               product_name, assignee, customer,
+               product_name, assignee, customer, group_name,
                date_created, date_modified, days_opened, days_since_modified,
                action_count, customer_message_count, inhance_message_count,
                priority, priority_explanation,
@@ -645,6 +646,83 @@ def save_customer_health_explanation(
     ))
 
 
+def get_all_health_plans():
+    try:
+        return query("""
+            SELECT id, customer, as_of_date, group_filter_label,
+                   target_band, projected_score, projected_band,
+                   jsonb_array_length(COALESCE(tickets_to_resolve, '[]'::jsonb))
+                       AS tickets_to_resolve_count,
+                   tickets_to_resolve,
+                   plan_text, created_at,
+                   (raw_context_json -> 'simulation' ->> 'current_score')::numeric AS current_score
+            FROM customer_health_improvement_plans
+            ORDER BY created_at DESC, id DESC
+        """)
+    except (psycopg2_errors.UndefinedColumn, psycopg2_errors.UndefinedTable,
+            psycopg2.OperationalError):
+        return []
+
+
+def get_customer_health_plans(customer):
+    try:
+        return query("""
+            SELECT id, customer, as_of_date, group_filter_json, group_filter_label,
+                   target_band, projected_score, projected_band, tickets_to_resolve,
+                   model_name, prompt_version, plan_text, created_at
+            FROM customer_health_improvement_plans
+            WHERE customer = %s
+            ORDER BY created_at DESC, id DESC
+        """, (customer,))
+    except (psycopg2_errors.UndefinedColumn, psycopg2_errors.UndefinedTable,
+            psycopg2.OperationalError):
+        return []
+
+
+def save_customer_health_plan(
+    *,
+    customer,
+    as_of_date,
+    group_filter_json,
+    group_filter_label,
+    target_band,
+    projected_score,
+    projected_band,
+    tickets_to_resolve,
+    model_name,
+    prompt_version,
+    plan_text,
+    raw_context_json,
+    raw_response_text,
+):
+    return _execute_returning("""
+        INSERT INTO customer_health_improvement_plans (
+            customer, as_of_date, group_filter_json, group_filter_label,
+            target_band, projected_score, projected_band, tickets_to_resolve,
+            model_name, prompt_version, plan_text, raw_context_json,
+            raw_response_text, created_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+        RETURNING id, customer, as_of_date, group_filter_json, group_filter_label,
+                  target_band, projected_score, projected_band, tickets_to_resolve,
+                  model_name, prompt_version, plan_text, created_at
+    """, (
+        customer,
+        as_of_date,
+        json.dumps(group_filter_json),
+        group_filter_label,
+        target_band,
+        projected_score,
+        projected_band,
+        json.dumps(tickets_to_resolve, default=str),
+        model_name,
+        prompt_version,
+        plan_text,
+        json.dumps(raw_context_json, default=str),
+        raw_response_text,
+    ))
+
+
 # ── Operations / Analyst behaviour ──────────────────────────────────
 
 _ANALYST_EXCLUSIONS = ("Customer Support (CS)", "Cogsdale Support",
@@ -936,13 +1014,20 @@ KPI_FILTERS = {
 
 
 def get_drilldown_tickets(product=None, severity_tier=None, age_bucket=None,
-                          kpi_filter=None):
+                          kpi_filter=None, group_name=None):
     """Return open tickets matching chart drill-down filters."""
     conditions = ["TRUE"]
     params = []
 
     if kpi_filter and kpi_filter in KPI_FILTERS:
         conditions.extend(KPI_FILTERS[kpi_filter])
+
+    if group_name:
+        if group_name == "Unassigned":
+            conditions.append("(v.group_name IS NULL OR v.group_name = '')")
+        else:
+            conditions.append("v.group_name = %s")
+            params.append(group_name)
 
     if product:
         if product == "PowerMan":
@@ -1790,6 +1875,49 @@ def get_top_clusters(product_names=None, top_n=5):
     return query(base, tuple(params))
 
 
+def get_top_clusters_for_customer(customer_names, top_n=3, open_only=True):
+    """Return top N issue clusters for the given customer(s).
+
+    Joins tickets → pass results → rollup map to aggregate cluster counts
+    filtered by customer name. Returns both L1 cluster key and mechanism class.
+    """
+    if not customer_names:
+        return []
+    placeholders = ",".join(["%s"] * len(customer_names))
+    sql = f"""
+        SELECT
+            r4.mechanism_class,
+            COALESCE(m.cluster_key_l1, r5.cluster_key) AS cluster_key_l1,
+            COUNT(*) AS ticket_count
+        FROM tickets t
+        JOIN ticket_llm_pass_results r4
+            ON r4.ticket_id = t.ticket_id
+           AND r4.pass_name = 'pass4_intervention'
+           AND r4.status = 'success'
+           AND r4.mechanism_class IS NOT NULL
+        JOIN ticket_llm_pass_results r5
+            ON r5.ticket_id = t.ticket_id
+           AND r5.pass_name = 'pass5_cluster_key'
+           AND r5.status = 'success'
+           AND r5.cluster_key IS NOT NULL
+        LEFT JOIN cluster_key_rollup_map m
+            ON m.cluster_key = r5.cluster_key
+           AND m.is_active = TRUE
+        WHERE t.customer IN ({placeholders})
+    """
+    params = list(customer_names)
+    if open_only:
+        sql += " AND t.status NOT ILIKE %s"
+        params.append("%Closed%")
+    sql += """
+        GROUP BY r4.mechanism_class, COALESCE(m.cluster_key_l1, r5.cluster_key)
+        ORDER BY COUNT(*) DESC
+        LIMIT %s
+    """
+    params.append(top_n)
+    return query(sql, tuple(params))
+
+
 def get_cluster_examples(product_name, mechanism_class, cluster_key_l1):
     """Return example tickets for a specific L1 cluster."""
     return query("""
@@ -1988,8 +2116,25 @@ def get_deep_dive_product_analyst_heatmap(assignees=None, products=None, months=
 
 
 def get_deep_dive_tickets(assignees=None, products=None, months=12):
-    """Return ticket list matching deep-dive filters."""
-    where, params = _deep_dive_base_conditions(assignees, products, months)
+    """Return all tickets (open and closed) matching the deep-dive assignee/product filters."""
+    conditions = ["TRUE"]
+    params = []
+    cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
+    conditions.append(cust_sql)
+    params.extend(cust_params)
+    support_analysts = _get_support_analysts()
+    support_ph = ",".join(["%s"] * len(support_analysts))
+    conditions.append(f"v.assignee IN ({support_ph})")
+    params.extend(support_analysts)
+    if assignees:
+        ph = ",".join(["%s"] * len(assignees))
+        conditions.append(f"v.assignee IN ({ph})")
+        params.extend(assignees)
+    if products:
+        ph = ",".join(["%s"] * len(products))
+        conditions.append(f"v.product_name IN ({ph})")
+        params.extend(products)
+    where = " AND ".join(conditions)
     return query(f"""
         SELECT v.ticket_id, v.ticket_number, v.ticket_name, v.status,
                v.severity, v.product_name, v.assignee, v.customer,
@@ -1998,7 +2143,7 @@ def get_deep_dive_tickets(assignees=None, products=None, months=12):
                v.hours_to_first_response, v.date_modified, v.closed_at
         FROM vw_ticket_analytics_core v
         WHERE {where}
-        ORDER BY v.closed_at DESC NULLS LAST
+        ORDER BY v.date_modified DESC NULLS LAST
     """, tuple(params))
 
 
@@ -2020,3 +2165,147 @@ def get_deep_dive_resolution_distribution(assignees=None, products=None, months=
         GROUP BY 1
         ORDER BY MIN(v.days_opened)
     """, tuple(params))
+
+
+def get_deep_dive_time_by_resource(assignees=None, products=None, months=12):
+    """Return total hours entered in actions per analyst per month."""
+    conditions = ["ta.created_at >= CURRENT_DATE - (%s || ' months')::interval"]
+    params = [months]
+    cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
+    conditions.append(cust_sql)
+    params.extend(cust_params)
+    support_analysts = _get_support_analysts()
+    support_ph = ",".join(["%s"] * len(support_analysts))
+    # filter hours to entries made BY support analysts
+    conditions.append(f"ta.creator_name IN ({support_ph})")
+    params.extend(support_analysts)
+    if assignees:
+        ph = ",".join(["%s"] * len(assignees))
+        conditions.append(f"v.assignee IN ({ph})")
+        params.extend(assignees)
+    if products:
+        ph = ",".join(["%s"] * len(products))
+        conditions.append(f"v.product_name IN ({ph})")
+        params.extend(products)
+    where = " AND ".join(conditions)
+    return query(f"""
+        SELECT
+            TO_CHAR(ta.created_at, 'YYYY-MM') AS month,
+            ta.creator_name                    AS assignee,
+            ROUND(SUM(
+                NULLIF(ta.source_payload->>'hours_spent', '')::numeric
+            ), 2)                              AS total_hours
+        FROM ticket_actions ta
+        JOIN vw_ticket_analytics_core v ON v.ticket_id = ta.ticket_id
+        WHERE NULLIF(ta.source_payload->>'hours_spent', '') IS NOT NULL
+          AND ta.creator_name IS NOT NULL
+          AND {where}
+        GROUP BY 1, 2
+        ORDER BY 1, 2
+    """, tuple(params))
+
+
+# ── Operations Overview KPIs (CS group) ──────────────────────────────
+
+def get_ops_avg_days_to_close(months=6, group_name="Customer Support (CS)"):
+    """Average days to close for tickets in the given group, per month."""
+    cust_sql, cust_params = _customer_exclusion_clause(column="t.customer")
+    return query(f"""
+        SELECT
+            TO_CHAR(t.closed_at, 'YYYY-MM') AS month,
+            ROUND(AVG(EXTRACT(EPOCH FROM (t.closed_at - t.date_created)) / 86400.0), 1)
+                AS avg_days_to_close,
+            COUNT(*)::int AS tickets_closed
+        FROM tickets t
+        WHERE t.closed_at IS NOT NULL
+          AND t.closed_at >= CURRENT_DATE - (%s || ' months')::interval
+          AND t.date_created IS NOT NULL
+          AND COALESCE(t.group_name, '') = %s
+          AND COALESCE(t.status, '') != 'Open'
+          AND {cust_sql}
+        GROUP BY 1
+        ORDER BY 1
+    """, (str(months), group_name, *cust_params))
+
+
+def get_ops_backlog_snapshot(group_name="Customer Support (CS)"):
+    """Backlog count at Jan 1 of current year and now, for the given group."""
+    cust_sql, cust_params = _customer_exclusion_clause(column="t.customer")
+    jan1 = query_one(f"""
+        SELECT COUNT(*) AS backlog
+        FROM tickets t
+        WHERE t.date_created IS NOT NULL
+          AND t.date_created::date <= DATE_TRUNC('year', CURRENT_DATE)::date
+          AND COALESCE(t.group_name, '') = %s
+          AND COALESCE(t.status, '') != 'Open'
+          AND {cust_sql}
+          AND (
+              (t.closed_at IS NOT NULL AND t.closed_at::date > DATE_TRUNC('year', CURRENT_DATE)::date)
+              OR
+              (t.closed_at IS NULL AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved'))
+          )
+    """, (group_name, *cust_params))
+
+    now = query_one(f"""
+        SELECT COUNT(*) AS backlog
+        FROM tickets t
+        WHERE t.date_created IS NOT NULL
+          AND COALESCE(t.group_name, '') = %s
+          AND COALESCE(t.status, '') != 'Open'
+          AND {cust_sql}
+          AND t.closed_at IS NULL
+          AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved')
+    """, (group_name, *cust_params))
+
+    return {
+        "jan1": (jan1 or {}).get("backlog", 0),
+        "now": (now or {}).get("backlog", 0),
+    }
+
+
+def get_ops_most_improved_customers(months=3, group_name="Customer Support (CS)", top_n=5):
+    """Customers whose open backlog dropped the most over the last N months."""
+    cust_sql, cust_params = _customer_exclusion_clause(column="t.customer")
+    return query(f"""
+        WITH then_open AS (
+            SELECT t.customer, COUNT(*) AS open_then
+            FROM tickets t
+            WHERE t.date_created IS NOT NULL
+              AND t.date_created::date <= (CURRENT_DATE - (%s || ' months')::interval)::date
+              AND COALESCE(t.group_name, '') = %s
+              AND COALESCE(t.status, '') != 'Open'
+              AND {cust_sql}
+              AND t.customer IS NOT NULL AND t.customer != ''
+              AND (
+                  (t.closed_at IS NOT NULL
+                   AND t.closed_at::date > (CURRENT_DATE - (%s || ' months')::interval)::date)
+                  OR
+                  (t.closed_at IS NULL
+                   AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved'))
+              )
+            GROUP BY t.customer
+        ),
+        now_open AS (
+            SELECT t.customer, COUNT(*) AS open_now
+            FROM tickets t
+            WHERE t.date_created IS NOT NULL
+              AND COALESCE(t.group_name, '') = %s
+              AND COALESCE(t.status, '') != 'Open'
+              AND {cust_sql}
+              AND t.customer IS NOT NULL AND t.customer != ''
+              AND t.closed_at IS NULL
+              AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved')
+            GROUP BY t.customer
+        )
+        SELECT
+            COALESCE(th.customer, nw.customer) AS customer,
+            COALESCE(th.open_then, 0)::int     AS open_then,
+            COALESCE(nw.open_now, 0)::int      AS open_now,
+            (COALESCE(th.open_then, 0) - COALESCE(nw.open_now, 0))::int AS reduction
+        FROM then_open th
+        FULL OUTER JOIN now_open nw ON nw.customer = th.customer
+        WHERE COALESCE(th.open_then, 0) - COALESCE(nw.open_now, 0) > 0
+        ORDER BY reduction DESC
+        LIMIT %s
+    """, (str(months), group_name, *cust_params, str(months),
+          group_name, *cust_params, top_n))

@@ -83,6 +83,7 @@ app.layout = dmc.MantineProvider(
         dcc.Location(id="url", refresh=False),
         dcc.Store(id="ticket-filter-session", storage_type="session"),
         dcc.Store(id="dark-mode-store", storage_type="local", data=False),
+        dcc.Store(id="nav-expanded-store", storage_type="session", data=[]),
         dmc.AppShell(
             [
                 dmc.AppShellHeader(
@@ -206,24 +207,92 @@ def display_page(pathname, search):
 @callback(
     Output("sidebar-nav", "children"),
     Input("url", "pathname"),
+    Input("nav-expanded-store", "data"),
 )
-def render_sidebar_nav(pathname):
+def render_sidebar_nav(pathname, expanded_hrefs):
+    from dash import ctx
     try:
         items = dashboard_registry.build_nav_items(_PAGES)
     except Exception as exc:
         print(f"[web] sidebar nav fallback: {exc}", flush=True)
         traceback.print_exc()
         items = dashboard_registry.build_static_nav_items(_PAGES)
-    return [
-        dmc.NavLink(
-            label=item["label"],
-            leftSection=DashIconify(icon=item["icon"], width=20),
-            href=item["href"],
-            variant="light",
-            active=dashboard_registry.nav_item_active(item, pathname),
-        )
-        for item in items
-    ]
+
+    expanded_set = set(expanded_hrefs or [])
+    nav_links = []
+    for item in items:
+        children = item.get("children", [])
+        is_active = dashboard_registry.nav_item_active(item, pathname)
+        # Auto-expand only when a child route is the current page, not the parent itself.
+        # This lets the user collapse the section even while the parent is active.
+        child_is_active = bool(children and any(pathname == c["href"] for c in children))
+        is_expanded = child_is_active or (item["href"] in expanded_set)
+        if children:
+            right_section = DashIconify(
+                icon="tabler:chevron-down" if is_expanded else "tabler:chevron-right",
+                width=14,
+                color="#adb5bd",
+            )
+            nav_links.append(
+                dmc.NavLink(
+                    id={"type": "nav-parent", "index": item["href"]},
+                    label=item["label"],
+                    leftSection=DashIconify(icon=item["icon"], width=20),
+                    rightSection=right_section,
+                    variant="light",
+                    active=is_active,
+                )
+            )
+            if is_expanded:
+                for child in children:
+                    nav_links.append(
+                        dmc.NavLink(
+                            label=child["label"],
+                            href=child["href"],
+                            variant="light",
+                            active=pathname == child["href"],
+                            style={
+                                "fontSize": "0.85rem",
+                                "paddingLeft": "2.75rem",
+                                "borderLeft": "2px solid #dee2e6",
+                                "marginLeft": "1rem",
+                            },
+                        )
+                    )
+        else:
+            nav_links.append(
+                dmc.NavLink(
+                    label=item["label"],
+                    leftSection=DashIconify(icon=item["icon"], width=20),
+                    href=item["href"],
+                    variant="light",
+                    active=is_active,
+                )
+            )
+    return nav_links
+
+
+@callback(
+    Output("nav-expanded-store", "data"),
+    Input({"type": "nav-parent", "index": ALL}, "n_clicks"),
+    State("nav-expanded-store", "data"),
+    prevent_initial_call=True,
+)
+def toggle_nav_section(n_clicks_list, expanded_hrefs):
+    from dash import ctx
+    if not ctx.triggered_id or not isinstance(ctx.triggered_id, dict):
+        return no_update
+    # Only fire on actual clicks (not initial render)
+    triggered_clicks = ctx.triggered[0]["value"]
+    if not triggered_clicks:
+        return no_update
+    href = ctx.triggered_id["index"]
+    expanded = set(expanded_hrefs or [])
+    if href in expanded:
+        expanded.discard(href)
+    else:
+        expanded.add(href)
+    return list(expanded)
 
 
 # ── Ticket grid row click → navigate ────────────────────────────────
@@ -301,11 +370,13 @@ _KPI_CARDS = {
     Output("drilldown-store", "data"),
     Input("aging-chart", "clickData"),
     Input("product-chart", "clickData"),
+    Input("frustrated-group-chart", "clickData"),
     Input({"type": "aging-product-chart", "index": ALL}, "clickData"),
     [Input(card_id, "n_clicks") for card_id in _KPI_CARDS],
     prevent_initial_call=True,
 )
-def chart_click_to_store(aging_click, product_click, aging_product_clicks, *kpi_clicks):
+def chart_click_to_store(aging_click, product_click, frustrated_group_click,
+                         aging_product_clicks, *kpi_clicks):
     """Translate a Plotly clickData event into a drilldown filter dict."""
     from dash import ctx
     trigger = ctx.triggered_id
@@ -323,6 +394,13 @@ def chart_click_to_store(aging_click, product_click, aging_product_clicks, *kpi_
         if severity_tier:
             label += f" — {severity_tier} severity"
         return {"product": product, "severity_tier": severity_tier, "label": label}
+
+    if trigger == "frustrated-group-chart" and frustrated_group_click:
+        pt = frustrated_group_click["points"][0]
+        group = pt.get("y") or pt.get("label")
+        return {"frustrated_group": group,
+                "kpi_filter": "frustrated",
+                "label": f"Frustrated — {group}"}
 
     # Per-product aging charts (pattern-matching IDs)
     if isinstance(trigger, dict) and trigger.get("type") == "aging-product-chart":
@@ -369,6 +447,7 @@ def open_drilldown_modal(filter_data, active_filters, ticket_store):
             severity_tier=filter_data.get("severity_tier"),
             age_bucket=filter_data.get("age_bucket"),
             kpi_filter=filter_data.get("kpi_filter"),
+            group_name=filter_data.get("frustrated_group"),
         )
 
     label = filter_data.get("label", "Tickets")
@@ -445,6 +524,11 @@ def _drilldown_from_store(filter_data, active_filters, ticket_store):
         rows = [r for r in rows if r.get("overall_complexity") is not None and r["overall_complexity"] >= 4]
     elif kpi_filter == "frustrated":
         rows = [r for r in rows if r.get("frustrated") == "Yes"]
+
+    frustrated_group = filter_data.get("frustrated_group")
+    if frustrated_group:
+        rows = [r for r in rows
+                if (r.get("group_name") or "Unassigned") == frustrated_group]
 
     product = filter_data.get("product")
     if product:

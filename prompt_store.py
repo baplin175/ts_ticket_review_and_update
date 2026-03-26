@@ -80,6 +80,13 @@ PROMPT_SEEDS: tuple[PromptSeed, ...] = (
         filename="customer_health_explanation.md",
         version=1,
     ),
+    PromptSeed(
+        key="customer_health_improvement_plan",
+        title="Customer Health Improvement Plan",
+        description="Improvement plan prompt: prioritized tickets to resolve to reach a target health band.",
+        filename="customer_health_improvement_plan.md",
+        version=1,
+    ),
 )
 
 _SEED_BY_KEY = {seed.key: seed for seed in PROMPT_SEEDS}

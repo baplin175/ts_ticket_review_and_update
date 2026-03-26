@@ -230,35 +230,88 @@ def _reassignment_chart(reassignment_rows):
     return dcc.Graph(figure=fig, id="reassignment-chart", config={"displayModeBar": False})
 
 
+def _linear_trend(xs, ys):
+    """Return (slope, intercept) for a simple linear regression."""
+    n = len(xs)
+    if n < 2:
+        return 0, (ys[0] if ys else 0)
+    x_mean = sum(xs) / n
+    y_mean = sum(ys) / n
+    num = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys))
+    den = sum((x - x_mean) ** 2 for x in xs)
+    slope = num / den if den else 0
+    return slope, y_mean - slope * x_mean
+
+
 def _monthly_closure_chart(monthly_rows):
-    """Line chart: monthly closures per analyst."""
+    """Line chart: monthly closures per analyst, with per-analyst trend lines.
+    Team Total and its trend run on a secondary y-axis to preserve scale."""
     if not monthly_rows:
         return dmc.Text("No data.", c="dimmed", ta="center", py="xl")
 
-    # Pivot: {analyst: {month: count}}
+    # Plotly default colorway (matches auto-assignment order)
+    COLORS = [
+        "#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A",
+        "#19D3F3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52",
+    ]
+
     by_analyst = {}
     all_months = sorted(set(r["month"] for r in monthly_rows))
     for r in monthly_rows:
         by_analyst.setdefault(r["assignee"], {})[r["month"]] = r["closed_count"]
 
-    # Sort analysts by total closures desc, take top 10
     totals = [(a, sum(m.values())) for a, m in by_analyst.items()]
     totals.sort(key=lambda x: -x[1])
     top = [a for a, _ in totals[:10]]
 
     fig = go.Figure()
-    for analyst in top:
+    xs = list(range(len(all_months)))
+
+    # Per-analyst lines + dashed trend in same colour
+    for i, analyst in enumerate(top):
+        color = COLORS[i % len(COLORS)]
         vals = [by_analyst[analyst].get(m, 0) for m in all_months]
         fig.add_trace(go.Scatter(
             x=all_months, y=vals, name=analyst, mode="lines+markers",
-            line=dict(width=2),
+            line=dict(width=2, color=color), marker=dict(color=color),
+        ))
+        slope, intercept = _linear_trend(xs, vals)
+        trend = [slope * x + intercept for x in xs]
+        fig.add_trace(go.Scatter(
+            x=all_months, y=trend,
+            mode="lines",
+            line=dict(width=1.5, color=color, dash="dash"),
+            showlegend=False,
+            hoverinfo="skip",
         ))
 
+    # Team total on secondary y-axis (hidden by default to keep scale clean)
+    team_totals = [sum(by_analyst[a].get(m, 0) for a in by_analyst) for m in all_months]
+    fig.add_trace(go.Scatter(
+        x=all_months, y=team_totals, name="Team Total",
+        mode="lines+markers",
+        line=dict(width=2, color="#1c1c1c", dash="dot"),
+        marker=dict(size=5, color="#1c1c1c"),
+        yaxis="y2",
+        visible="legendonly",
+    ))
+    slope, intercept = _linear_trend(xs, team_totals)
+    trend = [slope * x + intercept for x in xs]
+    fig.add_trace(go.Scatter(
+        x=all_months, y=trend, name="Trend (team)",
+        mode="lines",
+        line=dict(width=2, color="#e03131", dash="dash"),
+        yaxis="y2",
+        visible="legendonly",
+        hovertemplate="%{x}: %{y:.0f} (trend)<extra></extra>",
+    ))
+
     fig.update_layout(
-        margin=dict(l=0, r=0, t=10, b=10),
+        margin=dict(l=0, r=50, t=10, b=10),
         height=400,
         xaxis_title="Month",
-        yaxis_title="Tickets Closed",
+        yaxis=dict(title="Tickets Closed"),
+        yaxis2=dict(title="Team Total", overlaying="y", side="right", showgrid=False),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
@@ -292,13 +345,145 @@ def operations_layout():
     reassignment_profile = data.get_analyst_reassignment_profile(6)
     scorecard = _merge_scorecard(scorecard, action_profile, severity_profile)
 
+    # ── CS group KPIs
+    avg_close_rows = data.get_ops_avg_days_to_close(months=6)
+    backlog_snap = data.get_ops_backlog_snapshot()
+    most_improved = data.get_ops_most_improved_customers(months=3)
+
+    # Current month avg
+    cur_month_avg = avg_close_rows[-1]["avg_days_to_close"] if avg_close_rows else None
+    # Past 6 month overall avg
+    if avg_close_rows:
+        total_tickets = sum(r["tickets_closed"] for r in avg_close_rows)
+        weighted = sum(
+            float(r["avg_days_to_close"]) * r["tickets_closed"]
+            for r in avg_close_rows
+        )
+        overall_avg = round(weighted / total_tickets, 1) if total_tickets else None
+    else:
+        overall_avg = None
+
     return dmc.Stack(
         [
-            dmc.Title("Operations", order=2),
+            dmc.Title("Overview", order=2),
             dmc.Text(
                 "Analyst activity metrics — team workload distribution, "
                 "skill mix, and contribution patterns.",
                 c="dimmed", size="sm",
+            ),
+
+            # ── CS Group KPI Cards
+            dmc.SimpleGrid(
+                cols={"base": 1, "sm": 2, "md": 4},
+                spacing="md",
+                children=[
+                    # Avg days to close — current month
+                    dmc.Paper(
+                        [
+                            dmc.Text("Avg Days to Close", c="dimmed", size="xs"),
+                            dmc.Text("Current Month", c="dimmed", size="xs"),
+                            dmc.Title(
+                                f"{float(cur_month_avg):.1f}" if cur_month_avg else "—",
+                                order=3,
+                            ),
+                        ],
+                        withBorder=True, p="md", radius="md", shadow="sm",
+                    ),
+                    # Avg days to close — past 6 months
+                    dmc.Paper(
+                        [
+                            dmc.Text("Avg Days to Close", c="dimmed", size="xs"),
+                            dmc.Text("Past 6 Months", c="dimmed", size="xs"),
+                            dmc.Title(
+                                f"{overall_avg}" if overall_avg else "—",
+                                order=3,
+                            ),
+                        ],
+                        withBorder=True, p="md", radius="md", shadow="sm",
+                    ),
+                    # Backlog at Jan 1
+                    dmc.Paper(
+                        [
+                            dmc.Text("CS Backlog", c="dimmed", size="xs"),
+                            dmc.Text("Jan 1", c="dimmed", size="xs"),
+                            dmc.Title(str(backlog_snap["jan1"]), order=3),
+                        ],
+                        withBorder=True, p="md", radius="md", shadow="sm",
+                    ),
+                    # Backlog now
+                    dmc.Paper(
+                        [
+                            dmc.Text("CS Backlog", c="dimmed", size="xs"),
+                            dmc.Text("Now", c="dimmed", size="xs"),
+                            dmc.Group(
+                                [
+                                    dmc.Title(str(backlog_snap["now"]), order=3),
+                                    dmc.Badge(
+                                        f"{'↓' if backlog_snap['now'] <= backlog_snap['jan1'] else '↑'} "
+                                        f"{abs(backlog_snap['now'] - backlog_snap['jan1'])}",
+                                        color="green" if backlog_snap["now"] <= backlog_snap["jan1"] else "red",
+                                        variant="light",
+                                        size="lg",
+                                    ),
+                                ],
+                                gap="xs",
+                            ),
+                        ],
+                        withBorder=True, p="md", radius="md", shadow="sm",
+                    ),
+                ],
+            ),
+
+            # ── Most Improved Customers (last 3 months)
+            dmc.Paper(
+                [
+                    dmc.Group(
+                        [
+                            DashIconify(icon="tabler:trending-down", width=22, color="#2f9e44"),
+                            dmc.Text("Most Improved Customers (last 3 months)", fw=600, size="lg"),
+                        ],
+                        gap="xs", mb="xs",
+                    ),
+                    dmc.Text(
+                        "CS-group customers whose open backlog decreased the most.",
+                        c="dimmed", size="xs", mb="sm",
+                    ),
+                    dmc.Table(
+                        [
+                            dmc.TableThead(
+                                dmc.TableTr([
+                                    dmc.TableTh("Customer"),
+                                    dmc.TableTh("3 Months Ago"),
+                                    dmc.TableTh("Now"),
+                                    dmc.TableTh("Reduction"),
+                                ]),
+                            ),
+                            dmc.TableTbody(
+                                [
+                                    dmc.TableTr([
+                                        dmc.TableTd(r["customer"]),
+                                        dmc.TableTd(str(r["open_then"])),
+                                        dmc.TableTd(str(r["open_now"])),
+                                        dmc.TableTd(
+                                            dmc.Badge(
+                                                f"↓ {r['reduction']}",
+                                                color="green", variant="light",
+                                            ),
+                                        ),
+                                    ])
+                                    for r in most_improved
+                                ] if most_improved else [
+                                    dmc.TableTr([
+                                        dmc.TableTd("No improvement data available",
+                                                    colSpan=4, ta="center"),
+                                    ])
+                                ],
+                            ),
+                        ],
+                        striped=True, highlightOnHover=True,
+                    ),
+                ],
+                withBorder=True, p="md", radius="md", shadow="sm",
             ),
 
             # ── Analyst Scorecard
