@@ -836,23 +836,106 @@ def get_analyst_complexity_distribution(months=6):
     """, (str(months), *cust_params, *support_analysts))
 
 
-def get_analyst_monthly_closures(months=12):
-    """Monthly closure counts per analyst."""
+def get_analyst_monthly_closures(months=12, date_from=None, date_to=None,
+                                  severity_tier=None):
+    """Monthly closure counts per analyst.
+    If date_from/date_to are provided (YYYY-MM-DD strings), use those instead of months.
+    If severity_tier is 'split', returns rows with an additional severity_tier column.
+    If severity_tier is 'High'/'Medium'/'Low', filters to that tier only."""
     cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
     support_analysts = _get_support_analysts()
     support_ph = ",".join(["%s"] * len(support_analysts))
+
+    sev_case = """CASE
+        WHEN v.severity LIKE '1%%' OR LOWER(v.severity) LIKE '%%high%%' THEN 'High'
+        WHEN v.severity LIKE '3%%' OR LOWER(v.severity) LIKE '%%low%%' THEN 'Low'
+        ELSE 'Medium'
+    END"""
+
+    # Build severity column / filter / grouping pieces
+    if severity_tier == "split":
+        sev_select = f", {sev_case} AS severity_tier"
+        sev_filter = ""
+        sev_group = ", 3"
+        sev_order = "ORDER BY 1, 4 DESC"
+    elif severity_tier in ("High", "Medium", "Low"):
+        sev_select = ""
+        sev_filter = f" AND {sev_case} = %s"
+        sev_group = ""
+        sev_order = "ORDER BY 1, 3 DESC"
+    else:
+        sev_select = ""
+        sev_filter = ""
+        sev_group = ""
+        sev_order = "ORDER BY 1, 3 DESC"
+
+    if date_from and date_to:
+        params = [date_from, date_to, *cust_params]
+        if severity_tier in ("High", "Medium", "Low"):
+            params.append(severity_tier)
+        params.extend(support_analysts)
+        return query(f"""
+            SELECT TO_CHAR(v.closed_at, 'YYYY-MM') AS month,
+                   v.assignee{sev_select},
+                   COUNT(*)::int AS closed_count
+            FROM vw_ticket_analytics_core v
+            WHERE v.closed_at IS NOT NULL
+              AND v.closed_at >= %s::date
+              AND v.closed_at < %s::date + INTERVAL '1 day'
+              AND v.assignee IS NOT NULL
+              AND {cust_sql}{sev_filter}
+              AND v.assignee IN ({support_ph})
+            GROUP BY 1, 2{sev_group}
+            {sev_order}
+        """, tuple(params))
+
+    params = [str(months), *cust_params]
+    if severity_tier in ("High", "Medium", "Low"):
+        params.append(severity_tier)
+    params.extend(support_analysts)
     return query(f"""
         SELECT TO_CHAR(v.closed_at, 'YYYY-MM') AS month,
-               v.assignee,
+               v.assignee{sev_select},
                COUNT(*)::int AS closed_count
         FROM vw_ticket_analytics_core v
         WHERE v.closed_at IS NOT NULL
           AND v.closed_at >= CURRENT_DATE - (%s || ' months')::interval
           AND v.assignee IS NOT NULL
+          AND {cust_sql}{sev_filter}
+          AND v.assignee IN ({support_ph})
+        GROUP BY 1, 2{sev_group}
+        {sev_order}
+    """, tuple(params))
+
+
+def get_monthly_tickets_created(date_from=None, date_to=None, months=12):
+    """Monthly ticket creation counts for CS-group customers."""
+    cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
+    support_analysts = _get_support_analysts()
+    support_ph = ",".join(["%s"] * len(support_analysts))
+    if date_from and date_to:
+        return query(f"""
+            SELECT TO_CHAR(v.date_created, 'YYYY-MM') AS month,
+                   COUNT(*)::int AS created_count
+            FROM vw_ticket_analytics_core v
+            WHERE v.date_created IS NOT NULL
+              AND v.date_created >= %s::date
+              AND v.date_created < %s::date + INTERVAL '1 day'
+              AND {cust_sql}
+              AND v.assignee IN ({support_ph})
+            GROUP BY 1
+            ORDER BY 1
+        """, (date_from, date_to, *cust_params, *support_analysts))
+    return query(f"""
+        SELECT TO_CHAR(v.date_created, 'YYYY-MM') AS month,
+               COUNT(*)::int AS created_count
+        FROM vw_ticket_analytics_core v
+        WHERE v.date_created IS NOT NULL
+          AND v.date_created >= CURRENT_DATE - (%s || ' months')::interval
           AND {cust_sql}
           AND v.assignee IN ({support_ph})
-        GROUP BY 1, 2
-        ORDER BY 1, 3 DESC
+        GROUP BY 1
+        ORDER BY 1
     """, (str(months), *cust_params, *support_analysts))
 
 
@@ -958,7 +1041,7 @@ def get_analyst_severity_profile(months=6):
 
 
 def get_analyst_reassignment_profile(months=6):
-    """Avg within-InHance handoffs per closed ticket, by analyst and severity."""
+    """Avg within-InHance handoffs per closed high-severity ticket, by analyst and severity."""
     cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
     support_analysts = _get_support_analysts()
     support_ph = ",".join(["%s"] * len(support_analysts))
@@ -969,6 +1052,9 @@ def get_analyst_reassignment_profile(months=6):
             WHERE v.closed_at IS NOT NULL
               AND v.closed_at >= CURRENT_DATE - (%s || ' months')::interval
               AND v.assignee IS NOT NULL
+              AND (v.severity LIKE '0%%' OR v.severity LIKE '1%%'
+                   OR LOWER(v.severity) LIKE '%%system down%%'
+                   OR LOWER(v.severity) LIKE '%%high%%')
               AND {cust_sql}
               AND v.assignee IN ({support_ph})
         ),
@@ -2202,6 +2288,21 @@ def get_deep_dive_time_by_resource(assignees=None, products=None, months=12):
           AND {where}
         GROUP BY 1, 2
         ORDER BY 1, 2
+    """, tuple(params))
+
+
+def get_deep_dive_avg_days_to_close(assignees=None, products=None, months=12):
+    """Return average days to close per month for the deep-dive filters."""
+    where, params = _deep_dive_base_conditions(assignees, products, months)
+    return query(f"""
+        SELECT
+            TO_CHAR(v.closed_at, 'YYYY-MM') AS month,
+            ROUND(AVG(v.days_opened), 1)     AS avg_days_to_close,
+            COUNT(*)::int                    AS tickets_closed
+        FROM vw_ticket_analytics_core v
+        WHERE v.days_opened IS NOT NULL AND {where}
+        GROUP BY 1
+        ORDER BY 1
     """, tuple(params))
 
 

@@ -4,7 +4,9 @@ import dash_ag_grid as dag
 import dash_mantine_components as dmc
 from dash import callback, dcc, html, Input, Output, State, no_update
 from dash_iconify import DashIconify
+from datetime import date, timedelta
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from .. import data
 from ..renderer import grid_with_export, ticket_number_column
@@ -185,7 +187,7 @@ def _swooper_chart(scorecard):
 
 
 def _reassignment_chart(reassignment_rows):
-    """Grouped bar: avg within-InHance handoffs per ticket by analyst and severity."""
+    """Grouped bar: avg within-InHance handoffs per high-severity ticket by analyst."""
     if not reassignment_rows:
         return dmc.Text("No data.", c="dimmed", ta="center", py="xl")
 
@@ -196,10 +198,11 @@ def _reassignment_chart(reassignment_rows):
         sev = r["severity"] or "Unknown"
         by_analyst.setdefault(r["assignee"], {})[sev] = r["avg_handoffs"] or 0
 
-    # Sort analysts by overall avg desc
+    # Sort analysts by overall avg desc, suppress rows where all severities are 0
     analyst_avgs = [
         (a, sum(sv.values()) / max(len(sv), 1)) for a, sv in by_analyst.items()
     ]
+    analyst_avgs = [(a, avg) for a, avg in analyst_avgs if sum(by_analyst[a].values()) > 0]
     analyst_avgs.sort(key=lambda x: x[1], reverse=True)
     names = [a for a, _ in analyst_avgs]
 
@@ -213,7 +216,7 @@ def _reassignment_chart(reassignment_rows):
             orientation="h",
             name=sev,
             marker_color=colors[i % len(colors)],
-            text=[f"{by_analyst[a].get(sev, 0):.1f}" for a in names],
+            text=[f"{by_analyst[a].get(sev, 0):.2f}" for a in names],
             textposition="outside",
         ))
 
@@ -274,6 +277,7 @@ def _monthly_closure_chart(monthly_rows):
         fig.add_trace(go.Scatter(
             x=all_months, y=vals, name=analyst, mode="lines+markers",
             line=dict(width=2, color=color), marker=dict(color=color),
+            legendgroup=analyst,
         ))
         slope, intercept = _linear_trend(xs, vals)
         trend = [slope * x + intercept for x in xs]
@@ -283,6 +287,7 @@ def _monthly_closure_chart(monthly_rows):
             line=dict(width=1.5, color=color, dash="dash"),
             showlegend=False,
             hoverinfo="skip",
+            legendgroup=analyst,
         ))
 
     # Team total on secondary y-axis (hidden by default to keep scale clean)
@@ -317,6 +322,127 @@ def _monthly_closure_chart(monthly_rows):
         paper_bgcolor="rgba(0,0,0,0)",
     )
     return dcc.Graph(figure=fig, id="monthly-closure-chart", config={"displayModeBar": False})
+
+
+def _monthly_created_chart(created_rows, closure_rows=None):
+    """Bar chart: monthly tickets created with avg closures overlay."""
+    if not created_rows:
+        return dmc.Text("No data.", c="dimmed", ta="center", py="xl")
+
+    months = [r["month"] for r in created_rows]
+    counts = [r["created_count"] for r in created_rows]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=months, y=counts,
+        marker_color="#339af0",
+        text=counts,
+        textposition="outside",
+        name="Created",
+    ))
+
+    # Overlay: total closures per month from closure_rows
+    if closure_rows:
+        closures_by_month = {}
+        for r in closure_rows:
+            closures_by_month[r["month"]] = closures_by_month.get(r["month"], 0) + r["closed_count"]
+        closed_vals = [closures_by_month.get(m, 0) for m in months]
+        fig.add_trace(go.Scatter(
+            x=months, y=closed_vals,
+            mode="lines+markers",
+            name="Closed",
+            line=dict(width=2, color="#e03131"),
+            marker=dict(size=6, color="#e03131"),
+        ))
+
+    fig.update_layout(
+        margin=dict(l=0, r=40, t=10, b=10),
+        height=300,
+        xaxis_title="Month",
+        yaxis_title="Count",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+    )
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+
+def _monthly_closure_by_severity_chart(split_rows):
+    """Small-multiples chart: one panel per severity tier, analyst lines in each."""
+    if not split_rows:
+        return dmc.Text("No data.", c="dimmed", ta="center", py="xl")
+
+    COLORS = [
+        "#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A",
+        "#19D3F3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52",
+    ]
+    TIERS = ["High", "Medium", "Low"]
+
+    all_months = sorted(set(r["month"] for r in split_rows))
+    xs = list(range(len(all_months)))
+
+    # Organise: {tier: {analyst: {month: count}}}
+    by_tier = {t: {} for t in TIERS}
+    for r in split_rows:
+        tier = r["severity_tier"]
+        if tier not in by_tier:
+            continue
+        by_tier[tier].setdefault(r["assignee"], {})[r["month"]] = r["closed_count"]
+
+    # Determine top 10 analysts across all tiers
+    analyst_totals = {}
+    for tier_data in by_tier.values():
+        for analyst, months_map in tier_data.items():
+            analyst_totals[analyst] = analyst_totals.get(analyst, 0) + sum(months_map.values())
+    top = sorted(analyst_totals, key=lambda a: -analyst_totals[a])[:10]
+
+    fig = make_subplots(
+        rows=1, cols=3,
+        subplot_titles=TIERS,
+        shared_xaxes=True,
+        horizontal_spacing=0.06,
+    )
+
+    for col_idx, tier in enumerate(TIERS, 1):
+        tier_data = by_tier[tier]
+        for i, analyst in enumerate(top):
+            color = COLORS[i % len(COLORS)]
+            vals = [tier_data.get(analyst, {}).get(m, 0) for m in all_months]
+            fig.add_trace(
+                go.Scatter(
+                    x=all_months, y=vals, name=analyst,
+                    mode="lines+markers",
+                    line=dict(width=2, color=color),
+                    marker=dict(color=color, size=4),
+                    legendgroup=analyst,
+                    showlegend=(col_idx == 1),
+                ),
+                row=1, col=col_idx,
+            )
+            slope, intercept = _linear_trend(xs, vals)
+            trend = [slope * x + intercept for x in xs]
+            fig.add_trace(
+                go.Scatter(
+                    x=all_months, y=trend,
+                    mode="lines",
+                    line=dict(width=1.5, color=color, dash="dash"),
+                    showlegend=False,
+                    hoverinfo="skip",
+                    legendgroup=analyst,
+                ),
+                row=1, col=col_idx,
+            )
+
+    fig.update_layout(
+        margin=dict(l=0, r=20, t=30, b=10),
+        height=420,
+        legend=dict(orientation="h", yanchor="bottom", y=1.06, xanchor="right", x=1),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+    )
+    fig.update_yaxes(title_text="Tickets Closed", col=1)
+    fig.update_xaxes(title_text="Month")
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
 
 
 # ── Merge helper ─────────────────────────────────────────────────────
@@ -575,13 +701,13 @@ def operations_layout():
                     dmc.Group(
                         [
                             DashIconify(icon="tabler:arrows-transfer-down", width=22, color="#1c7ed6"),
-                            dmc.Text("Avg Handoffs per Ticket by Severity", fw=600, size="lg"),
+                            dmc.Text("Avg Handoffs per Ticket (High Severity)", fw=600, size="lg"),
                         ],
                         gap="xs", mb="xs",
                     ),
                     dmc.Text(
-                        "Average number of times a ticket was passed between "
-                        "InHance analysts before closure, broken down by severity.",
+                        "Average number of times a high-severity (Sev 0/1) ticket was passed between "
+                        "InHance analysts before closure.",
                         c="dimmed", size="xs", mb="sm",
                     ),
                     _reassignment_chart(reassignment_profile),
@@ -589,17 +715,78 @@ def operations_layout():
                 withBorder=True, p="md", radius="md", shadow="sm",
             ),
 
-            # ── Monthly trend
+            # ── Monthly trend with date range
             dmc.Paper(
                 [
                     dmc.Group(
                         [
                             DashIconify(icon="tabler:chart-line", width=22, color="#1c7ed6"),
-                            dmc.Text("Monthly Closures by Analyst (12 months)", fw=600, size="lg"),
+                            dmc.Text("Monthly Closures by Analyst", fw=600, size="lg"),
                         ],
-                        gap="xs", mb="sm",
+                        gap="xs", mb="xs",
                     ),
-                    _monthly_closure_chart(monthly),
+                    dmc.Group(
+                        [
+                            dmc.DatePickerInput(
+                                id="ops-closure-date-from",
+                                label="From",
+                                value=(date.today() - timedelta(days=365)).isoformat(),
+                                size="xs",
+                                w=160,
+                            ),
+                            dmc.DatePickerInput(
+                                id="ops-closure-date-to",
+                                label="To",
+                                value=date.today().isoformat(),
+                                size="xs",
+                                w=160,
+                            ),
+                            dmc.Select(
+                                id="ops-closure-severity",
+                                label="Severity",
+                                data=[
+                                    {"value": "All", "label": "All"},
+                                    {"value": "High", "label": "High"},
+                                    {"value": "Medium", "label": "Medium"},
+                                    {"value": "Low", "label": "Low"},
+                                ],
+                                value="All",
+                                size="xs",
+                                w=120,
+                            ),
+                            dmc.Switch(
+                                id="ops-closure-split-severity",
+                                label="Split by Severity",
+                                size="sm",
+                                checked=False,
+                                style={"alignSelf": "flex-end", "paddingBottom": 4},
+                            ),
+                        ],
+                        gap="sm", mb="sm",
+                    ),
+                    html.Div(id="ops-monthly-closure-container", children=_monthly_closure_chart(monthly)),
+                ],
+                withBorder=True, p="md", radius="md", shadow="sm",
+            ),
+
+            # ── Tickets Created by Month
+            dmc.Paper(
+                [
+                    dmc.Group(
+                        [
+                            DashIconify(icon="tabler:file-plus", width=22, color="#2f9e44"),
+                            dmc.Text("Tickets Created by Month", fw=600, size="lg"),
+                        ],
+                        gap="xs", mb="xs",
+                    ),
+                    dmc.Text(
+                        "Monthly count of tickets created (CS group only).",
+                        c="dimmed", size="xs", mb="sm",
+                    ),
+                    html.Div(id="ops-monthly-created-container", children=_monthly_created_chart(
+                        data.get_monthly_tickets_created(months=12),
+                        closure_rows=monthly,
+                    )),
                 ],
                 withBorder=True, p="md", radius="md", shadow="sm",
             ),
@@ -660,3 +847,35 @@ def register_operations_callbacks(app):
             f"closed by {analyst} with under 25% of InHance actions"
         )
         return True, f"Ticket Details — {analyst}", subtitle, tickets
+
+    @app.callback(
+        Output("ops-monthly-closure-container", "children"),
+        Output("ops-monthly-created-container", "children"),
+        Input("ops-closure-date-from", "value"),
+        Input("ops-closure-date-to", "value"),
+        Input("ops-closure-severity", "value"),
+        Input("ops-closure-split-severity", "checked"),
+    )
+    def update_monthly_charts(date_from, date_to, severity, split_severity):
+        # Determine severity_tier parameter
+        if split_severity:
+            sev = "split"
+        elif severity and severity != "All":
+            sev = severity
+        else:
+            sev = None
+
+        if date_from and date_to:
+            df = str(date_from)[:10]
+            dt = str(date_to)[:10]
+            closure_rows = data.get_analyst_monthly_closures(date_from=df, date_to=dt, severity_tier=sev)
+            created_rows = data.get_monthly_tickets_created(date_from=df, date_to=dt)
+        else:
+            closure_rows = data.get_analyst_monthly_closures(months=12, severity_tier=sev)
+            created_rows = data.get_monthly_tickets_created(months=12)
+
+        if split_severity:
+            chart = _monthly_closure_by_severity_chart(closure_rows)
+        else:
+            chart = _monthly_closure_chart(closure_rows)
+        return chart, _monthly_created_chart(created_rows, closure_rows=closure_rows)

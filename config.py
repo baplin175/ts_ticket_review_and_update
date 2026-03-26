@@ -69,6 +69,12 @@ SAFETY_BUFFER_MINUTES = int(os.getenv("SAFETY_BUFFER_MINUTES", "10"))
 # (initial backfill window).  Set to 0 for full backfill (all open tickets).
 INITIAL_BACKFILL_DAYS = int(os.getenv("INITIAL_BACKFILL_DAYS", "0"))
 
+# Stale-ticket refresh: re-fetch any DB-open ticket whose last_ingested_at
+# is older than this many days.  Guards against tickets whose DateModified
+# didn't advance in time for the watermark-based sync to catch them.
+# Set to 0 to disable.
+STALE_TICKET_DAYS = int(os.getenv("STALE_TICKET_DAYS", "3"))
+
 # ── Database (Postgres) ──────────────────────────────────────────────
 # Optional. When empty/unset, the pipeline runs in JSON-only mode.
 # Local dev: DATABASE_URL=postgresql://user:pass@localhost:5432/Work
@@ -76,3 +82,9 @@ INITIAL_BACKFILL_DAYS = int(os.getenv("INITIAL_BACKFILL_DAYS", "0"))
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:kaplah@localhost:5432/Work")
 # All pipeline tables are created in this schema (not public).
 DATABASE_SCHEMA = os.getenv("DATABASE_SCHEMA", "tickets_ai")
+
+# ── Webhook receiver ─────────────────────────────────────────────────
+# Shared secret for verifying inbound TeamSupport webhook payloads.
+# The receiver checks the Authorization header ("Bearer <token>") against
+# this value.  When empty, token verification is skipped (dev/testing only).
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")

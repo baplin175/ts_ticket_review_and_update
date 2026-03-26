@@ -9,6 +9,7 @@ Ingest TeamSupport tickets and customer metadata into Postgres, derive operation
 - Canonical path: Postgres-backed ingestion via `run_ingest.py`, derived rebuilds via automatic post-sync hooks, and DB-backed enrichment via `run_enrich_db.py`
 - Dashboard: `python -m web.app`
 - CSV pipeline app: standalone Flask service in `pipeline/`
+- Webhook receiver: real-time ticket sync triggered by TeamSupport webhook events via `webhook/app.py`
 - Prompt administration: DB-backed prompt store with version history, editable from the Configuration page
 - Legacy compatibility path: `run_all.py` and the JSON-only orchestration flow
 
@@ -34,14 +35,14 @@ activity_cleaner.py    — Text-cleaning pipeline (HTML→text, boilerplate/sign
 matcha_client.py       — Matcha LLM API client (send prompts, extract responses, optional responseLLM override via config)
 prompt_store.py        — DB-backed prompt/version store and seed loader; runtime source of truth for prompts used by enrichment and RCA passes
 db.py                  — Postgres data-access layer (connection pool, migration runner, upsert helpers, enrichment persistence, get_sync_state watermark reader, watermark-safe upsert_sync_state with optional watermark_at override)
-run_ingest.py          — DB-backed incremental ingestion CLI (watermark-based sync with automatic created-since merge for opened+closed tickets, single-ticket resync, replay mode, customer metadata refresh, --sentiment flag for post-sync sentiment, --enrich flag for post-sync enrichment (sentiment + priority + complexity + health rollups), status; MAX_TICKETS-safe watermark: sorts tickets by DateModified ascending and advances only to min DateModified of processed tickets when set is truncated, ensuring incremental progress without skipping)
+run_ingest.py          — DB-backed incremental ingestion CLI (watermark-based sync with automatic created-since merge for opened+closed tickets, single-ticket resync, replay mode, customer metadata refresh, --sentiment flag for post-sync sentiment, --enrich flag for post-sync enrichment (sentiment + priority + complexity + health rollups), status; MAX_TICKETS-safe watermark: sorts tickets by DateModified ascending and advances only to min DateModified of processed tickets when set is truncated, ensuring incremental progress without skipping; stale-ticket refresh: after a full sync, re-fetches any open ticket whose last_ingested_at is older than STALE_TICKET_DAYS (default 3) to catch tickets whose DateModified lagged behind the watermark)
 run_sync_customer_attributes.py — One-off/customer-metadata sync from TeamSupport `/Customers` into `customer_attributes` (captures `KeyAcct`, active flag, support group, raw payload)
 action_classifier.py   — Deterministic rule-based action classification (no LLM; action_type='Description' → customer_problem_statement)
 run_rollups.py         — Rebuild action classification, thread rollups, metrics, and daily open counts from DB state; run_full_rollups() auto-triggers after any new migration; run_analytics_for_tickets() snapshots ALL tickets (not just touched ones) so aging/backlog views always have complete data for today
 run_all.py             — Legacy compatibility orchestrator: runs the JSON-oriented stages in sequence, merges fields, single API call per ticket (--force, --no-writeback)
 run_enrich_db.py       — DB-only enrichment: score tickets from Postgres (priority + complexity + sentiment by default), no TS API calls
 run_csv_import.py      — Bulk-import Activities.csv into DB (synthetic action IDs, streaming, idempotent, derives closed_at from Days Closed)
-run_csv_pipe_import.py — Import CSV pipeline results (pass1 / pass3 / pass4 / pass5) into ticket_llm_pass_results; matches the DB-backed runner schema; --force overwrites existing success rows; supports custom filenames via --pass1/--pass3/--pass4/--pass5 flags
+run_csv_pipe_import.py — Import CSV pipeline results (pass1 / pass3 / pass4 / pass5) into ticket_llm_pass_results; matches the DB-backed runner schema; --force overwrites existing success rows; supports custom filenames via --pass1/--pass3/--pass4/--pass5 flags; automatically rebuilds the cluster catalog after a successful import
 run_export.py          — Export canonical DB state to timestamped JSON artifacts
 run_pull_activities.py — Part 1: fetch, clean, classify activities → activities JSON
 run_sentiment.py       — Part 2: sentiment analysis via Matcha (DB persistence + hash-based skipping when DB available)
@@ -68,15 +69,15 @@ web/app.py             — Dash + Mantine web dashboard entry point (read-only, 
 web/assets/dark_mode.css — Dark mode CSS: comprehensive `body.dark-mode` scoped overrides for Mantine AppShell, navbar, cards, tabs, inputs, modals, AG Grid (quartz + alpine themes via CSS custom properties), Plotly chart backgrounds, and scrollbars
 web/dashboard.yaml     — YAML-driven dashboard configuration (pages, nav, queries, grids, charts, stat cards)
 web/renderer.py        — YAML config renderer: parses dashboard.yaml, builds Dash layouts for YAML-driven pages, imports custom page modules
-web/data.py            — Data access layer for the web dashboard (SELECT-only for analytics, plus dashboard-local CRUD for saved reports; no TS writes); root cause analytics now read from the persisted deterministic cluster views `vw_latest_mechanism_cluster_catalog` and `vw_latest_mechanism_ticket_clusters` instead of recomputing distributions from raw pass rows; health queries now anchor on active TeamSupport customers from `customer_attributes`, expose `key_account`, exclude Marketing and Sales by default, and support customer-level group-filtered history/explanations; EXCLUDED_CUSTOMERS tuple (currently "InHance Internal") filters internal tickets from all dashboard counts: overview KPIs, ticket list, health grid, backlog trend, drill-downs, and root cause stats/detail; get_filtered_backlog_daily() reconstructs daily backlog trend from tickets table with dynamic WHERE clauses for overview filters; get_tickets_by_customers() returns open tickets for a list of customer names (health drill-down); get_tickets_by_fixes() returns tickets matching (mechanism_class, intervention_type) pairs (engineering fixes drill-down); get_top_clusters_for_customer(customer_names, top_n, open_only) returns top N issue clusters aggregated across selected customers by joining tickets → pass4/pass5 results → cluster_key_rollup_map, with configurable open-only vs all-tickets scope; Cluster rollup analysis queries: get_top_clusters(product_names, top_n) returns top N L1 clusters per product via window function; get_cluster_examples(product, mechanism_class, cluster_key_l1) returns example tickets for a cluster; save_cluster_recommendation() persists engineering recommendations; get_cluster_recommendations() fetches saved recommendations; get_cluster_summary_l2/l1() return aggregate cluster summaries at L2 and L1 granularity; Operations queries are scoped to users whose TeamSupport title contains "Support" (fetched from TS API at startup, cached for process lifetime via _get_support_analysts()): get_analyst_scorecard() computes per-analyst closure count, avg complexity, own-work ratio, zero-contribution closes, and low-contribution % from ticket_actions join; get_analyst_complexity_distribution() returns complexity level counts per analyst; get_analyst_monthly_closures() returns monthly closure counts per analyst; get_analyst_swooper_tickets() returns tickets where an analyst closed but contributed < 25% of InHance actions; get_analyst_action_profile() returns technical work % and scheduling % of each analyst's own actions on closed tickets; get_analyst_severity_profile() returns high-severity (Sev 1) and low-severity closure percentages per analyst; get_analyst_reassignment_profile() returns average within-InHance handoffs per closed ticket by analyst and severity; Operations Overview KPIs (CS group): get_ops_avg_days_to_close(months, group_name) returns monthly avg days-to-close for the group; get_ops_backlog_snapshot(group_name) returns backlog count at Jan 1 vs now; get_ops_most_improved_customers(months, group_name, top_n) returns customers with largest backlog reduction over the period
+web/data.py            — Data access layer for the web dashboard (SELECT-only for analytics, plus dashboard-local CRUD for saved reports; no TS writes); root cause analytics now read from the persisted deterministic cluster views `vw_latest_mechanism_cluster_catalog` and `vw_latest_mechanism_ticket_clusters` instead of recomputing distributions from raw pass rows; health queries now anchor on active TeamSupport customers from `customer_attributes`, expose `key_account`, exclude Marketing and Sales by default, and support customer-level group-filtered history/explanations; EXCLUDED_CUSTOMERS tuple (currently "InHance Internal") filters internal tickets from all dashboard counts: overview KPIs, ticket list, health grid, backlog trend, drill-downs, and root cause stats/detail; get_filtered_backlog_daily() reconstructs daily backlog trend from tickets table with dynamic WHERE clauses for overview filters; get_tickets_by_customers() returns open tickets for a list of customer names (health drill-down); get_tickets_by_fixes() returns tickets matching (mechanism_class, intervention_type) pairs (engineering fixes drill-down); get_top_clusters_for_customer(customer_names, top_n, open_only) returns top N issue clusters aggregated across selected customers by joining tickets → pass4/pass5 results → cluster_key_rollup_map, with configurable open-only vs all-tickets scope; Cluster rollup analysis queries: get_top_clusters(product_names, top_n) returns top N L1 clusters per product via window function; get_cluster_examples(product, mechanism_class, cluster_key_l1) returns example tickets for a cluster; save_cluster_recommendation() persists engineering recommendations; get_cluster_recommendations() fetches saved recommendations; get_cluster_summary_l2/l1() return aggregate cluster summaries at L2 and L1 granularity; Operations queries are scoped to users whose TeamSupport title contains "Support" (fetched from TS API at startup, cached for process lifetime via _get_support_analysts()): get_analyst_scorecard() computes per-analyst closure count, avg complexity, own-work ratio, zero-contribution closes, and low-contribution % from ticket_actions join; get_analyst_complexity_distribution() returns complexity level counts per analyst; get_analyst_monthly_closures() returns monthly closure counts per analyst with optional severity_tier parameter ('split' for per-tier breakdown, 'High'/'Medium'/'Low' for single-tier filter); get_analyst_swooper_tickets() returns tickets where an analyst closed but contributed < 25% of InHance actions; get_analyst_action_profile() returns technical work % and scheduling % of each analyst's own actions on closed tickets; get_analyst_severity_profile() returns high-severity (Sev 1) and low-severity closure percentages per analyst; get_analyst_reassignment_profile() returns average within-InHance handoffs per closed ticket by analyst and severity; Operations Overview KPIs (CS group): get_ops_avg_days_to_close(months, group_name) returns monthly avg days-to-close for the group; get_ops_backlog_snapshot(group_name) returns backlog count at Jan 1 vs now; get_ops_most_improved_customers(months, group_name, top_n) returns customers with largest backlog reduction over the period
 web/pages/overview.py  — Overview page: KPI stat cards, backlog trend chart, aging distribution, open-by-product, frustrated-by-group chart with click-to-drill-down, chart drill-down; multi-select filter bar (status, severity, product, assignee, customer, group, frustrated) — empty = all open tickets (original DB views), selected values = include only those; all visualizations update including backlog trend (reconstructed from tickets table with filter-matching SQL); clearing filters reverts to original DB-view data; filters update KPI values in-place (no card recreation to avoid drill-down trigger); drill-downs use ticket store when filters active for consistent counts (custom)
 web/pages/tickets.py   — Ticket explorer: AG Grid with filters, sorting, row-click navigation to detail, saved filter reports, background sync via subprocess with live log panel and auto-dismiss; tabbed view with Open (default, excludes Closed), All Tickets, and user-saved report tabs; saved reports are tabs rather than chips, can be deleted from the page, and the current tab/filter state is preserved when navigating to ticket detail and back; saved report tabs are reorderable via chevron-left/chevron-right buttons that swap sort_order with the adjacent tab (migration 037); rowSelection uses string format "single" for compatibility; filter persistence via browser sessionStorage — AG Grid filterModel and active tab are saved to a session-scoped dcc.Store on every change and restored automatically when navigating back from ticket detail, so filters survive page transitions until the user clicks Clear Filters; sync-progress-panel hidden via display:none when empty to avoid blank gap in stack layout (custom)
 web/pages/ticket_detail.py — Ticket detail: metadata header, thread timeline (newest-first), score cards, wait profile chart, issue summary, refresh button (re-syncs single ticket from TeamSupport via run_ingest.py --ticket-id, then re-renders page); ticket number in the header links to the TeamSupport UI, and the back link preserves the originating Tickets tab/report context (custom)
 web/health_explainer.py — Customer health explanation service: builds Matcha payloads from current customer health, selected groups, prior snapshot, and top contributors; loads the active explanation prompt from the DB prompt store; persists generated explanations
 web/health_planner.py — Customer health improvement plan service: calls simulate_improvement_to_band for a target band, builds a Matcha payload from the simulation output and contributor details, persists plans to customer_health_improvement_plans versioned by as_of_date (same pattern as explanations)
 web/pages/health.py    — Health dashboards: Customer and Product health AG Grid tables; Customer Health now shows one row per active TeamSupport customer, includes `Key Account`, computes default distress across all groups except Marketing/Sales, and supports multi-row "View Tickets" drill-down plus single-customer history modal with group selector, Matcha-backed Explain button, and persisted explanation history; View Tickets drill-down modal now includes a Top Issue Clusters panel (top 3 clusters by ticket count for the selected customer(s)) with an open-only/all-tickets toggle, showing both L1 cluster key and mechanism class per card; Customer Health grid columns use flex sizing with minWidth so all columns fill the available viewport width; column order places Distress and Band immediately after Customer (before Key Acct) for quick triage visibility; grid now surfaces all five distress sub-dimensions (Pressure, Aging, Friction, Concentration, Breadth) matching the Health History dialog breakdown, each with color-coded highlights when above threshold; Generate Plan button produces a greedy target-band simulation (tickets sorted by total_contribution, removed until score falls below threshold) plus a Matcha-generated narrative plan, persisted with as_of_date versioning identical to explanations; target band is user-selectable (at_risk / watch / healthy) via a modal Select; `/health/plans` sub-page (`plans_layout`) renders an AG Grid of all saved plans across all customers with row-click detail modal (custom)
-web/pages/operations.py — Operations dashboard: analyst activity metrics covering workload distribution, skill mix, and contribution patterns. Overview KPI cards (CS group): Avg Days to Close (current month + past 6 months weighted average), CS Backlog at Jan 1 vs Now (with delta badge), and Most Improved Customers table (top 5 customers whose open backlog decreased most over last 3 months, showing open-then/open-now/reduction). Analyst Scorecard AG Grid (tickets closed, avg days open, high sev %, technical %, scheduling %, high priority/frustrated counts, own-work ratio, avg other contributors, zero-contribution closes, % low-contribution closes) with highlighted rows for metrics differing notably from team averages and row-click drill-down into ticket details. Technical vs Scheduling Work chart (horizontal grouped bar of technical work % and scheduling % per analyst compared to team averages). High-Severity Closure Share chart (horizontal bar of high-sev % per analyst compared to team average). Avg Handoffs per Ticket by Severity chart (grouped horizontal bar showing average within-InHance analyst handoffs per closed ticket, broken down by severity per analyst). Collaboration Ratio chart (horizontal bar of own-work ratio). Monthly Closures by Analyst line chart (12 months, top 10). Ticket detail drill-down modal shows tickets where the analyst closed with under 25% of InHance actions (custom)
-web/pages/deep_dive.py — Deep Dive page: per-analyst / per-product operational analytics with multi-select filter bar (analyst, product, time range defaulting to 12 months). KPI stat cards (tickets closed, avg resolution days, avg complexity, frustrated count/%, avg first response hours). Tickets by Severity bar chart, Action Mix donut (InHance action class distribution), Monthly Closure Trend line chart, Resolution Time Distribution histogram (< 1d / 1-7d / 7-30d / 30-90d / 90+d), Resolution Time by Analyst grouped bar chart (avg vs median days per analyst, hover shows ticket count / first response time / frustrated %), Workload Heatmap (analyst × product with hover showing avg days/complexity/frustrated), and filterable AG Grid of matching tickets with CSV export. All charts and grid update dynamically when filters change (custom)
+web/pages/operations.py — Operations dashboard: analyst activity metrics covering workload distribution, skill mix, and contribution patterns. Overview KPI cards (CS group): Avg Days to Close (current month + past 6 months weighted average), CS Backlog at Jan 1 vs Now (with delta badge), and Most Improved Customers table (top 5 customers whose open backlog decreased most over last 3 months, showing open-then/open-now/reduction). Analyst Scorecard AG Grid (tickets closed, avg days open, high sev %, technical %, scheduling %, high priority/frustrated counts, own-work ratio, avg other contributors, zero-contribution closes, % low-contribution closes) with highlighted rows for metrics differing notably from team averages and row-click drill-down into ticket details. Technical vs Scheduling Work chart (horizontal grouped bar of technical work % and scheduling % per analyst compared to team averages). High-Severity Closure Share chart (horizontal bar of high-sev % per analyst compared to team average). Avg Handoffs per Ticket by Severity chart (grouped horizontal bar showing average within-InHance analyst handoffs per closed ticket, broken down by severity per analyst). Collaboration Ratio chart (horizontal bar of own-work ratio). Monthly Closures by Analyst line chart (date-range selectable, defaults to 12 months, with From/To date pickers that also drive the Tickets Created chart; Severity dropdown filters to High/Medium/Low; Split by Severity toggle switches to small-multiples view with one panel per severity tier showing analyst lines side-by-side). Tickets Created by Month bar chart (CS group only, shares the same date range). Ticket detail drill-down modal shows tickets where the analyst closed with under 25% of InHance actions (custom)
+web/pages/deep_dive.py — Deep Dive page: per-analyst / per-product operational analytics with multi-select filter bar (analyst, product, time range defaulting to 12 months). KPI stat cards (tickets closed, avg resolution days, avg complexity, frustrated count/%, avg first response hours). Tickets by Severity bar chart, Action Mix donut (InHance action class distribution), Monthly Closure Trend line chart, Resolution Time Distribution histogram (< 1d / 1-7d / 7-30d / 30-90d / 90+d), Avg Days to Close Over Time line chart (monthly average days from creation to close with ticket count on hover), Resolution Time by Analyst grouped bar chart (avg vs median days per analyst, hover shows ticket count / first response time / frustrated %), Workload Heatmap (analyst × product with hover showing avg days/complexity/frustrated), and filterable AG Grid of matching tickets with CSV export. All charts and grid update dynamically when filters change (custom)
 web/pages/root_cause.py — Root Cause Analytics dashboard: tabbed layout (Dashboard + Detail + Glossary). Dashboard tab: KPI stat cards (tickets analyzed, mechanisms found, interventions mapped, pipeline completion %, top mechanism), pipeline completion funnel chart, mechanism class distribution (horizontal bar), intervention type breakdown (donut), component treemap, operation verb frequency bar chart, Sankey flow diagram (Component → Mechanism Class → Intervention Type), root cause by product (stacked bar), Top Failure Patterns by Product section (grouped horizontal bar chart of top 5 L1 clusters per product + AG Grid with row-click drill-down modal showing example tickets from v_cluster_examples), top engineering fixes AG Grid (ROI-ranked from the latest deterministic cluster run) with multi-row checkbox selection and "View Tickets" drill-down modal; Cluster Catalog AG Grid with Subcluster Breakdown chart — segmented control toggles between "By Component" (aggregated, default) and "Component → Operation" (granular) views to avoid an oversized Other bucket when component/operation pairs are too fragmented. Detail tab: original AG Grid of pass-processed tickets with CSV export, row-click expands Pass 1/2/3 cards + cleaned thread text. Glossary tab: reference guide for pipeline passes, canonical failure grammar fields, all 14 mechanism classes, all 8 intervention types, and dashboard metrics (custom)
 web/pages/config_view.py — Pipeline config editor plus prompt administration UI (editable settings with Save button writes to config.py + live reload; MATCHA_RESPONSE_LLM model override, toggles, text fields, sync status; Prompts section edits DB-backed prompts by creating new versions rather than overwriting; custom)
 web_requirements.txt   — Python dependencies for the web dashboard (dash, dash-mantine-components, dash-ag-grid, PyYAML, etc.)
@@ -86,10 +87,124 @@ pipeline/blob_store.py — Azure Blob Storage helper: uploads/downloads output C
 pipeline/app.py        — Standalone Flask web app (port 5001): upload CSV, run pipeline as background job, poll status via JSON API, download result CSVs (pass1/pass3/pass4/pass5_results.csv); download route falls back to blob storage when local file is missing after container restart; /files browser page for navigating Azure Blob Storage with inline preview of .log and .json files; /api/files and /api/files/download/<path> endpoints
 pipeline/templates/index.html — Single-page HTML/JS UI for CSV upload, progress bar with pass indicator, download links, link to blob storage browser; job list includes Log links for completed/failed jobs
 pipeline/templates/files.html — Blob Storage browser UI: folder navigation, breadcrumbs, file listing with size/date, inline preview for .log and .json files, direct download for CSVs
+webhook/__init__.py    — Webhook receiver package
+webhook/app.py         — Standalone Flask webhook receiver (port 5002): accepts POST from TeamSupport at `/webhook/teamsupport`, validates via Bearer token or HMAC-SHA256 signature (WEBHOOK_SECRET), extracts ticket ID from payload, triggers `_sync(ticket_ids=[...])` in a background thread; `/webhook/health` GET endpoint for uptime checks; designed to sit behind ngrok or Cloudflare Tunnel for public reachability
 pipeline/azure.env     — Deployment resource names (RESOURCE_GROUP, ACR_NAME, APP_NAME, IMAGE) sourced by deploy.sh
 pipeline/Dockerfile    — Container image: python:3.13-slim + gunicorn + flask + requests + azure-storage-blob; copies pipeline code + parsers + pass5/ + prompt_store + prompts (no DB files); serves on port 80 with 600s timeout for long LLM runs
 pipeline/deploy.sh     — Azure Container Apps deployment script: sources pipeline/azure.env for resource names; full deploy (no args) or --build-only for quick rebuild + update; Matcha credentials + AZURE_STORAGE_CONNECTION_STRING passed via az containerapp update --set-env-vars
 run_export_pipeline_input.py — Export up to 1000 PM/PowerManager/Impresa tickets without RCA (no successful pass1_phenomenon) and less than 18 months old as a CSV-pipeline-compatible input file (ticket_id, ticket_name, full_thread_text)
+```
+
+## Webhook Receiver — Setup & Testing
+
+The webhook receiver lets TeamSupport push real-time ticket events to this application.
+When a ticket is created or updated, TeamSupport POSTs a lightweight notification to
+`/webhook/teamsupport`, and the receiver triggers `_sync(ticket_ids=[...])` from
+`run_ingest.py` to pull the full ticket + actions and upsert them into Postgres.
+
+### Prerequisites
+
+- Postgres running with the `tickets_ai` schema (standard `DATABASE_URL` in config.py)
+- Cloudflare Tunnel (`cloudflared`) or ngrok installed for public URL exposure
+  - `brew install cloudflared` (free, no account required for quick tunnels)
+  - `brew install ngrok` (requires free account + `ngrok config add-authtoken <token>`)
+
+### 1. Start the webhook receiver
+
+```bash
+# Without auth (dev/testing):
+python3 -m webhook.app
+
+# With auth (recommended when exposed publicly):
+WEBHOOK_SECRET=your-secret-here python3 -m webhook.app
+```
+
+The server starts on `http://localhost:5002`.
+
+### 2. Expose via Cloudflare Tunnel
+
+```bash
+cloudflared tunnel --url http://localhost:5002
+```
+
+This prints a public URL like:
+```
+https://sentence-regards-utah-web.trycloudflare.com
+```
+
+The webhook URL to give TeamSupport is:
+```
+https://<your-subdomain>.trycloudflare.com/webhook/teamsupport
+```
+
+> **Note:** Quick-tunnel URLs change every time you restart `cloudflared`.
+> For a stable URL, create a named tunnel with a Cloudflare account (free).
+
+### 3. Configure TeamSupport
+
+In TeamSupport Admin → Automation → Webhook Triggers:
+
+| Field | Value |
+|-------|-------|
+| URL | `https://<your-subdomain>.trycloudflare.com/webhook/teamsupport` |
+| Method | POST |
+| Content-Type | application/json |
+| Auth header (if WEBHOOK_SECRET set) | `Authorization: Bearer your-secret-here` |
+| Events | Ticket Created, Ticket Updated, Action Added |
+
+### 4. Test locally with curl
+
+```bash
+# Health check
+curl https://<your-subdomain>.trycloudflare.com/webhook/health
+
+# Simulate a ticket event
+curl -X POST https://<your-subdomain>.trycloudflare.com/webhook/teamsupport \
+  -H "Content-Type: application/json" \
+  -d '{"TicketID": "29696"}'
+```
+
+Expected response: `{"status":"accepted","ticket_id":"29696"}` (HTTP 202).
+The webhook server log will show the sync starting in the background.
+
+### 5. Verify the sync
+
+Check the webhook server terminal for log output like:
+```
+[2026-03-26 11:27:01] INFO Webhook received — syncing ticket_id=29696
+[2026-03-26 11:27:01] INFO 127.0.0.1 - "POST /webhook/teamsupport HTTP/1.1" 202 -
+[api] GET https://app.na2.teamsupport.com/api/json/...
+```
+
+Confirm the ticket was updated in Postgres:
+```sql
+SELECT ticket_id, ticket_number, status, last_ingested_at
+FROM tickets_ai.tickets
+WHERE ticket_id = 29696;
+```
+
+### Authentication modes
+
+| Mode | Header | When |
+|------|--------|------|
+| None | (no header) | `WEBHOOK_SECRET` is empty — dev only |
+| Bearer token | `Authorization: Bearer <secret>` | `WEBHOOK_SECRET` set, TeamSupport sends token |
+| HMAC-SHA256 | `X-TS-Signature: <hex-digest>` | `WEBHOOK_SECRET` set, sender signs the body |
+
+### Architecture flow
+
+```
+TeamSupport ticket event
+    → POST to public URL (/webhook/teamsupport)
+    → Cloudflare Tunnel / ngrok
+    → localhost:5002 (webhook/app.py)
+    → verify auth (Bearer token or HMAC-SHA256)
+    → extract TicketID from JSON payload
+    → background thread: _sync(ticket_ids=["29696"])
+        → fetch full ticket + actions from TS API
+        → upsert into Postgres
+        → rebuild thread rollup + metrics
+    → return 202 Accepted immediately
 ```
 
 ## Data Dictionary

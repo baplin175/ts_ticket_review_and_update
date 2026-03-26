@@ -496,6 +496,85 @@ def _reconcile_closed(synced_open_ids: list[int], verbose: bool = False) -> list
     return reconcile_closed(synced_open_ids, verbose=verbose)
 
 
+# ── Stale-ticket refresh ─────────────────────────────────────────────
+
+def _refresh_stale_tickets(stale_days: int = 3, verbose: bool = False) -> list[int]:
+    """Re-fetch open tickets whose last_ingested_at is older than *stale_days*.
+
+    This guards against a race condition where a ticket's DateModified in
+    TeamSupport updates after the watermark-based sync already advanced past
+    it.  By periodically re-fetching stale open tickets, we ensure their
+    assignee, status, and other fields stay current.
+
+    Returns the list of ticket_ids that were refreshed.
+    """
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=stale_days)
+
+    stale_rows = db.fetch_all("""
+        SELECT ticket_id, ticket_number
+        FROM tickets
+        WHERE closed_at IS NULL
+          AND COALESCE(status, '') NOT IN ('Closed', 'Resolved', 'Open')
+          AND last_ingested_at < %s
+        ORDER BY last_ingested_at ASC
+    """, (cutoff,))
+
+    if not stale_rows:
+        print(f"[ingest] Stale-ticket refresh: no open tickets older than {stale_days} day(s).", flush=True)
+        return []
+
+    print(
+        f"[ingest] Stale-ticket refresh: {len(stale_rows)} open ticket(s) not synced "
+        f"in {stale_days}+ day(s) — re-fetching …",
+        flush=True,
+    )
+
+    refreshed_ids: list[int] = []
+    errors = 0
+
+    for tid, tnum in stale_rows:
+        try:
+            raw_tickets = fetch_ticket_by_id(str(tid))
+            if not raw_tickets:
+                if verbose:
+                    print(f"  [stale] #{tnum} (id={tid}): not found in TS — skipping.", flush=True)
+                continue
+
+            ticket_raw = raw_tickets[0] if isinstance(raw_tickets, list) else raw_tickets
+            ticket_row = extract_ticket_row(ticket_raw, now)
+
+            # Fetch + clean actions
+            raw_actions = fetch_all_activities(str(tid))
+            action_rows = []
+            for action_raw in raw_actions:
+                cleaned = clean_activity_dict(action_raw)
+                if not cleaned.get("action_id"):
+                    continue
+                action_row = extract_action_row(action_raw, tid, cleaned)
+                action_row["ticket_number"] = str(tnum)
+                action_rows.append(action_row)
+
+            db.upsert_ticket_with_actions(ticket_row, action_rows, now=now)
+            refreshed_ids.append(tid)
+
+            if verbose:
+                print(f"  [stale] #{tnum} (id={tid}): refreshed ({len(action_rows)} actions).", flush=True)
+
+        except Exception as exc:
+            errors += 1
+            print(f"[ingest] WARNING: stale refresh failed for #{tnum} (id={tid}): {exc}", flush=True)
+            if verbose:
+                traceback.print_exc()
+
+    print(
+        f"[ingest] Stale-ticket refresh complete: {len(refreshed_ids)} refreshed"
+        f"{f', {errors} error(s)' if errors else ''}.",
+        flush=True,
+    )
+    return refreshed_ids
+
+
 # ── Status display ───────────────────────────────────────────────────
 
 def _show_status():
@@ -694,9 +773,26 @@ def main():
             verbose=args.verbose,
         )
 
+    # ── Post-sync: refresh stale open tickets ──
+    # Re-fetch open tickets whose last_ingested_at is older than the
+    # configured threshold.  This catches tickets whose DateModified
+    # lagged behind the watermark (e.g. reassignment didn't bump
+    # DateModified at the time of the previous sync).
+    stale_refreshed_ids: list[int] = []
+    if (
+        is_full_sync
+        and not args.dry_run
+        and result["status"] == "completed"
+        and config.STALE_TICKET_DAYS > 0
+    ):
+        stale_refreshed_ids = _refresh_stale_tickets(
+            stale_days=config.STALE_TICKET_DAYS,
+            verbose=args.verbose,
+        )
+
     # ── Post-sync: rebuild rollups + analytics for touched tickets ──
     if not args.dry_run and result["status"] == "completed":
-        all_touched = result.get("upserted_ids", []) + reconciled_ids
+        all_touched = result.get("upserted_ids", []) + reconciled_ids + stale_refreshed_ids
         rebuild_for_tickets(all_touched)
 
     # ── Post-sync: enrichment for touched tickets ──

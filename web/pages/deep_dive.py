@@ -55,11 +55,32 @@ _ACTION_COLORS = {
 _SEVERITY_COLORS = {
     "1 - Critical": "#e03131",
     "1 - High": "#e03131",
+    "1 - High Priority": "#e03131",
     "2 - Medium": "#f08c00",
     "2 - Normal": "#f08c00",
+    "2 - Medium Priority": "#f08c00",
     "3 - Low": "#2b8a3e",
+    "3 - Low Priority": "#2b8a3e",
+    "0: System Down Office Wide": "#c92a2a",
+    "Low": "#2b8a3e",
     "Unknown": "#868e96",
 }
+
+
+def _severity_color(label):
+    """Return a color for a severity label, falling back to pattern matching."""
+    if label in _SEVERITY_COLORS:
+        return _SEVERITY_COLORS[label]
+    low = (label or "").lower()
+    if "high" in low or "critical" in low or "system down" in low:
+        return "#e03131"
+    if low.startswith("0"):
+        return "#c92a2a"
+    if "medium" in low or "normal" in low or low.startswith("2"):
+        return "#f08c00"
+    if "low" in low or low.startswith("3"):
+        return "#2b8a3e"
+    return "#868e96"
 
 
 def _pretty_action(raw):
@@ -102,7 +123,7 @@ def _severity_bar(rows):
         return dmc.Text("No data.", c="dimmed", ta="center", py="xl")
     labels = [r["severity"] for r in rows]
     values = [r["ticket_count"] for r in rows]
-    colors = [_SEVERITY_COLORS.get(l, "#868e96") for l in labels]
+    colors = [_severity_color(l) for l in labels]
     fig = go.Figure(go.Bar(
         x=labels, y=values,
         marker_color=colors,
@@ -159,6 +180,28 @@ def _volume_trend(rows):
         margin=dict(l=10, r=10, t=10, b=10),
         height=280,
         xaxis_title="Month", yaxis_title="Tickets Closed",
+    )
+    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+
+
+def _avg_days_to_close_trend(rows):
+    if not rows:
+        return dmc.Text("No data.", c="dimmed", ta="center", py="xl")
+    months = [r["month"] for r in rows]
+    avg_days = [float(r["avg_days_to_close"]) for r in rows]
+    ticket_counts = [r["tickets_closed"] for r in rows]
+    fig = go.Figure(go.Scatter(
+        x=months, y=avg_days, mode="lines+markers",
+        line=dict(color="#ae3ec9", width=2),
+        marker=dict(size=6),
+        customdata=ticket_counts,
+        hovertemplate="%{x}<br>Avg: %{y:.1f} days<br>Tickets: %{customdata}<extra></extra>",
+    ))
+    fig.update_layout(
+        template="plotly_white",
+        margin=dict(l=10, r=10, t=10, b=10),
+        height=280,
+        xaxis_title="Month", yaxis_title="Avg Days to Close",
     )
     return dcc.Graph(figure=fig, config={"displayModeBar": False})
 
@@ -327,6 +370,7 @@ def _build_content(assignees, products, months):
     severity = data.get_deep_dive_severity_breakdown(assignees, products, months)
     action_mix = data.get_deep_dive_action_mix(assignees, products, months)
     trend = data.get_deep_dive_volume_trend(assignees, products, months)
+    avg_close_trend = data.get_deep_dive_avg_days_to_close(assignees, products, months)
     resolution = data.get_deep_dive_resolution_distribution(assignees, products, months)
     time_by_resource = data.get_deep_dive_time_by_resource(assignees, products, months)
     heatmap = data.get_deep_dive_product_analyst_heatmap(assignees, products, months)
@@ -390,6 +434,18 @@ def _build_content(assignees, products, months):
                 ], withBorder=True, p="md", radius="md", shadow="sm"),
             ],
         )
+    )
+
+    # ── Row 3: Avg Days to Close Over Time ───────────────────────────
+    children.append(
+        dmc.Paper([
+            dmc.Text("Avg Days to Close Over Time", fw=600, mb="xs"),
+            dmc.Text(
+                "Monthly average days from ticket creation to close. Hover for ticket count.",
+                size="xs", c="dimmed", mb="xs",
+            ),
+            _avg_days_to_close_trend(avg_close_trend),
+        ], withBorder=True, p="md", radius="md", shadow="sm")
     )
 
     # ── Time by Resource ─────────────────────────────────────────────

@@ -442,6 +442,28 @@ def main(
     _log("=" * 60)
     _log(f"[csv-import] Done. Total rows imported: {total_imported}")
 
+    if total_imported > 0:
+        _log("[csv-import] Rebuilding cluster catalog …")
+        from build_cluster_catalog import get_db_engine, load_data, clean_columns, filter_success
+        from build_cluster_catalog import build_cluster_catalog as _build_catalog
+        from build_cluster_catalog import build_ticket_mapping, persist_outputs, save_outputs
+        from build_cluster_catalog import _ensure_analytical_shape
+        from config import OUTPUT_DIR
+
+        engine = get_db_engine()
+        try:
+            raw = load_data(engine)
+            normalized = clean_columns(raw)
+            analytical = _ensure_analytical_shape(normalized, engine)
+            successful = filter_success(analytical)
+            catalog = _build_catalog(successful)
+            mapping = build_ticket_mapping(successful)
+            persist_outputs(engine, catalog, mapping)
+            save_outputs(catalog, mapping, OUTPUT_DIR)
+            _log(f"[csv-import] Cluster catalog rebuilt: {len(catalog)} clusters, {len(mapping)} ticket mappings.")
+        finally:
+            engine.dispose()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
