@@ -1158,8 +1158,10 @@ def fetch_open_ticket_numbers_missing_sentiment() -> list[str]:
              FROM vw_operational_open_tickets v
              JOIN ticket_thread_rollups r ON r.ticket_id = v.ticket_id
              LEFT JOIN latest_sentiment s ON s.ticket_id = v.ticket_id
+             LEFT JOIN ticket_exclusions xe ON xe.ticket_id = v.ticket_id
             WHERE r.thread_hash IS NOT NULL
               AND NULLIF(COALESCE(s.frustrated, ''), '') IS NULL
+              AND COALESCE(xe.exclude_sentiment, FALSE) = FALSE
             ORDER BY v.ticket_number;""",
     )
     return [str(r[0]) for r in rows]
@@ -1176,7 +1178,9 @@ def fetch_open_ticket_numbers_missing_complexity() -> list[str]:
            SELECT v.ticket_number
              FROM vw_operational_open_tickets v
              LEFT JOIN latest_complexity c ON c.ticket_id = v.ticket_id
+             LEFT JOIN ticket_exclusions xe ON xe.ticket_id = v.ticket_id
             WHERE c.overall_complexity IS NULL
+              AND COALESCE(xe.exclude_complexity, FALSE) = FALSE
             ORDER BY v.ticket_number;""",
     )
     return [str(r[0]) for r in rows]
@@ -1191,6 +1195,32 @@ def get_open_ticket_ids() -> list[int]:
         "SELECT ticket_id FROM vw_operational_open_tickets ORDER BY ticket_id;"
     )
     return [r[0] for r in rows]
+
+
+def get_excluded_ticket_numbers(stage: str) -> set[str]:
+    """Return ticket_numbers excluded from *stage* scoring.
+
+    *stage* must be one of: ``"priority"``, ``"sentiment"``, ``"complexity"``.
+    Returns an empty set when the table doesn't exist or DB is not enabled.
+    """
+    col_map = {
+        "priority":   "exclude_priority",
+        "sentiment":  "exclude_sentiment",
+        "complexity": "exclude_complexity",
+    }
+    col = col_map.get(stage)
+    if not col:
+        raise ValueError(f"Unknown stage: {stage!r}")
+    try:
+        rows = fetch_all(
+            f"""SELECT t.ticket_number
+                  FROM ticket_exclusions x
+                  JOIN tickets t ON t.ticket_id = x.ticket_id
+                 WHERE x.{col} = TRUE;"""
+        )
+        return {str(r[0]) for r in rows}
+    except Exception:
+        return set()
 
 
 # ── Analytics rebuild helpers ────────────────────────────────────────

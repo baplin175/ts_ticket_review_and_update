@@ -180,6 +180,16 @@ def main(activities_file: str | None = None, *, force: bool = False,
     if db_enabled:
         tid_map = db.ticket_ids_for_numbers(target_tickets)
 
+    # Filter out tickets explicitly excluded from sentiment scoring
+    if db_enabled:
+        excluded = db.get_excluded_ticket_numbers("sentiment")
+        if excluded:
+            before = len(target_tickets)
+            target_tickets = [t for t in target_tickets if t not in excluded]
+            n = before - len(target_tickets)
+            if n:
+                _log(f"[sentiment] {n} ticket(s) excluded from sentiment scoring (ticket_exclusions table).")
+
     # 1. Locate most recent activities file (still needed for JSON fallback)
     if not activities_file:
         activities_file = _latest_activities_file()

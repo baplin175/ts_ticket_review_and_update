@@ -213,9 +213,9 @@ def _fetch_customer_health_input_rows(as_of_date: date) -> list[dict]:
                 THEN TRUE
                 ELSE FALSE
             END AS open_flag,
-            p.priority,
-            c.overall_complexity,
-            s.frustrated,
+            CASE WHEN COALESCE(xe.exclude_priority, FALSE) THEN NULL ELSE p.priority END AS priority,
+            CASE WHEN COALESCE(xe.exclude_complexity, FALSE) THEN NULL ELSE c.overall_complexity END AS overall_complexity,
+            CASE WHEN COALESCE(xe.exclude_sentiment, FALSE) THEN NULL ELSE s.frustrated END AS frustrated,
             m.customer_message_count,
             m.handoff_count,
             lc.cluster_id,
@@ -226,6 +226,7 @@ def _fetch_customer_health_input_rows(as_of_date: date) -> list[dict]:
         LEFT JOIN latest_priority p ON p.ticket_id = t.ticket_id
         LEFT JOIN latest_complexity c ON c.ticket_id = t.ticket_id
         LEFT JOIN latest_sentiment s ON s.ticket_id = t.ticket_id
+        LEFT JOIN ticket_exclusions xe ON xe.ticket_id = t.ticket_id
         LEFT JOIN ticket_metrics m ON m.ticket_id = t.ticket_id
         LEFT JOIN latest_cluster lc ON lc.ticket_id = t.ticket_id
         WHERE t.customer IS NOT NULL
@@ -851,10 +852,12 @@ def snapshot_tickets_daily(
             t.status, t.assignee, t.product_name, t.customer,
             t.group_name,
             t.date_created, t.date_modified, t.source_updated_at,
-            p.priority, c.overall_complexity
+            CASE WHEN COALESCE(xe.exclude_priority, FALSE) THEN NULL ELSE p.priority END AS priority,
+            CASE WHEN COALESCE(xe.exclude_complexity, FALSE) THEN NULL ELSE c.overall_complexity END AS overall_complexity
         FROM tickets t
         LEFT JOIN vw_latest_ticket_priority p ON p.ticket_id = t.ticket_id
         LEFT JOIN vw_latest_ticket_complexity c ON c.ticket_id = t.ticket_id
+        LEFT JOIN ticket_exclusions xe ON xe.ticket_id = t.ticket_id
         WHERE TRUE {tid_clause};
     """, tuple(params))
 
@@ -993,9 +996,9 @@ def rebuild_product_ticket_health(as_of_date: date | None = None) -> int:
             t.product_name,
             COALESCE(t.group_name, '') AS group_name,
             COUNT(*)                                      AS vol,
-            ROUND(AVG(c.overall_complexity), 2)           AS avg_c,
-            ROUND(AVG(c.coordination_load), 2)            AS avg_cl,
-            ROUND(AVG(c.elapsed_drag), 2)                 AS avg_ed
+            ROUND(AVG(CASE WHEN COALESCE(xe.exclude_complexity, FALSE) THEN NULL ELSE c.overall_complexity END), 2) AS avg_c,
+            ROUND(AVG(CASE WHEN COALESCE(xe.exclude_complexity, FALSE) THEN NULL ELSE c.coordination_load END), 2) AS avg_cl,
+            ROUND(AVG(CASE WHEN COALESCE(xe.exclude_complexity, FALSE) THEN NULL ELSE c.elapsed_drag END), 2) AS avg_ed
         FROM tickets t
         LEFT JOIN (
             SELECT DISTINCT ON (ticket_id) ticket_id,
@@ -1003,6 +1006,7 @@ def rebuild_product_ticket_health(as_of_date: date | None = None) -> int:
             FROM ticket_complexity_scores
             ORDER BY ticket_id, scored_at DESC, id DESC
         ) c ON c.ticket_id = t.ticket_id
+        LEFT JOIN ticket_exclusions xe ON xe.ticket_id = t.ticket_id
         WHERE t.product_name IS NOT NULL
           AND (t.date_created >= %s
                OR t.closed_at IS NULL

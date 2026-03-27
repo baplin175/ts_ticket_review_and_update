@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import threading
+import urllib.parse
 
 import dash_mantine_components as dmc
 from dash import callback, ctx, dcc, html, Input, Output, State, no_update
@@ -54,6 +55,47 @@ def _run_auto_refresh(ticket_id):
         _auto_refresh["finished"] = True
 
 
+def _rescore_and_rebuild(ticket_id: int, ticket_number: str) -> None:
+    """Background thread: rescore all three stages for *ticket_number* (force=True)
+    then rebuild customer- and product-level health rollups.
+
+    The exclusion filters inside each run_* main will honour the newly saved
+    ticket_exclusions row, so excluded stages are skipped and un-excluded
+    stages are re-scored even when the thread hash hasn't changed.
+    """
+    try:
+        from run_sentiment import main as sentiment_main
+        sentiment_main(force=True, ticket_numbers=[ticket_number])
+    except SystemExit:
+        pass
+    except Exception as exc:
+        print(f"[exclusion] Sentiment rescore error for {ticket_number}: {exc}", flush=True)
+
+    try:
+        from run_priority import main as priority_main
+        priority_main(write_back=False, force=True, ticket_numbers=[ticket_number])
+    except SystemExit:
+        pass
+    except Exception as exc:
+        print(f"[exclusion] Priority rescore error for {ticket_number}: {exc}", flush=True)
+
+    try:
+        from run_complexity import main as complexity_main
+        complexity_main(write_back=False, force=True, ticket_numbers=[ticket_number])
+    except SystemExit:
+        pass
+    except Exception as exc:
+        print(f"[exclusion] Complexity rescore error for {ticket_number}: {exc}", flush=True)
+
+    try:
+        from run_rollups import rebuild_customer_ticket_health, rebuild_product_ticket_health
+        rebuild_customer_ticket_health()
+        rebuild_product_ticket_health()
+        print(f"[exclusion] Health rollups rebuilt after exclusion change for {ticket_number}.", flush=True)
+    except Exception as exc:
+        print(f"[exclusion] Health rollup rebuild error: {exc}", flush=True)
+
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 def _badge(label, color="gray", variant="light"):
@@ -99,6 +141,48 @@ def _format_dt(val):
     if not val:
         return "—"
     return str(val)[:16].replace("T", " ")
+
+
+def _build_teams_message(ticket):
+    """Build a pre-filled Teams message from ticket metadata + complexity summary."""
+    tid = ticket.get("ticket_number", "")
+    name = ticket.get("ticket_name", "")
+    status = ticket.get("status", "—")
+    severity = ticket.get("severity", "—")
+    customer = ticket.get("customer", "—")
+    assignee = ticket.get("assignee", "—")
+    product = ticket.get("product_name", "—")
+    age = round(ticket["days_opened"]) if ticket.get("days_opened") else "—"
+    do_number = ticket.get("do_number")
+    do_status = ticket.get("do_status")
+
+    lines = [
+        f"📋 Ticket #{tid} — {name}",
+        f"Status: {status} | Priority: {severity}",
+        f"Customer: {customer}",
+        f"Assignee: {assignee} | Age: {age} days",
+        f"Product: {product}",
+    ]
+    if do_number:
+        do_part = f"DO #{do_number}"
+        if do_status:
+            do_part += f" ({do_status})"
+        lines.append(do_part)
+
+    # Add complexity summary if available
+    cx = data.get_ticket_complexity_detail(ticket.get("ticket_id"))
+    if cx and cx.get("complexity_summary"):
+        lines.append("")
+        lines.append(cx["complexity_summary"])
+
+    # Links
+    lines.append("")
+    if tid:
+        lines.append(f"TeamSupport: https://app.na2.teamsupport.com/?TicketNumber={tid}")
+    if do_number:
+        lines.append(f"DevOps: https://dev.azure.com/inHanceUtilities/Impresa/_workitems/edit/{do_number}/")
+
+    return "\n".join(lines)
 
 
 def _meta_item(label, value):
@@ -225,18 +309,23 @@ def _wait_chart(profile):
 
 # ── Layout ───────────────────────────────────────────────────────────
 
-def _build_detail(ticket_id, back_href="/tickets"):
-    """Build the full ticket detail content (header + tabs) from DB data."""
+def _build_detail(ticket_id, back_href="/tickets", *, inline=False):
+    """Build the full ticket detail content (header + tabs) from DB data.
+
+    When *inline* is True (e.g. embedded inside a modal), the nav row
+    (back link, Share in Teams, Refresh) is omitted so the caller can
+    provide its own navigation affordance.
+    """
     ticket = data.get_ticket_detail(ticket_id)
     if not ticket:
         return dmc.Stack([
             dmc.Title("Ticket Not Found", order=3),
             dmc.Text(f"No ticket with ID {ticket_id} exists in the database.", c="dimmed"),
-            dmc.Anchor("Back to Tickets", href=back_href),
-        ], gap="md")
+        ] + ([] if inline else [dmc.Anchor("Back to Tickets", href=back_href)]), gap="md")
 
     actions = data.get_ticket_actions(ticket_id)
     wait = data.get_ticket_wait_profile(ticket_id)
+    events = data.get_ticket_events(ticket_id)
     ticket_number = ticket.get("ticket_number", "")
     ticket_name = ticket.get("ticket_name", "")
     teamsupport_url = (
@@ -244,31 +333,51 @@ def _build_detail(ticket_id, back_href="/tickets"):
         if ticket_number else None
     )
 
+    # Teams deep link — msteams: protocol goes straight to desktop app
+    teams_message = _build_teams_message(ticket)
+    encoded_msg = urllib.parse.quote(teams_message, safe="")
+    teams_url = f"msteams:/l/chat/0/0?users=&message={encoded_msg}"
+
     # Header
+    nav_row = (
+        None if inline else
+        dmc.Group(
+            [
+                dmc.Anchor(
+                    dmc.Group([DashIconify(icon="tabler:arrow-left", width=16), "Tickets"], gap=4),
+                    href=back_href, size="sm",
+                ),
+                dmc.Group(
+                    [
+                        dmc.Button(
+                            "Share in Teams",
+                            id="ticket-teams-btn",
+                            leftSection=DashIconify(icon="tabler:brand-teams", width=16),
+                            variant="light",
+                            color="violet",
+                            size="compact-sm",
+                        ),
+                        dmc.Button(
+                            "Refresh",
+                            id="ticket-refresh-btn",
+                            leftSection=DashIconify(icon="tabler:refresh", width=16),
+                            variant="light",
+                            size="compact-sm",
+                        ),
+                    ],
+                    ml="auto",
+                    gap="xs",
+                ),
+            ],
+            justify="space-between",
+            mb="sm",
+        )
+    )
+
     header = dmc.Paper(
-        [
-            dmc.Group(
-                [
-                    dmc.Anchor(
-                        dmc.Group([DashIconify(icon="tabler:arrow-left", width=16), "Tickets"], gap=4),
-                        href=back_href, size="sm",
-                    ),
-                    dmc.Group(
-                        [
-                            dmc.Button(
-                                "Refresh",
-                                id="ticket-refresh-btn",
-                                leftSection=DashIconify(icon="tabler:refresh", width=16),
-                                variant="light",
-                                size="compact-sm",
-                            ),
-                        ],
-                        ml="auto",
-                    ),
-                ],
-                justify="space-between",
-                mb="sm",
-            ),
+        [c for c in [
+            None if inline else dcc.Store(id="teams-share-url", data=teams_url),
+            nav_row,
             dmc.Group(
                 [
                     dmc.Title(
@@ -311,11 +420,62 @@ def _build_detail(ticket_id, back_href="/tickets"):
                     _meta_item("DO Status", ticket.get("do_status", "—")),
                 ],
             ),
-        ],
+        ] if c is not None],
         withBorder=True, p="md", radius="md", shadow="sm",
     )
 
     # Scores tab
+    excl = data.get_ticket_exclusions(ticket_id) or {}
+    exclusion_panel = dmc.Paper(
+        [
+            dmc.Text("Scoring Exclusions", size="xs", fw=700, c="dimmed", tt="uppercase", mb="xs"),
+            dmc.Text(
+                "Prevent this ticket from being scored by the checked stages.",
+                size="xs", c="dimmed", mb="sm",
+            ),
+            dmc.Stack(
+                [
+                    dmc.Checkbox(
+                        id="excl-priority", label="Exclude from Priority scoring",
+                        checked=bool(excl.get("exclude_priority")),
+                    ),
+                    dmc.Checkbox(
+                        id="excl-sentiment", label="Exclude from Sentiment / Frustration scoring",
+                        checked=bool(excl.get("exclude_sentiment")),
+                    ),
+                    dmc.Checkbox(
+                        id="excl-complexity", label="Exclude from Complexity scoring",
+                        checked=bool(excl.get("exclude_complexity")),
+                    ),
+                    dmc.TextInput(
+                        id="excl-reason",
+                        label="Reason (optional)",
+                        placeholder="e.g. Training bundle — not a real support issue",
+                        value=excl.get("reason") or "",
+                        size="xs",
+                    ),
+                    dmc.Group(
+                        [
+                            dmc.Button(
+                                "Save Exclusions",
+                                id="excl-save-btn",
+                                size="compact-sm",
+                                variant="light",
+                                color="orange",
+                                leftSection=DashIconify(icon="tabler:device-floppy", width=14),
+                            ),
+                            html.Div(id="excl-save-status"),
+                        ],
+                        gap="sm",
+                        mt="xs",
+                    ),
+                ],
+                gap="xs",
+            ),
+        ],
+        withBorder=True, p="md", radius="md", mt="md",
+    )
+
     scores_content = dmc.SimpleGrid(
         cols={"base": 1, "sm": 2, "lg": 4},
         children=[
@@ -507,10 +667,52 @@ def _build_detail(ticket_id, back_href="/tickets"):
     if do_tab:
         tab_list.append(do_tab)
 
+    # Activity tab (always present — shows user-initiated events like Teams shares)
+    if events:
+        event_cards = []
+        for ev in events:
+            icon_map = {"teams_share": "tabler:brand-teams"}
+            label_map = {"teams_share": "Shared to Teams"}
+            ev_type = ev.get("event_type", "")
+            ev_icon = icon_map.get(ev_type, "tabler:activity")
+            ev_label = label_map.get(ev_type, ev_type)
+            ev_detail = ev.get("detail") or {}
+            ev_by = ev.get("created_by") or ""
+            ev_at = _format_dt(ev.get("created_at"))
+
+            detail_text = None
+            if isinstance(ev_detail, dict) and ev_detail.get("message_preview"):
+                preview = ev_detail["message_preview"]
+                if len(preview) > 200:
+                    preview = preview[:200] + "…"
+                detail_text = dmc.Text(preview, size="xs", c="dimmed",
+                                       style={"whiteSpace": "pre-wrap", "marginTop": "0.25rem"})
+
+            event_cards.append(
+                dmc.Paper([
+                    dmc.Group([
+                        DashIconify(icon=ev_icon, width=16, color="#7950f2"),
+                        dmc.Text(ev_label, size="sm", fw=600),
+                        dmc.Text(ev_by, size="xs", c="dimmed") if ev_by else None,
+                        dmc.Text(ev_at, size="xs", c="dimmed"),
+                    ], gap="xs"),
+                    detail_text,
+                ], withBorder=True, p="sm", radius="sm",
+                   style={"borderLeft": "3px solid #7950f2"})
+            )
+        activity_content = dmc.Stack(event_cards, gap="xs")
+    else:
+        activity_content = dmc.Text("No activity events recorded yet.", c="dimmed", ta="center", py="xl")
+
+    tab_list.append(
+        dmc.TabsTab("Activity", value="activity",
+                    leftSection=DashIconify(icon="tabler:activity", width=16)),
+    )
+
     panels = [
         dmc.TabsPanel(thread_content, value="thread", pt="md"),
         dmc.TabsPanel(
-            dmc.Stack([scores_content, scores_extra], gap="sm"),
+            dmc.Stack([scores_content, scores_extra, exclusion_panel], gap="sm"),
             value="scores", pt="md",
         ),
         dmc.TabsPanel(_wait_chart(wait), value="wait", pt="md"),
@@ -522,6 +724,7 @@ def _build_detail(ticket_id, back_href="/tickets"):
     ]
     if do_panel:
         panels.append(do_panel)
+    panels.append(dmc.TabsPanel(activity_content, value="activity", pt="md"))
 
     tabs = dmc.Tabs(
         [dmc.TabsList(tab_list)] + panels,
@@ -603,3 +806,65 @@ def register_callbacks(app):
             return "", {"display": "none"}, True, _build_detail(ticket_id, back_href=back_href or "/tickets")
 
         return "", {"display": "none"}, True, no_update
+
+    # Teams share: clientside opens the URL; server callback logs the event
+    from dash import ClientsideFunction
+    app.clientside_callback(
+        ClientsideFunction(namespace="clientside", function_name="openTeamsLink"),
+        Output("teams-share-url", "data"),  # dummy output (no-op)
+        Input("ticket-teams-btn", "n_clicks"),
+        State("teams-share-url", "data"),
+        prevent_initial_call=True,
+    )
+
+    @app.callback(
+        Output("ticket-detail-content", "children", allow_duplicate=True),
+        Input("ticket-teams-btn", "n_clicks"),
+        State("ticket-detail-id", "data"),
+        State("ticket-detail-back-href", "data"),
+        prevent_initial_call=True,
+    )
+    def log_teams_share(n_clicks, ticket_id, back_href):
+        if not n_clicks or not ticket_id:
+            return no_update
+        ticket = data.get_ticket_detail(ticket_id)
+        if ticket:
+            msg = _build_teams_message(ticket)
+            data.insert_ticket_event(
+                ticket_id,
+                "teams_share",
+                detail={"message_preview": msg[:500]},
+            )
+        return _build_detail(ticket_id, back_href=back_href or "/tickets")
+
+    @app.callback(
+        Output("excl-save-status", "children"),
+        Input("excl-save-btn", "n_clicks"),
+        State("ticket-detail-id", "data"),
+        State("excl-priority", "checked"),
+        State("excl-sentiment", "checked"),
+        State("excl-complexity", "checked"),
+        State("excl-reason", "value"),
+        prevent_initial_call=True,
+    )
+    def save_exclusions(n_clicks, ticket_id, excl_priority, excl_sentiment, excl_complexity, reason):
+        if not n_clicks or not ticket_id:
+            return no_update
+        try:
+            data.upsert_ticket_exclusions(
+                ticket_id,
+                exclude_priority=bool(excl_priority),
+                exclude_sentiment=bool(excl_sentiment),
+                exclude_complexity=bool(excl_complexity),
+                reason=reason or None,
+            )
+            ticket_number = data.get_ticket_number(ticket_id)
+            if ticket_number:
+                threading.Thread(
+                    target=_rescore_and_rebuild,
+                    args=(ticket_id, ticket_number),
+                    daemon=True,
+                ).start()
+            return dmc.Text("Saved — rescoring in background…", size="xs", c="green")
+        except Exception as e:
+            return dmc.Text(f"Error: {e}", size="xs", c="red")

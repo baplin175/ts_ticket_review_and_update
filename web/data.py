@@ -355,6 +355,60 @@ def get_ticket_wait_profile(ticket_id):
     """, (ticket_id,))
 
 
+# ── Ticket events ───────────────────────────────────────────────────
+
+def insert_ticket_event(ticket_id, event_type, detail=None, created_by=None):
+    """Record a user-initiated event against a ticket."""
+    import json
+    _execute("""
+        INSERT INTO ticket_events (ticket_id, event_type, detail, created_by)
+        VALUES (%s, %s, %s, %s)
+    """, (ticket_id, event_type, json.dumps(detail or {}), created_by))
+
+
+def get_ticket_events(ticket_id):
+    """Return all events for a ticket, newest first."""
+    return query("""
+        SELECT id, ticket_id, event_type, detail, created_by, created_at
+        FROM ticket_events
+        WHERE ticket_id = %s
+        ORDER BY created_at DESC
+    """, (ticket_id,))
+
+
+# ── Ticket exclusions ────────────────────────────────────────────────
+
+def get_ticket_exclusions(ticket_id):
+    """Return the exclusion flags for a ticket, or None if no row exists."""
+    return query_one("""
+        SELECT exclude_priority, exclude_sentiment, exclude_complexity, reason
+        FROM ticket_exclusions
+        WHERE ticket_id = %s
+    """, (ticket_id,))
+
+
+def get_ticket_number(ticket_id):
+    """Return the ticket_number string for a given ticket_id, or None."""
+    row = query_one("SELECT ticket_number FROM tickets WHERE ticket_id = %s", (ticket_id,))
+    return row["ticket_number"] if row else None
+
+
+def upsert_ticket_exclusions(ticket_id, *, exclude_priority: bool,
+                              exclude_sentiment: bool, exclude_complexity: bool,
+                              reason: str | None = None):
+    """Insert or update the exclusion flags for a ticket."""
+    _execute("""
+        INSERT INTO ticket_exclusions
+            (ticket_id, exclude_priority, exclude_sentiment, exclude_complexity, reason)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (ticket_id) DO UPDATE SET
+            exclude_priority   = EXCLUDED.exclude_priority,
+            exclude_sentiment  = EXCLUDED.exclude_sentiment,
+            exclude_complexity = EXCLUDED.exclude_complexity,
+            reason             = EXCLUDED.reason
+    """, (ticket_id, exclude_priority, exclude_sentiment, exclude_complexity, reason or None))
+
+
 # ── Health ───────────────────────────────────────────────────────────
 
 def get_group_names():
@@ -1670,26 +1724,27 @@ def _execute(sql, params=()):
         db.put_conn(conn)
 
 
-def get_saved_reports():
+def get_saved_reports(page='tickets'):
     return query("""
         SELECT id, name, filter_model, created_at, sort_order
         FROM saved_reports
+        WHERE page = %s
         ORDER BY sort_order, name
-    """)
+    """, (page,))
 
 
-def save_report(name, filter_model):
-    """Upsert a saved report by name and return the saved row."""
-    # Assign next sort_order
-    max_row = query_one("SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM saved_reports")
+def save_report(name, filter_model, page='tickets'):
+    """Upsert a saved report by name+page and return the saved row."""
+    # Assign next sort_order within this page
+    max_row = query_one("SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM saved_reports WHERE page = %s", (page,))
     next_order = max_row["next_order"] if max_row else 1
     return _execute_returning("""
-        INSERT INTO saved_reports (name, filter_model, sort_order)
-        VALUES (%s, %s, %s)
-        ON CONFLICT (name) DO UPDATE SET filter_model = EXCLUDED.filter_model,
-                                         created_at = now()
+        INSERT INTO saved_reports (name, filter_model, sort_order, page)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (name, page) DO UPDATE SET filter_model = EXCLUDED.filter_model,
+                                               created_at = now()
         RETURNING id, name, filter_model, created_at, sort_order
-    """, (name, json.dumps(filter_model), next_order))
+    """, (name, json.dumps(filter_model), next_order, page))
 
 
 def delete_report(report_id):
@@ -1697,25 +1752,26 @@ def delete_report(report_id):
 
 
 def reorder_report(report_id, direction):
-    """Move a saved report tab left (-1) or right (+1).
+    """Move a saved report tab left (-1) or right (+1), within the same page.
 
     Swaps sort_order with the adjacent report in the given direction.
     """
     current = query_one(
-        "SELECT id, sort_order FROM saved_reports WHERE id = %s", (report_id,)
+        "SELECT id, sort_order, page FROM saved_reports WHERE id = %s", (report_id,)
     )
     if not current:
         return
     cur_order = current["sort_order"]
+    cur_page = current.get("page") or "tickets"
     if direction in (-1, "left"):  # move left
         neighbor = query_one(
-            "SELECT id, sort_order FROM saved_reports WHERE sort_order < %s ORDER BY sort_order DESC LIMIT 1",
-            (cur_order,)
+            "SELECT id, sort_order FROM saved_reports WHERE page = %s AND sort_order < %s ORDER BY sort_order DESC LIMIT 1",
+            (cur_page, cur_order)
         )
     else:  # move right
         neighbor = query_one(
-            "SELECT id, sort_order FROM saved_reports WHERE sort_order > %s ORDER BY sort_order ASC LIMIT 1",
-            (cur_order,)
+            "SELECT id, sort_order FROM saved_reports WHERE page = %s AND sort_order > %s ORDER BY sort_order ASC LIMIT 1",
+            (cur_page, cur_order)
         )
     if not neighbor:
         return

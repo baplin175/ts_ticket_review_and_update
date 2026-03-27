@@ -203,7 +203,7 @@ def build_report_tabs(reports):
 
 def tickets_layout():
     rows = data.get_ticket_list()
-    reports = data.get_saved_reports()
+    reports = data.get_saved_reports('tickets')
     open_count = sum(1 for r in rows if (r.get("status") or "").lower() != "closed")
 
     return dmc.Stack(

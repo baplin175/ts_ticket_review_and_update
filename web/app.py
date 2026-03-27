@@ -596,8 +596,8 @@ def save_report(n_clicks, name, filter_model):
     fm = filter_model or {}
     if not fm:
         return no_update, no_update, no_update
-    saved = data.save_report(name.strip(), fm)
-    reports = {str(r["id"]): r for r in data.get_saved_reports()}
+    saved = data.save_report(name.strip(), fm, page='tickets')
+    reports = {str(r["id"]): r for r in data.get_saved_reports('tickets')}
     selected_tab = f"report:{saved['id']}" if saved else no_update
     return reports, selected_tab, ""
 
@@ -724,7 +724,7 @@ def delete_report(n_clicks, active_tab, saved_reports):
     if not report:
         return no_update, no_update
     data.delete_report(report_id)
-    reports = {str(r["id"]): r for r in data.get_saved_reports()}
+    reports = {str(r["id"]): r for r in data.get_saved_reports('tickets')}
     return reports, "open"
 
 
@@ -755,9 +755,10 @@ def _collect_grid_ids():
     return ids
 
 
+_EXCLUDED_FROM_GENERIC_CLICK = {"ticket-grid", "health-drilldown-grid"}
 _TICKET_NUMBER_CLICK_GRID_IDS = [
     grid_id for grid_id in sorted(_collect_grid_ids())
-    if grid_id != "ticket-grid"
+    if grid_id not in _EXCLUDED_FROM_GENERIC_CLICK
 ]
 
 

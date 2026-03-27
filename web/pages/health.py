@@ -623,11 +623,33 @@ def plans_layout():
     )
 
 
+# ── Saved reports helpers ────────────────────────────────────────────
+
+def _normalize_health_reports(reports):
+    if not reports:
+        return []
+    if isinstance(reports, dict):
+        reports = list(reports.values())
+    return sorted(reports, key=lambda r: (r.get("sort_order") or 0, (r.get("name") or "").lower()))
+
+
+def _build_health_report_tabs(reports):
+    report_tabs = [
+        dmc.TabsTab(r["name"], value=f"report:{r['id']}")
+        for r in _normalize_health_reports(reports)
+    ]
+    return [dmc.TabsList([
+        dmc.TabsTab("All Customers", value="all"),
+        *report_tabs,
+    ])]
+
+
 # ── Layout ───────────────────────────────────────────────────────────
 
 def health_layout():
     customers = data.get_customer_health()
     products = data.get_product_health()
+    health_reports = data.get_saved_reports('health')
 
     customer_grid = dag.AgGrid(
         id="customer-health-grid",
@@ -690,10 +712,56 @@ def health_layout():
                                                 size="compact-sm",
                                                 disabled=True,
                                             ),
+                                            dmc.Button(
+                                                "Save Report",
+                                                id="health-save-report-btn",
+                                                leftSection=DashIconify(icon="tabler:device-floppy", width=16),
+                                                variant="light",
+                                                size="compact-sm",
+                                            ),
+                                            dmc.Button(
+                                                "Delete Report",
+                                                id="health-delete-report-btn",
+                                                leftSection=DashIconify(icon="tabler:trash", width=16),
+                                                variant="subtle",
+                                                color="red",
+                                                size="compact-sm",
+                                                disabled=True,
+                                            ),
+                                            dmc.ActionIcon(
+                                                DashIconify(icon="tabler:chevron-left", width=16),
+                                                id="health-move-tab-left-btn",
+                                                variant="subtle",
+                                                color="gray",
+                                                size="sm",
+                                                disabled=True,
+                                            ),
+                                            dmc.ActionIcon(
+                                                DashIconify(icon="tabler:chevron-right", width=16),
+                                                id="health-move-tab-right-btn",
+                                                variant="subtle",
+                                                color="gray",
+                                                size="sm",
+                                                disabled=True,
+                                            ),
+                                            dmc.Button(
+                                                "Clear Filters",
+                                                id="health-clear-filters-btn",
+                                                leftSection=DashIconify(icon="tabler:filter-off", width=16),
+                                                variant="subtle",
+                                                color="gray",
+                                                size="compact-sm",
+                                            ),
                                         ],
+                                        gap="xs",
                                     ),
                                 ],
                                 justify="space-between",
+                            ),
+                            dmc.Tabs(
+                                _build_health_report_tabs(health_reports),
+                                id="health-report-tabs",
+                                value="all",
                             ),
                             customer_grid,
                         ], gap="xs"),
@@ -706,6 +774,7 @@ def health_layout():
             dcc.Store(id="health-history-selection"),
             dcc.Store(id="health-history-selected-date"),
             dcc.Store(id="health-drilldown-customers-store"),
+            dcc.Store(id="health-drilldown-ticket-id"),
             # Drill-down modal for customer tickets
             dmc.Modal(
                 id="health-drilldown-modal",
@@ -713,42 +782,54 @@ def health_layout():
                 size="90%",
                 centered=True,
                 children=[
-                    dmc.Text(id="health-drilldown-subtitle", size="sm", c="dimmed", mb="sm"),
-                    dmc.Group(
-                        [
-                            dmc.Text("Top Issue Clusters", size="sm", fw=600),
-                            dmc.Switch(
-                                id="health-cluster-scope-toggle",
-                                label="Open only",
-                                checked=True,
-                                size="xs",
+                    # ── List view (default) ──────────────────────────
+                    html.Div(
+                        id="health-drilldown-list-view",
+                        children=[
+                            dmc.Text(id="health-drilldown-subtitle", size="sm", c="dimmed", mb="sm"),
+                            dmc.Group(
+                                [
+                                    dmc.Text("Top Issue Clusters", size="sm", fw=600),
+                                    dmc.Switch(
+                                        id="health-cluster-scope-toggle",
+                                        label="Open only",
+                                        checked=True,
+                                        size="xs",
+                                    ),
+                                ],
+                                justify="space-between",
+                                mb="xs",
+                            ),
+                            html.Div(id="health-cluster-cards", style={"marginBottom": "12px"}),
+                            grid_with_export(
+                                dag.AgGrid(
+                                    id="health-drilldown-grid",
+                                    rowData=[],
+                                    columnDefs=DRILLDOWN_COL_DEFS,
+                                    defaultColDef={
+                                        "sortable": True, "filter": True,
+                                        "resizable": True, "floatingFilter": True,
+                                        "filterParams": {"caseSensitive": False},
+                                    },
+                                    dashGridOptions={
+                                        "rowSelection": "single",
+                                        "pagination": True,
+                                        "paginationPageSize": 25,
+                                        "animateRows": True,
+                                        "enableCellTextSelection": True,
+                                    },
+                                    style={"height": "60vh", "cursor": "pointer"},
+                                    className="ag-theme-quartz",
+                                ),
+                                "health-drilldown-grid",
                             ),
                         ],
-                        justify="space-between",
-                        mb="xs",
                     ),
-                    html.Div(id="health-cluster-cards", style={"marginBottom": "12px"}),
-                    grid_with_export(
-                        dag.AgGrid(
-                            id="health-drilldown-grid",
-                            rowData=[],
-                            columnDefs=DRILLDOWN_COL_DEFS,
-                            defaultColDef={
-                                "sortable": True, "filter": True,
-                                "resizable": True, "floatingFilter": True,
-                                "filterParams": {"caseSensitive": False},
-                            },
-                            dashGridOptions={
-                                "rowSelection": "single",
-                                "pagination": True,
-                                "paginationPageSize": 25,
-                                "animateRows": True,
-                                "enableCellTextSelection": True,
-                            },
-                            style={"height": "60vh", "cursor": "pointer"},
-                            className="ag-theme-quartz",
-                        ),
-                        "health-drilldown-grid",
+                    # ── Inline ticket view (shown when a row is clicked) ─
+                    html.Div(
+                        id="health-drilldown-ticket-view",
+                        children=[],
+                        style={"display": "none"},
                     ),
                 ],
             ),
@@ -866,6 +947,35 @@ def health_layout():
                 centered=True,
                 children=html.Div(id="health-explain-modal-body"),
             ),
+            # ── Saved reports for Customer Health ─────────────────────
+            dcc.Store(
+                id="health-saved-reports-store",
+                data={str(r["id"]): r for r in health_reports},
+            ),
+            dmc.Modal(
+                id="health-save-report-modal",
+                title="Save Customer Health Filters as Report",
+                centered=True,
+                children=[
+                    dmc.Stack(
+                        [
+                            dmc.TextInput(
+                                id="health-report-name-input",
+                                label="Report name",
+                                placeholder="e.g. Key Accounts",
+                            ),
+                            dmc.Group(
+                                [
+                                    dmc.Button("Save", id="health-confirm-save-report-btn", color="blue"),
+                                    dmc.Button("Cancel", id="health-cancel-save-report-btn", variant="subtle", color="gray"),
+                                ],
+                                justify="flex-end",
+                            ),
+                        ],
+                        gap="md",
+                    ),
+                ],
+            ),
         ],
         gap="sm",
     )
@@ -882,13 +992,23 @@ def register_health_callbacks(app):
         Output("health-history-btn", "disabled"),
         Output("health-history-btn", "children"),
         Input("customer-health-grid", "selectedRows"),
+        Input("customer-health-grid", "virtualRowData"),
     )
-    def toggle_drilldown_btn(selected):
-        if not selected:
+    def toggle_drilldown_btn(selected, virtual_rows):
+        # Intersect selected rows with currently visible (filtered) rows.
+        # This ensures select-all + filter only counts the visible subset.
+        visible_customers = {
+            r["customer"] for r in (virtual_rows or []) if r.get("customer")
+        }
+        effective = [
+            r for r in (selected or [])
+            if r.get("customer") in visible_customers
+        ]
+        if not effective:
             return True, "View Tickets", True, "View Health Trend"
-        n = len(selected)
+        n = len(effective)
         history_disabled = n != 1
-        selected_label = selected[0]["customer"]
+        selected_label = effective[0]["customer"]
         history_label = "View Health Trend" if history_disabled else f"View Health Trend ({selected_label})"
         return False, f"View Tickets ({n} row{'s' if n != 1 else ''})", history_disabled, history_label
 
@@ -899,12 +1019,28 @@ def register_health_callbacks(app):
         Output("health-drilldown-customers-store", "data"),
         Input("health-drilldown-btn", "n_clicks"),
         State("customer-health-grid", "selectedRows"),
+        State("customer-health-grid", "virtualRowData"),
         prevent_initial_call=True,
     )
-    def open_drilldown(n_clicks, selected):
+    def open_drilldown(n_clicks, selected, virtual_rows):
         if not n_clicks or not selected:
             return no_update, no_update, no_update, no_update
-        names = [r["customer"] for r in selected if r.get("customer")]
+        # Restrict to currently visible (filtered) rows only.
+        # When virtualRowData is None the grid hasn't emitted its first render
+        # event yet (e.g. immediately after navigating back), so fall back to
+        # using the full selectedRows list to avoid an empty modal.
+        if virtual_rows is not None:
+            visible_customers = {
+                r["customer"] for r in virtual_rows if r.get("customer")
+            }
+            effective = [
+                r for r in selected if r.get("customer") in visible_customers
+            ]
+        else:
+            effective = selected
+        if not effective:
+            return no_update, no_update, no_update, no_update
+        names = [r["customer"] for r in effective if r.get("customer")]
         tickets = data.get_tickets_by_customers(names)
         label = ", ".join(names)
         subtitle = f"{len(tickets)} open ticket{'s' if len(tickets) != 1 else ''} for: {label}"
@@ -981,13 +1117,23 @@ def register_health_callbacks(app):
         Output("health-history-selected-date", "data"),
         Input("health-history-btn", "n_clicks"),
         State("customer-health-grid", "selectedRows"),
+        State("customer-health-grid", "virtualRowData"),
         prevent_initial_call=True,
     )
-    def open_health_history(n_clicks, selected):
-        if not n_clicks or not selected or len(selected) != 1:
+    def open_health_history(n_clicks, selected, virtual_rows):
+        if not n_clicks or not selected:
+            return (no_update,) * 12
+        if virtual_rows is not None:
+            visible_customers = {
+                r["customer"] for r in virtual_rows if r.get("customer")
+            }
+            effective = [r for r in selected if r.get("customer") in visible_customers]
+        else:
+            effective = selected
+        if len(effective) != 1:
             return (no_update,) * 12
 
-        customer = selected[0]["customer"]
+        customer = effective[0]["customer"]
         groups = data.get_customer_groups(customer)
         history = data.get_customer_health_history(customer, groups)
         explanations = data.get_customer_health_explanations(customer)
@@ -1142,16 +1288,71 @@ def register_health_callbacks(app):
         return contributors, subtitle
 
     @app.callback(
-        Output("url", "pathname", allow_duplicate=True),
+        Output("health-drilldown-ticket-id", "data"),
         Input("health-drilldown-grid", "selectedRows"),
         prevent_initial_call=True,
     )
-    def navigate_from_health_drilldown(selected_rows):
+    def open_ticket_in_drilldown(selected_rows):
         if selected_rows and len(selected_rows) > 0:
             tid = selected_rows[0].get("ticket_id")
             if tid is not None:
-                return f"/ticket/{tid}"
+                return tid
         return no_update
+
+    @app.callback(
+        Output("health-drilldown-ticket-id", "data", allow_duplicate=True),
+        Input("health-drilldown-grid", "cellClicked"),
+        prevent_initial_call=True,
+    )
+    def open_ticket_from_drilldown_cell(cell_event):
+        if not isinstance(cell_event, dict):
+            return no_update
+        col_id = cell_event.get("colId") or ((cell_event.get("colDef") or {}).get("field"))
+        if col_id != "ticket_number":
+            return no_update
+        row = cell_event.get("data") or {}
+        tid = row.get("ticket_id")
+        return tid if tid is not None else no_update
+
+    @app.callback(
+        Output("health-drilldown-list-view", "style"),
+        Output("health-drilldown-ticket-view", "children"),
+        Output("health-drilldown-ticket-view", "style"),
+        Input("health-drilldown-ticket-id", "data"),
+        prevent_initial_call=True,
+    )
+    def render_inline_drilldown_ticket(ticket_id):
+        if not ticket_id:
+            return {}, [], {"display": "none"}
+        try:
+            from .ticket_detail import _build_detail
+        except ImportError:
+            from web.pages.ticket_detail import _build_detail
+        back_btn = dmc.Button(
+            "\u2190 Customer Tickets",
+            id="health-drilldown-back-btn",
+            variant="subtle",
+            size="compact-sm",
+            mb="sm",
+        )
+        detail = _build_detail(ticket_id, inline=True)
+        return {"display": "none"}, [back_btn, detail], {}
+
+    @app.callback(
+        Output("health-drilldown-ticket-id", "data", allow_duplicate=True),
+        Input("health-drilldown-back-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def back_to_drilldown_list(n_clicks):
+        return None if n_clicks else no_update
+
+    @app.callback(
+        Output("health-drilldown-ticket-id", "data", allow_duplicate=True),
+        Input("health-drilldown-modal", "opened"),
+        prevent_initial_call=True,
+    )
+    def reset_drilldown_ticket_on_modal_close(opened):
+        return None if not opened else no_update
 
     @app.callback(
         Output("url", "pathname", allow_duplicate=True),
@@ -1189,4 +1390,133 @@ def register_health_callbacks(app):
         else:  # newest (default — already ordered DESC from DB)
             plans = sorted(plans, key=lambda p: str(p.get("created_at") or ""), reverse=True)
         return _build_plans_accordion(plans)
+
+    # ── Saved reports for Customer Health ──────────────────────────────
+
+    @app.callback(
+        Output("health-save-report-modal", "opened"),
+        Input("health-save-report-btn", "n_clicks"),
+        Input("health-cancel-save-report-btn", "n_clicks"),
+        Input("health-confirm-save-report-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def toggle_health_save_modal(open_clicks, cancel_clicks, confirm_clicks):
+        from dash import ctx as _ctx
+        if _ctx.triggered_id == "health-save-report-btn":
+            return True
+        return False
+
+    @app.callback(
+        Output("health-saved-reports-store", "data", allow_duplicate=True),
+        Output("health-report-tabs", "value", allow_duplicate=True),
+        Output("health-report-name-input", "value"),
+        Input("health-confirm-save-report-btn", "n_clicks"),
+        State("health-report-name-input", "value"),
+        State("customer-health-grid", "filterModel"),
+        prevent_initial_call=True,
+    )
+    def save_health_report(n_clicks, name, filter_model):
+        if not n_clicks or not name or not name.strip():
+            return no_update, no_update, no_update
+        fm = filter_model or {}
+        saved = data.save_report(name.strip(), fm, page="health")
+        reports = {str(r["id"]): r for r in data.get_saved_reports("health")}
+        selected_tab = f"report:{saved['id']}" if saved else no_update
+        return reports, selected_tab, ""
+
+    @app.callback(
+        Output("health-report-tabs", "children"),
+        Input("health-saved-reports-store", "data"),
+    )
+    def render_health_report_tabs(saved_reports):
+        reports = _normalize_health_reports(saved_reports)
+        return _build_health_report_tabs(reports)
+
+    @app.callback(
+        Output("customer-health-grid", "filterModel"),
+        Input("health-report-tabs", "value"),
+        State("health-saved-reports-store", "data"),
+        prevent_initial_call=True,
+    )
+    def apply_health_report_filter(tab_value, saved_reports):
+        if not tab_value or tab_value == "all":
+            return {}
+        if str(tab_value).startswith("report:"):
+            report_id = str(tab_value).split(":", 1)[1]
+            report = (saved_reports or {}).get(report_id) or (saved_reports or {}).get(int(report_id), {})
+            return (report or {}).get("filter_model") or {}
+        return {}
+
+    @app.callback(
+        Output("health-delete-report-btn", "disabled"),
+        Output("health-delete-report-btn", "children"),
+        Output("health-move-tab-left-btn", "disabled"),
+        Output("health-move-tab-right-btn", "disabled"),
+        Input("health-report-tabs", "value"),
+        State("health-saved-reports-store", "data"),
+    )
+    def update_health_delete_btn(tab_value, saved_reports):
+        if not tab_value or not str(tab_value).startswith("report:"):
+            return True, "Delete Report", True, True
+        report_id = str(tab_value).split(":", 1)[1]
+        report = (saved_reports or {}).get(report_id) or (saved_reports or {}).get(int(report_id), {})
+        report_name = (report or {}).get("name")
+        if not report_name:
+            return True, "Delete Report", True, True
+        return False, f"Delete {report_name}", False, False
+
+    @app.callback(
+        Output("health-saved-reports-store", "data", allow_duplicate=True),
+        Output("health-report-tabs", "value", allow_duplicate=True),
+        Input("health-delete-report-btn", "n_clicks"),
+        State("health-report-tabs", "value"),
+        State("health-saved-reports-store", "data"),
+        prevent_initial_call=True,
+    )
+    def delete_health_report(n_clicks, active_tab, saved_reports):
+        if not n_clicks or not active_tab or not str(active_tab).startswith("report:"):
+            return no_update, no_update
+        report_id = str(active_tab).split(":", 1)[1]
+        report = (saved_reports or {}).get(report_id) or (saved_reports or {}).get(int(report_id), {})
+        if not report:
+            return no_update, no_update
+        data.delete_report(report_id)
+        reports = {str(r["id"]): r for r in data.get_saved_reports("health")}
+        return reports, "all"
+
+    @app.callback(
+        Output("health-saved-reports-store", "data", allow_duplicate=True),
+        Input("health-move-tab-left-btn", "n_clicks"),
+        Input("health-move-tab-right-btn", "n_clicks"),
+        State("health-report-tabs", "value"),
+        State("health-saved-reports-store", "data"),
+        prevent_initial_call=True,
+    )
+    def reorder_health_tab(left_clicks, right_clicks, tab_value, saved_reports):
+        from dash import ctx as _ctx
+        from dash.exceptions import PreventUpdate
+        if not tab_value or not str(tab_value).startswith("report:"):
+            raise PreventUpdate
+        triggered = _ctx.triggered_id
+        if triggered == "health-move-tab-left-btn":
+            direction = "left"
+        elif triggered == "health-move-tab-right-btn":
+            direction = "right"
+        else:
+            raise PreventUpdate
+        report_id = int(str(tab_value).split(":", 1)[1])
+        data.reorder_report(report_id, direction)
+        reports = {str(r["id"]): r for r in data.get_saved_reports("health")}
+        return reports
+
+    @app.callback(
+        Output("customer-health-grid", "filterModel", allow_duplicate=True),
+        Input("health-clear-filters-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def clear_health_filters(n_clicks):
+        if not n_clicks:
+            return no_update
+        return {}
+
 

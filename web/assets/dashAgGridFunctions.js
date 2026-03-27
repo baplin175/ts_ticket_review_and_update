@@ -9,3 +9,12 @@ dagcomponentfuncs.DOLink = function (props) {
         onClick: function (e) { e.stopPropagation(); }
     }, props.value);
 };
+
+// Clientside callbacks for Dash
+window.dash_clientside = window.dash_clientside || {};
+window.dash_clientside.clientside = window.dash_clientside.clientside || {};
+
+window.dash_clientside.clientside.openTeamsLink = function (n_clicks, url) {
+    if (n_clicks && url) { window.open(url, "_blank"); }
+    return window.dash_clientside.no_update;
+};

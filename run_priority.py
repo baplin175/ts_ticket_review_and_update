@@ -234,6 +234,20 @@ def main(activities_file: str | None = None, write_back: bool | None = None,
         _log("[priority] All tickets skipped (unchanged). Nothing to score.")
         return {}
 
+    # Filter out tickets explicitly excluded from priority scoring
+    if db_enabled:
+        excluded = db.get_excluded_ticket_numbers("priority")
+        if excluded:
+            before = len(tickets_to_score)
+            tickets_to_score = [t for t in tickets_to_score if t not in excluded]
+            n = before - len(tickets_to_score)
+            if n:
+                _log(f"[priority] {n} ticket(s) excluded from priority scoring (ticket_exclusions table).")
+
+    if not tickets_to_score:
+        _log("[priority] All tickets excluded or skipped. Nothing to score.")
+        return {}
+
     # 1. Load ticket data
     if db_enabled and tid_map:
         tickets = _load_tickets_from_db(tickets_to_score)
