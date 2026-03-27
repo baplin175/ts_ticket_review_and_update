@@ -877,59 +877,53 @@ def _build_detail(ticket_id, back_href=None, back_label="Tickets", *, ctx="page"
     # Ask Matcha chat panel
     chat_panel_content = html.Div(
         [
-            dcc.Store(id={"type": "chat-history", "index": ctx}, data=[]),
-            dcc.Interval(id={"type": "chat-poll", "index": ctx}, interval=2000, disabled=True),
-            # Left column: input + buttons
-            html.Div(
-                [
-                    dmc.Textarea(
-                        id={"type": "chat-input", "index": ctx},
-                        placeholder="Ask anything about this ticket…",
-                        autosize=True,
-                        minRows=3,
-                        maxRows=12,
-                        style={"width": "100%", "resize": "none"},
-                        className="chat-textarea",
-                        mb="xs",
-                    ),
-                    dmc.Group(
-                        [
-                            dmc.Button(
-                                "Send",
-                                id={"type": "chat-send-btn", "index": ctx},
-                                leftSection=DashIconify(icon="tabler:send", width=14),
-                                size="sm",
-                                className="chat-send-btn",
-                            ),
-                            dmc.Button(
-                                "Clear",
-                                id={"type": "chat-clear-btn", "index": ctx},
-                                variant="subtle",
-                                color="gray",
-                                size="sm",
-                            ),
-                        ],
-                        gap="xs",
-                    ),
-                ],
-                className="chat-left-col",
-                style={"width": 440, "flexShrink": 0, "paddingRight": 16},
-            ),
-            # Right column: message history (newest at top)
+            # Message history — scrollable, fills available space
             html.Div(
                 id={"type": "chat-messages", "index": ctx},
                 style={
-                    "flex": 1,
-                    "minHeight": 200,
-                    "maxHeight": 520,
+                    "minHeight": 300,
+                    "maxHeight": 480,
                     "overflowY": "auto",
                     "display": "flex",
                     "flexDirection": "column",
                     "gap": "8px",
+                    "marginBottom": "12px",
+                    "padding": "4px 2px",
                 },
             ),
+            # Input row — full width at the bottom
+            dmc.Textarea(
+                id={"type": "chat-input", "index": ctx},
+                placeholder="Ask anything about this ticket… (Enter to send, Shift+Enter for newline)",
+                autosize=True,
+                minRows=2,
+                maxRows=8,
+                style={"width": "100%", "resize": "none"},
+                className="chat-textarea",
+                mb="xs",
+            ),
+            dmc.Group(
+                [
+                    dmc.Button(
+                        "Send",
+                        id={"type": "chat-send-btn", "index": ctx},
+                        leftSection=DashIconify(icon="tabler:send", width=14),
+                        size="sm",
+                        className="chat-send-btn",
+                    ),
+                    dmc.Button(
+                        "Clear chat",
+                        id={"type": "chat-clear-btn", "index": ctx},
+                        variant="subtle",
+                        color="gray",
+                        size="sm",
+                    ),
+                ],
+                gap="xs",
+            ),
         ],
-        style={"display": "flex", "flexDirection": "row", "alignItems": "flex-start", "gap": 0},
+        className="chat-left-col",
+        style={"display": "flex", "flexDirection": "column"},
     )
 
     panels = [
@@ -977,6 +971,9 @@ def build_ticket_shell(ticket_id, back_href=None, back_label="Tickets", *, ctx="
         dcc.Store(id={"type": "ticket-detail-back-href", "index": ctx}, data=back_href),
         dcc.Store(id={"type": "ticket-detail-back-label", "index": ctx}, data=back_label),
         dcc.Store(id={"type": "active-tab", "index": ctx}, data="thread"),
+        # Chat stores live here (not inside _build_detail) so they survive auto-refresh rebuilds
+        dcc.Store(id={"type": "chat-history", "index": ctx}, data=[]),
+        dcc.Interval(id={"type": "chat-poll", "index": ctx}, interval=2000, disabled=True),
         dcc.Interval(id={"type": "auto-refresh-poll", "index": ctx}, interval=2000, disabled=False),
         html.Div(
             id={"type": "auto-refresh-indicator", "index": ctx},
@@ -1216,3 +1213,14 @@ def register_callbacks(app):
         if not n_clicks:
             return no_update, no_update
         return [], []
+
+    @app.callback(
+        Output({"type": "chat-messages", "index": MATCH}, "children", allow_duplicate=True),
+        Input({"type": "ticket-detail-content", "index": MATCH}, "children"),
+        State({"type": "chat-history", "index": MATCH}, "data"),
+        prevent_initial_call=True,
+    )
+    def restore_chat_after_refresh(_, chat_history):
+        if not chat_history:
+            return no_update
+        return _render_chat_messages(chat_history)

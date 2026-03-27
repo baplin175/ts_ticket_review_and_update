@@ -26,11 +26,11 @@ window.dash_clientside.clientside.openEmailLink = function (n_clicks, url) {
 
 // Chat textarea: Enter sends, Shift+Enter inserts a newline.
 // dmc.Textarea applies className to a wrapper div, not the <textarea> itself,
-// so we identify the element by tagName and containment in .chat-left-col.
+// so we match by tagName and closest ancestor with a known chat class.
 document.addEventListener('keydown', function (e) {
     if (e.key !== 'Enter' || e.shiftKey) return;
     if (e.target.tagName !== 'TEXTAREA') return;
-    // Ticket-level chat
+    // Ticket-level chat (panel has class chat-left-col)
     var col = e.target.closest('.chat-left-col');
     if (col) {
         e.preventDefault();
@@ -38,11 +38,11 @@ document.addEventListener('keydown', function (e) {
         if (btn) btn.click();
         return;
     }
-    // Customer-level chat
-    var custCol = e.target.closest('.customer-chat-left-col');
-    if (custCol) {
+    // Customer-level chat (no wrapper — look for send btn in the same panel div)
+    var panel = e.target.closest('#health-drilldown-chat-panel');
+    if (panel) {
         e.preventDefault();
-        var custBtn = custCol.querySelector('.customer-chat-send-btn');
+        var custBtn = panel.querySelector('.customer-chat-send-btn');
         if (custBtn) custBtn.click();
     }
 }, true);

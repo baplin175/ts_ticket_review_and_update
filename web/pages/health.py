@@ -872,131 +872,123 @@ def health_layout():
                 size="90%",
                 centered=True,
                 children=[
+                    # Tab strip only — content is in plain divs below so the
+                    # AG Grid is never inside a hidden TabsPanel (which breaks
+                    # its virtual rendering engine).
                     dmc.Tabs(
-                        [
-                            dmc.TabsList([
-                                dmc.TabsTab("Tickets", value="tickets",
-                                            leftSection=DashIconify(icon="tabler:tickets", width=16)),
-                                dmc.TabsTab("Ask Matcha", value="chat",
-                                            leftSection=DashIconify(icon="tabler:robot", width=16)),
-                            ]),
-                            dmc.TabsPanel(
-                                [
-                                    # ── List view (default) ──────────────────────────
-                                    html.Div(
-                                        id="health-drilldown-list-view",
-                                        children=[
-                                            dmc.Text(id="health-drilldown-subtitle", size="sm", c="dimmed", mb="sm"),
-                                            dmc.Group(
-                                                [
-                                                    dmc.Text("Top Issue Clusters", size="sm", fw=600),
-                                                    dmc.Switch(
-                                                        id="health-cluster-scope-toggle",
-                                                        label="Open only",
-                                                        checked=True,
-                                                        size="xs",
-                                                    ),
-                                                ],
-                                                justify="space-between",
-                                                mb="xs",
-                                            ),
-                                            html.Div(id="health-cluster-cards", style={"marginBottom": "12px"}),
-                                            grid_with_export(
-                                                dag.AgGrid(
-                                                    id="health-drilldown-grid",
-                                                    rowData=[],
-                                                    columnDefs=DRILLDOWN_COL_DEFS,
-                                                    defaultColDef={
-                                                        "sortable": True, "filter": True,
-                                                        "resizable": True, "floatingFilter": True,
-                                                        "filterParams": {"caseSensitive": False},
-                                                    },
-                                                    dashGridOptions={
-                                                        "rowSelection": "single",
-                                                        "pagination": True,
-                                                        "paginationPageSize": 25,
-                                                        "animateRows": True,
-                                                        "enableCellTextSelection": True,
-                                                    },
-                                                    style={"height": "60vh", "cursor": "pointer"},
-                                                    className="ag-theme-quartz",
-                                                ),
-                                                "health-drilldown-grid",
+                        dmc.TabsList([
+                            dmc.TabsTab("Tickets", value="tickets",
+                                        leftSection=DashIconify(icon="tabler:tickets", width=16)),
+                            dmc.TabsTab("Ask Matcha", value="chat",
+                                        leftSection=DashIconify(icon="tabler:robot", width=16)),
+                        ]),
+                        id="health-drilldown-tabs",
+                        value="tickets",
+                        mb="sm",
+                    ),
+                    # ── Tickets content (always in DOM) ──────────────────
+                    html.Div(
+                        id="health-drilldown-tickets-panel",
+                        children=[
+                            html.Div(
+                                id="health-drilldown-list-view",
+                                children=[
+                                    dmc.Text(id="health-drilldown-subtitle", size="sm", c="dimmed", mb="sm"),
+                                    dmc.Group(
+                                        [
+                                            dmc.Text("Top Issue Clusters", size="sm", fw=600),
+                                            dmc.Switch(
+                                                id="health-cluster-scope-toggle",
+                                                label="Open only",
+                                                checked=True,
+                                                size="xs",
                                             ),
                                         ],
+                                        justify="space-between",
+                                        mb="xs",
                                     ),
-                                    # ── Inline ticket view (shown when a row is clicked) ─
-                                    html.Div(
-                                        id="health-drilldown-ticket-view",
-                                        children=[],
-                                        style={"display": "none"},
+                                    html.Div(id="health-cluster-cards", style={"marginBottom": "12px"}),
+                                    grid_with_export(
+                                        dag.AgGrid(
+                                            id="health-drilldown-grid",
+                                            rowData=[],
+                                            columnDefs=DRILLDOWN_COL_DEFS,
+                                            defaultColDef={
+                                                "sortable": True, "filter": True,
+                                                "resizable": True, "floatingFilter": True,
+                                                "filterParams": {"caseSensitive": False},
+                                            },
+                                            dashGridOptions={
+                                                "rowSelection": "single",
+                                                "pagination": True,
+                                                "paginationPageSize": 25,
+                                                "animateRows": True,
+                                                "enableCellTextSelection": True,
+                                            },
+                                            style={"height": "60vh", "cursor": "pointer"},
+                                            className="ag-theme-quartz",
+                                        ),
+                                        "health-drilldown-grid",
                                     ),
                                 ],
-                                value="tickets",
-                                pt="sm",
                             ),
-                            dmc.TabsPanel(
-                                html.Div(
-                                    [
-                                        # Left: textarea + buttons
-                                        html.Div(
-                                            [
-                                                dmc.Textarea(
-                                                    id="health-customer-chat-input",
-                                                    placeholder="Ask anything about this customer's tickets…",
-                                                    autosize=True,
-                                                    minRows=3,
-                                                    maxRows=12,
-                                                    style={"width": "100%", "resize": "none"},
-                                                    className="customer-chat-textarea",
-                                                    mb="xs",
-                                                ),
-                                                dmc.Group(
-                                                    [
-                                                        dmc.Button(
-                                                            "Send",
-                                                            id="health-customer-chat-send-btn",
-                                                            leftSection=DashIconify(icon="tabler:send", width=14),
-                                                            size="sm",
-                                                            className="customer-chat-send-btn",
-                                                        ),
-                                                        dmc.Button(
-                                                            "Clear",
-                                                            id="health-customer-chat-clear-btn",
-                                                            variant="subtle",
-                                                            color="gray",
-                                                            size="sm",
-                                                        ),
-                                                    ],
-                                                    gap="xs",
-                                                ),
-                                            ],
-                                            className="customer-chat-left-col",
-                                            style={"width": 440, "flexShrink": 0, "paddingRight": 16},
-                                        ),
-                                        # Right: message history newest-first
-                                        html.Div(
-                                            id="health-customer-chat-messages",
-                                            style={
-                                                "flex": 1,
-                                                "minHeight": 200,
-                                                "maxHeight": 520,
-                                                "overflowY": "auto",
-                                                "display": "flex",
-                                                "flexDirection": "column",
-                                                "gap": "8px",
-                                            },
-                                        ),
-                                    ],
-                                    style={"display": "flex", "flexDirection": "row",
-                                           "alignItems": "flex-start", "gap": 0},
-                                ),
-                                value="chat",
-                                pt="sm",
+                            html.Div(
+                                id="health-drilldown-ticket-view",
+                                children=[],
+                                style={"display": "none"},
                             ),
                         ],
-                        value="tickets",
-                        keepMounted=True,
+                    ),
+                    # ── Ask Matcha chat (always in DOM, hidden when not active) ──
+                    html.Div(
+                        id="health-drilldown-chat-panel",
+                        style={"display": "none"},
+                        children=[
+                            # Message history
+                            html.Div(
+                                id="health-customer-chat-messages",
+                                style={
+                                    "minHeight": 300,
+                                    "maxHeight": 480,
+                                    "overflowY": "auto",
+                                    "display": "flex",
+                                    "flexDirection": "column",
+                                    "gap": "8px",
+                                    "marginBottom": "12px",
+                                    "padding": "4px 2px",
+                                },
+                            ),
+                            # Input at the bottom
+                            dmc.Textarea(
+                                id="health-customer-chat-input",
+                                placeholder="Ask anything about this customer's tickets… (Enter to send, Shift+Enter for newline)",
+                                autosize=True,
+                                minRows=2,
+                                maxRows=8,
+                                style={"width": "100%", "resize": "none"},
+                                className="customer-chat-textarea",
+                                mb="xs",
+                            ),
+                            dmc.Group(
+                                [
+                                    dmc.Button(
+                                        "Send",
+                                        id="health-customer-chat-send-btn",
+                                        leftSection=DashIconify(icon="tabler:send", width=14),
+                                        size="sm",
+                                        className="customer-chat-send-btn",
+                                    ),
+                                    dmc.Button(
+                                        "Clear chat",
+                                        id="health-customer-chat-clear-btn",
+                                        variant="subtle",
+                                        color="gray",
+                                        size="sm",
+                                    ),
+                                ],
+                                gap="xs",
+                            ),
+                        ],
                     ),
                 ],
             ),
@@ -1184,6 +1176,9 @@ def register_health_callbacks(app):
         Output("health-drilldown-grid", "rowData"),
         Output("health-drilldown-subtitle", "children"),
         Output("health-drilldown-customers-store", "data"),
+        Output("health-drilldown-tabs", "value"),
+        Output("health-drilldown-tickets-panel", "style"),
+        Output("health-drilldown-chat-panel", "style"),
         Input("health-drilldown-btn", "n_clicks"),
         State("customer-health-grid", "selectedRows"),
         State("customer-health-grid", "virtualRowData"),
@@ -1191,7 +1186,7 @@ def register_health_callbacks(app):
     )
     def open_drilldown(n_clicks, selected, virtual_rows):
         if not n_clicks or not selected:
-            return no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update, no_update, no_update
         # Restrict to currently visible (filtered) rows only.
         # When virtualRowData is None the grid hasn't emitted its first render
         # event yet (e.g. immediately after navigating back), so fall back to
@@ -1206,12 +1201,23 @@ def register_health_callbacks(app):
         else:
             effective = selected
         if not effective:
-            return no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update, no_update, no_update
         names = [r["customer"] for r in effective if r.get("customer")]
         tickets = data.get_tickets_by_customers(names)
         label = ", ".join(names)
         subtitle = f"{len(tickets)} open ticket{'s' if len(tickets) != 1 else ''} for: {label}"
-        return True, tickets, subtitle, names
+        return True, tickets, subtitle, names, "tickets", {}, {"display": "none"}
+
+    @app.callback(
+        Output("health-drilldown-tickets-panel", "style", allow_duplicate=True),
+        Output("health-drilldown-chat-panel", "style", allow_duplicate=True),
+        Input("health-drilldown-tabs", "value"),
+        prevent_initial_call=True,
+    )
+    def switch_drilldown_panel(tab_value):
+        if tab_value == "chat":
+            return {"display": "none"}, {}
+        return {}, {"display": "none"}
 
     @app.callback(
         Output("health-cluster-cards", "children"),
