@@ -2,6 +2,7 @@
 
 import json
 import re
+from urllib.parse import parse_qs
 
 import dash
 import dash_mantine_components as dmc
@@ -575,48 +576,43 @@ def dashboard_editor_layout():
                 p="md",
                 radius="md",
             ),
-            dmc.SimpleGrid(
-                cols={"base": 1, "xl": 2},
-                children=[
-                    dmc.Paper(
+            dmc.Paper(
+                [
+                    dmc.Group(
                         [
-                            dmc.Group(
-                                [
-                                    dmc.Title("Dashboards", order=4),
-                                    dmc.Badge(id="dashboard-count-badge", children=f"{len(dashboards)} total", variant="light"),
-                                ],
-                                justify="space-between",
-                                mb="sm",
-                            ),
-                            html.Div(
-                                children=[_dashboard_card(d) for d in dashboards] or [dmc.Text("No dashboards yet.", c="dimmed")],
-                                id="dashboard-editor-list",
-                            ),
+                            dmc.Title("Dashboards", order=4),
+                            dmc.Badge(id="dashboard-count-badge", children=f"{len(dashboards)} total", variant="light"),
                         ],
-                        withBorder=True,
-                        p="md",
-                        radius="md",
+                        justify="space-between",
+                        mb="sm",
                     ),
-                    dmc.Paper(
-                        [
-                            dmc.Group(
-                                [
-                                    dmc.Title("Preview", order=4),
-                                    dmc.Text(id="dashboard-preview-label", size="sm", c="dimmed"),
-                                ],
-                                justify="space-between",
-                                mb="sm",
-                            ),
-                            html.Div(dmc.Text("Select a dashboard to preview.", c="dimmed"), id="dashboard-preview-content"),
-                        ],
-                        withBorder=True,
-                        p="md",
-                        radius="md",
+                    html.Div(
+                        children=[_dashboard_card(d) for d in dashboards] or [dmc.Text("No dashboards yet.", c="dimmed")],
+                        id="dashboard-editor-list",
                     ),
                 ],
+                withBorder=True,
+                p="md",
+                radius="md",
             ),
             dmc.Paper(
                 html.Div(dmc.Text("Select a dashboard to edit.", c="dimmed"), id="dashboard-structure-editor"),
+                withBorder=True,
+                p="md",
+                radius="md",
+            ),
+            dmc.Paper(
+                [
+                    dmc.Group(
+                        [
+                            dmc.Title("Preview", order=4),
+                            dmc.Text(id="dashboard-preview-label", size="sm", c="dimmed"),
+                        ],
+                        justify="space-between",
+                        mb="sm",
+                    ),
+                    html.Div(dmc.Text("Select a dashboard to preview.", c="dimmed"), id="dashboard-preview-content"),
+                ],
                 withBorder=True,
                 p="md",
                 radius="md",
@@ -657,6 +653,22 @@ def dashboard_editor_layout():
 
 
 def register_callbacks(app):
+    @app.callback(
+        Output("url", "pathname", allow_duplicate=True),
+        Output("url", "search", allow_duplicate=True),
+        Input({"type": "dashboard-edit-btn", "index": dash.ALL}, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def navigate_to_dashboard_editor(_clicks):
+        from dash import ctx
+        if not ctx.triggered_id or not ctx.triggered or not ctx.triggered[0].get("value"):
+            return no_update, no_update
+        dashboard_id = ctx.triggered_id["index"]
+        tree = data.get_dashboard_tree(dashboard_id)
+        if not tree:
+            return no_update, no_update
+        return "/dashboards/manage", f"?dashboard={tree['slug']}"
+
     @app.callback(
         Output("dashboard-create-message", "children"),
         Output("selected-dashboard-id", "data", allow_duplicate=True),
@@ -700,14 +712,29 @@ def register_callbacks(app):
 
     @app.callback(
         Output("selected-dashboard-id", "data"),
+        Input("url", "pathname"),
+        Input("url", "search"),
         Input({"type": "dashboard-edit-btn", "index": dash.ALL}, "n_clicks"),
-        prevent_initial_call=True,
+        prevent_initial_call=False,
     )
-    def set_selected_dashboard(_clicks):
+    def set_selected_dashboard(pathname, search, _clicks):
         from dash import ctx
-        if not ctx.triggered_id or not ctx.triggered or not ctx.triggered[0].get("value"):
+
+        if isinstance(ctx.triggered_id, dict) and ctx.triggered_id.get("type") == "dashboard-edit-btn":
+            return ctx.triggered_id["index"]
+
+        if pathname != "/dashboards/manage":
             return no_update
-        return ctx.triggered_id["index"]
+
+        params = parse_qs((search or "").lstrip("?"))
+        dashboard_slug = params.get("dashboard", [None])[0]
+        if not dashboard_slug:
+            return no_update
+
+        dashboard = data.get_dashboard_by_slug(dashboard_slug)
+        if not dashboard:
+            return no_update
+        return dashboard["id"]
 
     @app.callback(
         Output("dashboard-structure-editor", "children"),
@@ -917,6 +944,8 @@ def register_callbacks(app):
     )
     def sync_widget_form_visibility(widget_types):
         widget_types = widget_types or []
+        if not widget_types:
+            return (no_update,) * 13
         query_data = []
         query_placeholders = []
         query_disabled = []

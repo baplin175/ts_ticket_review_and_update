@@ -457,7 +457,7 @@ def _wait_chart(profile):
 
 # ── Layout ───────────────────────────────────────────────────────────
 
-def _build_detail(ticket_id, back_href=None, back_label="Tickets", *, ctx="page"):
+def _build_detail(ticket_id, back_href=None, back_label="Tickets", *, ctx="page", active_tab="thread"):
     """Build the full ticket detail content (header + tabs) from DB data.
 
     *ctx* is used as the index in all pattern-matched component IDs so the
@@ -882,22 +882,24 @@ def _build_detail(ticket_id, back_href=None, back_label="Tickets", *, ctx="page"
             # Left column: input + buttons
             html.Div(
                 [
-                    dmc.TextInput(
+                    dmc.Textarea(
                         id={"type": "chat-input", "index": ctx},
                         placeholder="Ask anything about this ticket…",
-                        debounce=False,
-                        n_submit=0,
-                        style={"width": "100%"},
+                        autosize=True,
+                        minRows=3,
+                        maxRows=12,
+                        style={"width": "100%", "resize": "none"},
+                        className="chat-textarea",
                         mb="xs",
                     ),
-                    dmc.Stack(
+                    dmc.Group(
                         [
                             dmc.Button(
                                 "Send",
                                 id={"type": "chat-send-btn", "index": ctx},
                                 leftSection=DashIconify(icon="tabler:send", width=14),
                                 size="sm",
-                                fullWidth=True,
+                                className="chat-send-btn",
                             ),
                             dmc.Button(
                                 "Clear",
@@ -905,13 +907,13 @@ def _build_detail(ticket_id, back_href=None, back_label="Tickets", *, ctx="page"
                                 variant="subtle",
                                 color="gray",
                                 size="sm",
-                                fullWidth=True,
                             ),
                         ],
                         gap="xs",
                     ),
                 ],
-                style={"width": 220, "flexShrink": 0, "paddingRight": 16},
+                className="chat-left-col",
+                style={"width": 440, "flexShrink": 0, "paddingRight": 16},
             ),
             # Right column: message history (newest at top)
             html.Div(
@@ -950,7 +952,9 @@ def _build_detail(ticket_id, back_href=None, back_label="Tickets", *, ctx="page"
 
     tabs = dmc.Tabs(
         [dmc.TabsList(tab_list)] + panels,
-        value="thread",
+        id={"type": "ticket-tabs", "index": ctx},
+        value=active_tab,
+        keepMounted=True,
     )
 
     return dmc.Stack([header, tabs], gap="md")
@@ -972,6 +976,7 @@ def build_ticket_shell(ticket_id, back_href=None, back_label="Tickets", *, ctx="
         dcc.Store(id={"type": "ticket-detail-id", "index": ctx}, data=ticket_id),
         dcc.Store(id={"type": "ticket-detail-back-href", "index": ctx}, data=back_href),
         dcc.Store(id={"type": "ticket-detail-back-label", "index": ctx}, data=back_label),
+        dcc.Store(id={"type": "active-tab", "index": ctx}, data="thread"),
         dcc.Interval(id={"type": "auto-refresh-poll", "index": ctx}, interval=2000, disabled=False),
         html.Div(
             id={"type": "auto-refresh-indicator", "index": ctx},
@@ -1023,9 +1028,10 @@ def register_callbacks(app):
         State({"type": "ticket-detail-id", "index": MATCH}, "data"),
         State({"type": "ticket-detail-back-href", "index": MATCH}, "data"),
         State({"type": "ticket-detail-back-label", "index": MATCH}, "data"),
+        State({"type": "active-tab", "index": MATCH}, "data"),
         prevent_initial_call=True,
     )
-    def poll_auto_refresh(_n, ticket_id, back_href, back_label):
+    def poll_auto_refresh(_n, ticket_id, back_href, back_label, active_tab):
         with _auto_lock:
             running = _auto_refresh["running"]
             finished = _auto_refresh["finished"]
@@ -1044,7 +1050,10 @@ def register_callbacks(app):
             with _auto_lock:
                 _auto_refresh["finished"] = False
             instance_ctx = ctx.triggered_id["index"] if isinstance(ctx.triggered_id, dict) else "page"
-            return "", {"display": "none"}, True, _build_detail(ticket_id, back_href=back_href, back_label=back_label or "Tickets", ctx=instance_ctx)
+            return "", {"display": "none"}, True, _build_detail(
+                ticket_id, back_href=back_href, back_label=back_label or "Tickets",
+                ctx=instance_ctx, active_tab=active_tab or "thread",
+            )
 
         return "", {"display": "none"}, True, no_update
 
@@ -1073,9 +1082,10 @@ def register_callbacks(app):
         State({"type": "ticket-detail-id", "index": MATCH}, "data"),
         State({"type": "ticket-detail-back-href", "index": MATCH}, "data"),
         State({"type": "ticket-detail-back-label", "index": MATCH}, "data"),
+        State({"type": "active-tab", "index": MATCH}, "data"),
         prevent_initial_call=True,
     )
-    def log_teams_share(n_clicks, ticket_id, back_href, back_label):
+    def log_teams_share(n_clicks, ticket_id, back_href, back_label, active_tab):
         if not n_clicks or not ticket_id:
             return no_update
         ticket = data.get_ticket_detail(ticket_id)
@@ -1087,7 +1097,17 @@ def register_callbacks(app):
                 detail={"message_preview": msg[:500]},
             )
         instance_ctx = ctx.triggered_id["index"] if isinstance(ctx.triggered_id, dict) else "page"
-        return _build_detail(ticket_id, back_href=back_href, back_label=back_label or "Tickets", ctx=instance_ctx)
+        return _build_detail(ticket_id, back_href=back_href, back_label=back_label or "Tickets",
+                             ctx=instance_ctx, active_tab=active_tab or "thread")
+
+    # Persist active tab so rebuilds (auto-refresh, Teams share) don't reset it
+    @app.callback(
+        Output({"type": "active-tab", "index": MATCH}, "data"),
+        Input({"type": "ticket-tabs", "index": MATCH}, "value"),
+        prevent_initial_call=True,
+    )
+    def save_active_tab(value):
+        return value or "thread"
 
     @app.callback(
         Output({"type": "excl-save-status", "index": MATCH}, "children"),
@@ -1129,14 +1149,13 @@ def register_callbacks(app):
         Output({"type": "chat-poll", "index": MATCH}, "disabled"),
         Output({"type": "chat-input", "index": MATCH}, "value"),
         Input({"type": "chat-send-btn", "index": MATCH}, "n_clicks"),
-        Input({"type": "chat-input", "index": MATCH}, "n_submit"),
         State({"type": "chat-input", "index": MATCH}, "value"),
         State({"type": "chat-history", "index": MATCH}, "data"),
         State({"type": "ticket-detail-id", "index": MATCH}, "data"),
         prevent_initial_call=True,
     )
-    def chat_send(n_clicks, n_submit, user_text, chat_history, ticket_id):
-        if not n_clicks or not (user_text or "").strip():
+    def chat_send(n_clicks, user_text, chat_history, ticket_id):
+        if not (user_text or "").strip():
             return no_update, no_update, no_update, no_update
 
         user_text = user_text.strip()

@@ -1,5 +1,7 @@
 """Health dashboards — Customer and Product health AG Grid tables."""
 
+import threading
+
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
 from dash import callback, dcc, html, Input, Output, State, no_update
@@ -18,6 +20,92 @@ _HEALTH_BAND_COLORS = {
     "at_risk": "orange",
     "critical": "red",
 }
+
+
+# ── Customer chat state ───────────────────────────────────────────────
+
+_customer_chat_state: dict = {"running": False, "result": None, "error": None}
+_customer_chat_lock = threading.Lock()
+
+
+def _build_customer_context(customer_names: list[str], tickets: list[dict]) -> str:
+    """Serialize open ticket summaries for one or more customers into Matcha context."""
+    label = ", ".join(customer_names)
+    lines = [
+        f"=== CUSTOMER CONTEXT: {label} ===",
+        f"Open ticket count: {len(tickets)}",
+    ]
+    frustrated = [t for t in tickets if str(t.get("frustrated", "")).lower() == "yes"]
+    if frustrated:
+        lines.append(f"Frustrated tickets: {len(frustrated)}")
+    high_pri = [t for t in tickets if (t.get("priority") or 99) <= 2]
+    if high_pri:
+        lines.append(f"High-priority tickets (score ≤ 2): {len(high_pri)}")
+    lines.append("\n=== OPEN TICKETS ===")
+    for t in tickets:
+        lines.append(
+            f"  #{t.get('ticket_number', '?')} | {t.get('ticket_name', '—')} | "
+            f"Status: {t.get('status', '—')} | Severity: {t.get('severity', '—')} | "
+            f"Product: {t.get('product_name', '—')} | Assignee: {t.get('assignee', '—')} | "
+            f"Age: {round(t['days_opened']) if t.get('days_opened') else '—'}d | "
+            f"Priority: {t.get('priority', '—')} | Complexity: {t.get('overall_complexity', '—')} | "
+            f"Frustrated: {t.get('frustrated', '—')}"
+        )
+    return "\n".join(lines)
+
+
+def _render_customer_chat_messages(history: list[dict], pending: bool = False) -> list:
+    """Render customer chat history as Dash Paper bubbles, newest first."""
+    cards = []
+    if pending:
+        cards.append(
+            dmc.Paper(
+                dmc.Group([
+                    dmc.Badge("Matcha", color="violet", variant="filled", size="sm"),
+                    dmc.Loader(size="xs", type="dots"),
+                    dmc.Text("Thinking…", size="sm", c="dimmed"),
+                ], gap="xs"),
+                withBorder=True, p="sm", radius="sm",
+                style={"borderLeft": "3px solid #7950f2"},
+            )
+        )
+    for msg in reversed(history):
+        is_user = msg.get("role") == "user"
+        content = msg.get("content", "")
+        cards.append(
+            dmc.Paper(
+                [
+                    dmc.Group(
+                        [dmc.Badge("You" if is_user else "Matcha",
+                                   color="blue" if is_user else "violet",
+                                   variant="filled", size="sm")],
+                        mb=4,
+                    ),
+                    dmc.Text(str(content), size="sm",
+                             style={"whiteSpace": "pre-wrap", "lineHeight": 1.6}),
+                ],
+                withBorder=True, p="sm", radius="sm",
+                style={"borderLeft": f"3px solid {'#1c7ed6' if is_user else '#7950f2'}"},
+            )
+        )
+    return cards
+
+
+def _run_customer_chat(context: str, messages: list[dict], chat_history: list[dict]) -> None:
+    """Background thread: call Matcha and store the result."""
+    with _customer_chat_lock:
+        _customer_chat_state.update({"running": True, "result": None, "error": None})
+    try:
+        from matcha_client import call_matcha_chat
+        reply = call_matcha_chat(context=context, messages=messages, chat_history=chat_history)
+        with _customer_chat_lock:
+            _customer_chat_state["result"] = reply
+    except Exception as exc:
+        with _customer_chat_lock:
+            _customer_chat_state["error"] = str(exc)
+    finally:
+        with _customer_chat_lock:
+            _customer_chat_state["running"] = False
 
 
 def _health_band_color(band):
@@ -775,6 +863,8 @@ def health_layout():
             dcc.Store(id="health-history-selected-date"),
             dcc.Store(id="health-drilldown-customers-store"),
             dcc.Store(id="health-drilldown-ticket-id"),
+            dcc.Store(id="health-customer-chat-history", data=[]),
+            dcc.Interval(id="health-customer-chat-poll", interval=2000, disabled=True),
             # Drill-down modal for customer tickets
             dmc.Modal(
                 id="health-drilldown-modal",
@@ -782,54 +872,131 @@ def health_layout():
                 size="90%",
                 centered=True,
                 children=[
-                    # ── List view (default) ──────────────────────────
-                    html.Div(
-                        id="health-drilldown-list-view",
-                        children=[
-                            dmc.Text(id="health-drilldown-subtitle", size="sm", c="dimmed", mb="sm"),
-                            dmc.Group(
+                    dmc.Tabs(
+                        [
+                            dmc.TabsList([
+                                dmc.TabsTab("Tickets", value="tickets",
+                                            leftSection=DashIconify(icon="tabler:tickets", width=16)),
+                                dmc.TabsTab("Ask Matcha", value="chat",
+                                            leftSection=DashIconify(icon="tabler:robot", width=16)),
+                            ]),
+                            dmc.TabsPanel(
                                 [
-                                    dmc.Text("Top Issue Clusters", size="sm", fw=600),
-                                    dmc.Switch(
-                                        id="health-cluster-scope-toggle",
-                                        label="Open only",
-                                        checked=True,
-                                        size="xs",
+                                    # ── List view (default) ──────────────────────────
+                                    html.Div(
+                                        id="health-drilldown-list-view",
+                                        children=[
+                                            dmc.Text(id="health-drilldown-subtitle", size="sm", c="dimmed", mb="sm"),
+                                            dmc.Group(
+                                                [
+                                                    dmc.Text("Top Issue Clusters", size="sm", fw=600),
+                                                    dmc.Switch(
+                                                        id="health-cluster-scope-toggle",
+                                                        label="Open only",
+                                                        checked=True,
+                                                        size="xs",
+                                                    ),
+                                                ],
+                                                justify="space-between",
+                                                mb="xs",
+                                            ),
+                                            html.Div(id="health-cluster-cards", style={"marginBottom": "12px"}),
+                                            grid_with_export(
+                                                dag.AgGrid(
+                                                    id="health-drilldown-grid",
+                                                    rowData=[],
+                                                    columnDefs=DRILLDOWN_COL_DEFS,
+                                                    defaultColDef={
+                                                        "sortable": True, "filter": True,
+                                                        "resizable": True, "floatingFilter": True,
+                                                        "filterParams": {"caseSensitive": False},
+                                                    },
+                                                    dashGridOptions={
+                                                        "rowSelection": "single",
+                                                        "pagination": True,
+                                                        "paginationPageSize": 25,
+                                                        "animateRows": True,
+                                                        "enableCellTextSelection": True,
+                                                    },
+                                                    style={"height": "60vh", "cursor": "pointer"},
+                                                    className="ag-theme-quartz",
+                                                ),
+                                                "health-drilldown-grid",
+                                            ),
+                                        ],
+                                    ),
+                                    # ── Inline ticket view (shown when a row is clicked) ─
+                                    html.Div(
+                                        id="health-drilldown-ticket-view",
+                                        children=[],
+                                        style={"display": "none"},
                                     ),
                                 ],
-                                justify="space-between",
-                                mb="xs",
+                                value="tickets",
+                                pt="sm",
                             ),
-                            html.Div(id="health-cluster-cards", style={"marginBottom": "12px"}),
-                            grid_with_export(
-                                dag.AgGrid(
-                                    id="health-drilldown-grid",
-                                    rowData=[],
-                                    columnDefs=DRILLDOWN_COL_DEFS,
-                                    defaultColDef={
-                                        "sortable": True, "filter": True,
-                                        "resizable": True, "floatingFilter": True,
-                                        "filterParams": {"caseSensitive": False},
-                                    },
-                                    dashGridOptions={
-                                        "rowSelection": "single",
-                                        "pagination": True,
-                                        "paginationPageSize": 25,
-                                        "animateRows": True,
-                                        "enableCellTextSelection": True,
-                                    },
-                                    style={"height": "60vh", "cursor": "pointer"},
-                                    className="ag-theme-quartz",
+                            dmc.TabsPanel(
+                                html.Div(
+                                    [
+                                        # Left: textarea + buttons
+                                        html.Div(
+                                            [
+                                                dmc.Textarea(
+                                                    id="health-customer-chat-input",
+                                                    placeholder="Ask anything about this customer's tickets…",
+                                                    autosize=True,
+                                                    minRows=3,
+                                                    maxRows=12,
+                                                    style={"width": "100%", "resize": "none"},
+                                                    className="customer-chat-textarea",
+                                                    mb="xs",
+                                                ),
+                                                dmc.Group(
+                                                    [
+                                                        dmc.Button(
+                                                            "Send",
+                                                            id="health-customer-chat-send-btn",
+                                                            leftSection=DashIconify(icon="tabler:send", width=14),
+                                                            size="sm",
+                                                            className="customer-chat-send-btn",
+                                                        ),
+                                                        dmc.Button(
+                                                            "Clear",
+                                                            id="health-customer-chat-clear-btn",
+                                                            variant="subtle",
+                                                            color="gray",
+                                                            size="sm",
+                                                        ),
+                                                    ],
+                                                    gap="xs",
+                                                ),
+                                            ],
+                                            className="customer-chat-left-col",
+                                            style={"width": 440, "flexShrink": 0, "paddingRight": 16},
+                                        ),
+                                        # Right: message history newest-first
+                                        html.Div(
+                                            id="health-customer-chat-messages",
+                                            style={
+                                                "flex": 1,
+                                                "minHeight": 200,
+                                                "maxHeight": 520,
+                                                "overflowY": "auto",
+                                                "display": "flex",
+                                                "flexDirection": "column",
+                                                "gap": "8px",
+                                            },
+                                        ),
+                                    ],
+                                    style={"display": "flex", "flexDirection": "row",
+                                           "alignItems": "flex-start", "gap": 0},
                                 ),
-                                "health-drilldown-grid",
+                                value="chat",
+                                pt="sm",
                             ),
                         ],
-                    ),
-                    # ── Inline ticket view (shown when a row is clicked) ─
-                    html.Div(
-                        id="health-drilldown-ticket-view",
-                        children=[],
-                        style={"display": "none"},
+                        value="tickets",
+                        keepMounted=True,
                     ),
                 ],
             ),
@@ -1519,4 +1686,81 @@ def register_health_callbacks(app):
             return no_update
         return {}
 
+    # ── Customer Ask Matcha chat ───────────────────────────────────────
+
+    @app.callback(
+        Output("health-customer-chat-messages", "children"),
+        Output("health-customer-chat-history", "data"),
+        Output("health-customer-chat-poll", "disabled"),
+        Output("health-customer-chat-input", "value"),
+        Input("health-customer-chat-send-btn", "n_clicks"),
+        State("health-customer-chat-input", "value"),
+        State("health-customer-chat-history", "data"),
+        State("health-drilldown-customers-store", "data"),
+        prevent_initial_call=True,
+    )
+    def customer_chat_send(n_clicks, user_text, chat_history, customer_names):
+        if not (user_text or "").strip():
+            return no_update, no_update, no_update, no_update
+        user_text = user_text.strip()
+        tickets = data.get_tickets_by_customers(customer_names or [])
+        context_str = _build_customer_context(customer_names or [], tickets)
+        prior = list(chat_history or [])
+        new_history = prior + [{"role": "user", "content": user_text}]
+        threading.Thread(
+            target=_run_customer_chat,
+            args=(context_str, [{"role": "user", "content": user_text}], prior),
+            daemon=True,
+        ).start()
+        return _render_customer_chat_messages(new_history, pending=True), new_history, False, ""
+
+    @app.callback(
+        Output("health-customer-chat-messages", "children", allow_duplicate=True),
+        Output("health-customer-chat-history", "data", allow_duplicate=True),
+        Output("health-customer-chat-poll", "disabled", allow_duplicate=True),
+        Input("health-customer-chat-poll", "n_intervals"),
+        State("health-customer-chat-history", "data"),
+        prevent_initial_call=True,
+    )
+    def customer_chat_poll(n_intervals, chat_history):
+        with _customer_chat_lock:
+            running = _customer_chat_state["running"]
+            result = _customer_chat_state.get("result")
+            error = _customer_chat_state.get("error")
+
+        if running:
+            return no_update, no_update, False
+
+        if result is not None or error is not None:
+            reply = result if result is not None else f"[Error: {error}]"
+            new_history = list(chat_history or []) + [{"role": "assistant", "content": reply}]
+            with _customer_chat_lock:
+                _customer_chat_state["result"] = None
+                _customer_chat_state["error"] = None
+            return _render_customer_chat_messages(new_history), new_history, True
+
+        return no_update, no_update, True
+
+    @app.callback(
+        Output("health-customer-chat-messages", "children", allow_duplicate=True),
+        Output("health-customer-chat-history", "data", allow_duplicate=True),
+        Input("health-customer-chat-clear-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def customer_chat_clear(n_clicks):
+        if not n_clicks:
+            return no_update, no_update
+        return [], []
+
+    # Reset chat history when the modal closes so the next customer starts fresh
+    @app.callback(
+        Output("health-customer-chat-history", "data", allow_duplicate=True),
+        Output("health-customer-chat-messages", "children", allow_duplicate=True),
+        Input("health-drilldown-modal", "opened"),
+        prevent_initial_call=True,
+    )
+    def reset_customer_chat_on_modal_close(opened):
+        if not opened:
+            return [], []
+        return no_update, no_update
 
