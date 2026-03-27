@@ -70,7 +70,7 @@ COLUMN_DEFS = [
         "width": 90,
         "pinned": "left",
         "type": "numericColumn",
-        "cellStyle": {"color": "#228be6", "cursor": "pointer", "fontWeight": 500},
+        "cellRenderer": "DOLink",
     },
     {"field": "project", "headerName": "Project", "width": 130},
     {"field": "work_item_type", "headerName": "Type", "width": 120},

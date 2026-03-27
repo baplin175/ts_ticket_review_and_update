@@ -3,9 +3,10 @@
 import os
 import subprocess
 import sys
+import threading
 
 import dash_mantine_components as dmc
-from dash import callback, dcc, html, Input, Output, State, no_update
+from dash import callback, ctx, dcc, html, Input, Output, State, no_update
 from dash_iconify import DashIconify
 import plotly.graph_objects as go
 
@@ -13,6 +14,44 @@ from .. import data
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _INGEST_SCRIPT = os.path.join(_PROJECT_ROOT, "run_ingest.py")
+_WORK_ITEMS_SCRIPT = os.path.join(_PROJECT_ROOT, "run_import_work_items.py")
+
+# ── Background auto-refresh state ───────────────────────────────────
+
+_auto_refresh = {"running": False, "finished": False, "ticket_id": None}
+_auto_lock = threading.Lock()
+
+
+def _run_auto_refresh(ticket_id):
+    """Background thread: re-sync ticket from TS + refresh its DO work item."""
+    with _auto_lock:
+        _auto_refresh["running"] = True
+        _auto_refresh["finished"] = False
+        _auto_refresh["ticket_id"] = ticket_id
+
+    try:
+        # 1. Refresh ticket from TeamSupport
+        subprocess.run(
+            [sys.executable, _INGEST_SCRIPT, "sync", "--ticket-id", str(ticket_id), "--verbose", "--enrich-new"],
+            cwd=_PROJECT_ROOT, env=os.environ.copy(),
+            timeout=180, capture_output=True, text=True,
+        )
+    except Exception:
+        pass
+
+    try:
+        # 2. Refresh work items from Azure DevOps (quick — just upserts)
+        subprocess.run(
+            [sys.executable, _WORK_ITEMS_SCRIPT],
+            cwd=_PROJECT_ROOT, env=os.environ.copy(),
+            timeout=60, capture_output=True, text=True,
+        )
+    except Exception:
+        pass
+
+    with _auto_lock:
+        _auto_refresh["running"] = False
+        _auto_refresh["finished"] = True
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -329,31 +368,163 @@ def _build_detail(ticket_id, back_href="/tickets"):
                 ], withBorder=True, p="sm", radius="sm")
             )
 
+    # Complexity analysis detail
+    cx = data.get_ticket_complexity_detail(ticket_id)
+    if cx:
+        if cx.get("complexity_summary"):
+            summary_items.append(
+                dmc.Paper([
+                    dmc.Text("Complexity Summary", size="xs", fw=700, c="dimmed", tt="uppercase"),
+                    dmc.Text(cx["complexity_summary"], size="sm", mt=4),
+                ], withBorder=True, p="sm", radius="sm")
+            )
+        if cx.get("evidence"):
+            evidence = cx["evidence"] if isinstance(cx["evidence"], list) else [cx["evidence"]]
+            summary_items.append(
+                dmc.Paper([
+                    dmc.Text("Evidence", size="xs", fw=700, c="dimmed", tt="uppercase"),
+                    dmc.List(
+                        [dmc.ListItem(dmc.Text(e, size="sm")) for e in evidence],
+                        size="sm", mt=4,
+                    ),
+                ], withBorder=True, p="sm", radius="sm")
+            )
+        if cx.get("noise_factors"):
+            noise = cx["noise_factors"] if isinstance(cx["noise_factors"], list) else [cx["noise_factors"]]
+            summary_items.append(
+                dmc.Paper([
+                    dmc.Text("Noise Factors", size="xs", fw=700, c="dimmed", tt="uppercase"),
+                    dmc.List(
+                        [dmc.ListItem(dmc.Text(n, size="sm")) for n in noise],
+                        size="sm", mt=4,
+                    ),
+                ], withBorder=True, p="sm", radius="sm")
+            )
+        if cx.get("duration_vs_complexity_note"):
+            summary_items.append(
+                dmc.Paper([
+                    dmc.Text("Duration vs Complexity", size="xs", fw=700, c="dimmed", tt="uppercase"),
+                    dmc.Text(cx["duration_vs_complexity_note"], size="sm", mt=4),
+                ], withBorder=True, p="sm", radius="sm")
+            )
+
+    # DO work item tab (only when ticket has a DO #)
+    do_number = ticket.get("do_number")
+    do_tab = None
+    do_panel = None
+    if do_number:
+        wi = data.get_work_item_detail(do_number)
+        do_comments = data.get_do_comments(do_number)
+
+        # Work item metadata
+        do_url = f"https://dev.azure.com/inHanceUtilities/Impresa/_workitems/edit/{do_number}/"
+        do_link = dmc.Stack([
+            dmc.Text("DO #", size="xs", c="dimmed", tt="uppercase", fw=700),
+            dmc.Anchor(str(do_number), href=do_url, target="_blank", size="sm"),
+        ], gap=2)
+        wi_meta_items = []
+        if wi:
+            wi_meta_items = [
+                do_link,
+                _meta_item("State", wi.get("state", "—")),
+                _meta_item("Type", wi.get("work_item_type", "—")),
+                _meta_item("Assigned To", wi.get("assigned_to", "—")),
+                _meta_item("Iteration", wi.get("iteration_path", "—")),
+                _meta_item("Changed", _format_dt(wi.get("changed_date"))),
+            ]
+        else:
+            wi_meta_items = [
+                do_link,
+                _meta_item("State", ticket.get("do_status", "—")),
+            ]
+
+        wi_header = dmc.SimpleGrid(
+            cols={"base": 2, "sm": 3, "lg": 6},
+            children=wi_meta_items,
+        )
+
+        # Title
+        wi_title = None
+        if wi and wi.get("title"):
+            wi_title = dmc.Text(wi["title"], size="sm", fw=500, mb="sm")
+
+        # Comments
+        if do_comments:
+            import re
+            comment_cards = []
+            for c in do_comments:
+                author = c.get("createdBy", {}).get("displayName", "Unknown")
+                created = c.get("createdDate", "")[:16].replace("T", " ")
+                text_html = c.get("text", "")
+                # Strip HTML tags for clean display
+                text_clean = re.sub(r"<[^>]+>", " ", text_html)
+                text_clean = re.sub(r"\s+", " ", text_clean).strip()
+                text_clean = text_clean.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"')
+
+                comment_cards.append(
+                    dmc.Paper(
+                        [
+                            dmc.Group(
+                                [
+                                    dmc.Text(author, size="sm", fw=600),
+                                    dmc.Text(created, size="xs", c="dimmed"),
+                                ],
+                                gap="xs",
+                                mb=4,
+                            ),
+                            dmc.Text(text_clean, size="sm", style={"lineHeight": 1.5}),
+                        ],
+                        withBorder=True, p="sm", radius="sm",
+                        style={"borderLeft": "3px solid #7950f2"},
+                    )
+                )
+            comments_section = dmc.Stack(comment_cards, gap="xs")
+        else:
+            comments_section = dmc.Text("No comments on this work item.", c="dimmed", ta="center", py="md")
+
+        do_content = dmc.Stack(
+            [wi_header, wi_title, dmc.Divider(my="sm"), comments_section],
+            gap="sm",
+        )
+
+        do_tab = dmc.TabsTab(
+            f"DO #{do_number}", value="devops",
+            leftSection=DashIconify(icon="tabler:brand-azure", width=16),
+        )
+        do_panel = dmc.TabsPanel(do_content, value="devops", pt="md")
+
     # Tabs
+    tab_list = [
+        dmc.TabsTab("Thread", value="thread",
+                    leftSection=DashIconify(icon="tabler:messages", width=16)),
+        dmc.TabsTab("Scores", value="scores",
+                    leftSection=DashIconify(icon="tabler:chart-bar", width=16)),
+        dmc.TabsTab("Wait Profile", value="wait",
+                    leftSection=DashIconify(icon="tabler:clock", width=16)),
+        dmc.TabsTab("Summary", value="summary",
+                    leftSection=DashIconify(icon="tabler:file-text", width=16)),
+    ]
+    if do_tab:
+        tab_list.append(do_tab)
+
+    panels = [
+        dmc.TabsPanel(thread_content, value="thread", pt="md"),
+        dmc.TabsPanel(
+            dmc.Stack([scores_content, scores_extra], gap="sm"),
+            value="scores", pt="md",
+        ),
+        dmc.TabsPanel(_wait_chart(wait), value="wait", pt="md"),
+        dmc.TabsPanel(
+            dmc.Stack(summary_items, gap="sm") if summary_items
+            else dmc.Text("No issue summary available.", c="dimmed", ta="center", py="xl"),
+            value="summary", pt="md",
+        ),
+    ]
+    if do_panel:
+        panels.append(do_panel)
+
     tabs = dmc.Tabs(
-        [
-            dmc.TabsList([
-                dmc.TabsTab("Thread", value="thread",
-                            leftSection=DashIconify(icon="tabler:messages", width=16)),
-                dmc.TabsTab("Scores", value="scores",
-                            leftSection=DashIconify(icon="tabler:chart-bar", width=16)),
-                dmc.TabsTab("Wait Profile", value="wait",
-                            leftSection=DashIconify(icon="tabler:clock", width=16)),
-                dmc.TabsTab("Summary", value="summary",
-                            leftSection=DashIconify(icon="tabler:file-text", width=16)),
-            ]),
-            dmc.TabsPanel(thread_content, value="thread", pt="md"),
-            dmc.TabsPanel(
-                dmc.Stack([scores_content, scores_extra], gap="sm"),
-                value="scores", pt="md",
-            ),
-            dmc.TabsPanel(_wait_chart(wait), value="wait", pt="md"),
-            dmc.TabsPanel(
-                dmc.Stack(summary_items, gap="sm") if summary_items
-                else dmc.Text("No issue summary available.", c="dimmed", ta="center", py="xl"),
-                value="summary", pt="md",
-            ),
-        ],
+        [dmc.TabsList(tab_list)] + panels,
         value="thread",
     )
 
@@ -362,14 +533,23 @@ def _build_detail(ticket_id, back_href="/tickets"):
 
 def ticket_detail_layout(ticket_id, back_href="/tickets"):
     """Shell layout: stores ticket_id and wraps _build_detail in a refreshable container."""
+    # Kick off auto-refresh immediately
+    with _auto_lock:
+        already_running = _auto_refresh["running"]
+    if not already_running:
+        threading.Thread(target=_run_auto_refresh, args=(ticket_id,), daemon=True).start()
+
     return html.Div([
         dcc.Store(id="ticket-detail-id", data=ticket_id),
         dcc.Store(id="ticket-detail-back-href", data=back_href),
-        dcc.Loading(
-            id="ticket-detail-loading",
-            type="dot",
-            children=html.Div(id="ticket-detail-content", children=_build_detail(ticket_id, back_href=back_href)),
-        ),
+        dcc.Interval(id="auto-refresh-poll", interval=2000, disabled=False),
+        html.Div(id="auto-refresh-indicator", children=dmc.Group([
+            dmc.Loader(size="xs", type="dots"),
+            dmc.Text("Syncing latest data…", size="xs", c="dimmed"),
+        ], gap=4), style={"position": "fixed", "bottom": 16, "left": 16, "zIndex": 999,
+                          "background": "white", "padding": "6px 12px", "borderRadius": 8,
+                          "boxShadow": "0 1px 4px rgba(0,0,0,0.15)"}),
+        html.Div(id="ticket-detail-content", children=_build_detail(ticket_id, back_href=back_href)),
     ])
 
 
@@ -385,17 +565,41 @@ def register_callbacks(app):
         if not n_clicks or not ticket_id:
             return no_update
 
-        # Re-sync this single ticket from TeamSupport
-        try:
-            subprocess.run(
-                [sys.executable, _INGEST_SCRIPT, "sync", "--ticket-id", str(ticket_id), "--verbose"],
-                cwd=_PROJECT_ROOT,
-                env=os.environ.copy(),
-                timeout=120,
-                capture_output=True,
-                text=True,
-            )
-        except Exception:
-            pass  # still rebuild from whatever DB state we have
+        # Manual refresh: re-sync this single ticket from TeamSupport
+        with _auto_lock:
+            already_running = _auto_refresh["running"]
+        if not already_running:
+            threading.Thread(target=_run_auto_refresh, args=(ticket_id,), daemon=True).start()
+        return no_update
 
-        return _build_detail(ticket_id, back_href=back_href or "/tickets")
+    @app.callback(
+        Output("auto-refresh-indicator", "children"),
+        Output("auto-refresh-indicator", "style"),
+        Output("auto-refresh-poll", "disabled"),
+        Output("ticket-detail-content", "children", allow_duplicate=True),
+        Input("auto-refresh-poll", "n_intervals"),
+        State("ticket-detail-id", "data"),
+        State("ticket-detail-back-href", "data"),
+        prevent_initial_call=True,
+    )
+    def poll_auto_refresh(_n, ticket_id, back_href):
+        with _auto_lock:
+            running = _auto_refresh["running"]
+            finished = _auto_refresh["finished"]
+
+        if running:
+            indicator = dmc.Group([
+                dmc.Loader(size="xs", type="dots"),
+                dmc.Text("Syncing latest data…", size="xs", c="dimmed"),
+            ], gap=4)
+            style = {"position": "fixed", "bottom": 16, "left": 16, "zIndex": 999,
+                     "background": "white", "padding": "6px 12px", "borderRadius": 8,
+                     "boxShadow": "0 1px 4px rgba(0,0,0,0.15)"}
+            return indicator, style, False, no_update
+
+        if finished:
+            with _auto_lock:
+                _auto_refresh["finished"] = False
+            return "", {"display": "none"}, True, _build_detail(ticket_id, back_href=back_href or "/tickets")
+
+        return "", {"display": "none"}, True, no_update

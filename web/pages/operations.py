@@ -59,7 +59,8 @@ SWOOPER_DETAIL_COLS = [
     {"field": "own_ratio", "headerName": "Own %", "width": 80, "type": "numericColumn",
      "valueFormatter": {"function": "params.value != null ? (Number(params.value) * 100).toFixed(0) + '%' : '—'"},
      "cellStyle": {"function": "params.value != null && params.value < 0.25 ? {'color': '#e03131', 'fontWeight': 'bold'} : {}"}},
-    {"field": "do_number", "headerName": "DO #", "width": 90},
+    {"field": "do_number", "headerName": "DO #", "width": 90,
+     "cellRenderer": "DOLink"},
     {"field": "do_status", "headerName": "DO Status", "width": 110},
 ]
 

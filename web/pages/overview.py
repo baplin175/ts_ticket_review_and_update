@@ -133,7 +133,8 @@ DRILLDOWN_COL_DEFS = [
     {"field": "date_modified", "headerName": "Last Modified", "width": 130,
      "valueFormatter": {"function": "params.value ? new Date(params.value).toLocaleDateString() : ''"},
      "sort": "desc"},
-    {"field": "do_number", "headerName": "DO #", "width": 90},
+    {"field": "do_number", "headerName": "DO #", "width": 90,
+     "cellRenderer": "DOLink"},
     {"field": "do_status", "headerName": "DO Status", "width": 110},
 ]
 

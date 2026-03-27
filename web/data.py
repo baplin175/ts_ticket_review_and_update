@@ -88,6 +88,31 @@ def get_work_item_kpis():
     """)
 
 
+def get_do_comments(work_item_id):
+    """Fetch comments for a DO work item from the Azure DevOps API (live call)."""
+    try:
+        from azdevops_client import get_comments
+        raw = get_comments(int(work_item_id), top=50)
+        if not isinstance(raw, list):
+            raw = raw.get("value", []) if isinstance(raw, dict) else []
+        return raw
+    except Exception:
+        return []
+
+
+def get_work_item_detail(work_item_id):
+    """Return a single work item row from the DB."""
+    return query_one("""
+        SELECT work_item_id, project, work_item_type, title, state, reason,
+               assigned_to, area_path, iteration_path, priority,
+               board_column, tags, description,
+               created_date, changed_date, state_change_date,
+               completed_work, remaining_work, original_estimate
+        FROM work_items
+        WHERE work_item_id = %s
+    """, (int(work_item_id),))
+
+
 EXCLUDED_HEALTH_GROUPS = ("Marketing", "Sales (S)")
 EXCLUDED_CUSTOMERS = ("InHance Internal",)
 
@@ -300,6 +325,16 @@ def get_ticket_list():
 def get_ticket_detail(ticket_id):
     return query_one("""
         SELECT * FROM vw_ticket_analytics_core WHERE ticket_id = %s
+    """, (ticket_id,))
+
+
+def get_ticket_complexity_detail(ticket_id):
+    """Return the full complexity analysis for a ticket (summary, evidence, noise, duration note)."""
+    return query_one("""
+        SELECT complexity_summary, evidence, noise_factors,
+               duration_vs_complexity_note, primary_complexity_drivers
+        FROM vw_latest_ticket_complexity
+        WHERE ticket_id = %s
     """, (ticket_id,))
 
 

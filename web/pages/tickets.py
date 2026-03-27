@@ -147,7 +147,8 @@ COLUMN_DEFS = [
         },
         "sort": "desc",
     },
-    {"field": "do_number", "headerName": "DO #", "width": 90},
+    {"field": "do_number", "headerName": "DO #", "width": 90,
+     "cellRenderer": "DOLink"},
     {"field": "do_status", "headerName": "DO Status", "width": 110},
 ]
 
