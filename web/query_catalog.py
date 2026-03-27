@@ -221,6 +221,98 @@ QUERY_CATALOG: dict[str, QueryDefinition] = {
         result_kind="row",
         allowed_widget_types=("stat_row", "grid"),
     ),
+    "ops_overview_kpis": QueryDefinition(
+        key="ops_overview_kpis",
+        label="CS Overview KPIs",
+        description="Current-month close time, trailing six-month close time, and backlog snapshot KPIs.",
+        handler=data.get_ops_overview_kpis,
+        result_kind="row",
+        allowed_widget_types=("stat_row",),
+        params=(
+            QueryParam("months", "int", required=False, default=6, minimum=1, maximum=24),
+            QueryParam("group_name", "str", required=False, default="Customer Support (CS)"),
+        ),
+    ),
+    "ops_most_improved_customers": QueryDefinition(
+        key="ops_most_improved_customers",
+        label="Most Improved Customers",
+        description="Customers with the largest open-backlog reduction over the configured lookback.",
+        handler=data.get_ops_most_improved_customers,
+        result_kind="rows",
+        allowed_widget_types=("grid", "chart"),
+        params=(
+            QueryParam("months", "int", required=False, default=3, minimum=1, maximum=24),
+            QueryParam("top_n", "int", required=False, default=5, minimum=1, maximum=50),
+            QueryParam("group_name", "str", required=False, default="Customer Support (CS)"),
+        ),
+    ),
+    "ops_analyst_scorecard": QueryDefinition(
+        key="ops_analyst_scorecard",
+        label="Analyst Scorecard",
+        description="Per-analyst closure, severity, and action-mix metrics for CS Overview.",
+        handler=data.get_ops_analyst_scorecard,
+        result_kind="rows",
+        allowed_widget_types=("grid",),
+        params=(
+            QueryParam("months", "int", required=False, default=6, minimum=1, maximum=24),
+        ),
+    ),
+    "analyst_action_profile": QueryDefinition(
+        key="analyst_action_profile",
+        label="Analyst Action Profile",
+        description="Technical and scheduling action percentages per analyst.",
+        handler=data.get_analyst_action_profile,
+        result_kind="rows",
+        allowed_widget_types=("chart", "grid"),
+        params=(
+            QueryParam("months", "int", required=False, default=6, minimum=1, maximum=24),
+        ),
+    ),
+    "analyst_severity_profile": QueryDefinition(
+        key="analyst_severity_profile",
+        label="Analyst Severity Profile",
+        description="High-severity closure share per analyst.",
+        handler=data.get_analyst_severity_profile,
+        result_kind="rows",
+        allowed_widget_types=("chart", "grid"),
+        params=(
+            QueryParam("months", "int", required=False, default=6, minimum=1, maximum=24),
+        ),
+    ),
+    "analyst_reassignment_profile": QueryDefinition(
+        key="analyst_reassignment_profile",
+        label="Analyst Reassignment Profile",
+        description="Average handoffs per ticket by analyst and severity.",
+        handler=data.get_analyst_reassignment_profile,
+        result_kind="rows",
+        allowed_widget_types=("chart", "grid"),
+        params=(
+            QueryParam("months", "int", required=False, default=6, minimum=1, maximum=24),
+        ),
+    ),
+    "ops_analyst_monthly_closures": QueryDefinition(
+        key="ops_analyst_monthly_closures",
+        label="Analyst Monthly Closures",
+        description="Monthly closure counts by analyst.",
+        handler=data.get_ops_analyst_monthly_closures,
+        result_kind="rows",
+        allowed_widget_types=("chart", "grid"),
+        params=(
+            QueryParam("months", "int", required=False, default=12, minimum=1, maximum=36),
+            QueryParam("top_n", "int", required=False, default=10, minimum=1, maximum=25),
+        ),
+    ),
+    "monthly_created_vs_closed": QueryDefinition(
+        key="monthly_created_vs_closed",
+        label="Monthly Created vs Closed",
+        description="Monthly created and closed ticket counts.",
+        handler=data.get_monthly_created_vs_closed,
+        result_kind="rows",
+        allowed_widget_types=("chart", "grid"),
+        params=(
+            QueryParam("months", "int", required=False, default=12, minimum=1, maximum=36),
+        ),
+    ),
 }
 
 

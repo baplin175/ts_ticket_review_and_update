@@ -69,7 +69,7 @@ pages:
     module: web.pages.operations
     layout_func: operations_layout
     children:
-      - label: Overview
+      - label: CS Overview
         route: /operations
       - label: Deep Dive
         route: /deep-dive

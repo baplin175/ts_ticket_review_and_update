@@ -1063,6 +1063,39 @@ def get_monthly_tickets_created(date_from=None, date_to=None, months=12):
     """, (str(months), *cust_params, *support_analysts))
 
 
+def get_monthly_created_vs_closed(months=12):
+    """Monthly created vs closed ticket counts for the operations overview."""
+    created_rows = get_monthly_tickets_created(months=months)
+    closure_rows = get_analyst_monthly_closures(months=months)
+
+    created_by_month = {row["month"]: int(row.get("created_count") or 0) for row in created_rows}
+    closed_by_month: dict[str, int] = {}
+    for row in closure_rows:
+        month = row["month"]
+        closed_by_month[month] = closed_by_month.get(month, 0) + int(row.get("closed_count") or 0)
+
+    months_sorted = sorted(set(created_by_month) | set(closed_by_month))
+    result = []
+    for month in months_sorted:
+        result.append({"month": month, "series": "Created", "ticket_count": created_by_month.get(month, 0)})
+        result.append({"month": month, "series": "Closed", "ticket_count": closed_by_month.get(month, 0)})
+    return result
+
+
+def get_ops_analyst_monthly_closures(months=12, top_n=10):
+    """Monthly closure counts for the top analysts by total closures."""
+    rows = get_analyst_monthly_closures(months=months)
+    totals: dict[str, int] = {}
+    for row in rows:
+        assignee = row["assignee"]
+        totals[assignee] = totals.get(assignee, 0) + int(row.get("closed_count") or 0)
+    top_assignees = {
+        assignee
+        for assignee, _ in sorted(totals.items(), key=lambda item: (-item[1], item[0]))[:top_n]
+    }
+    return [row for row in rows if row.get("assignee") in top_assignees]
+
+
 def get_analyst_swooper_tickets(assignee, months=6):
     """Tickets where <assignee> closed but did < 25%% of InHance actions."""
     cust_sql, cust_params = _customer_exclusion_clause(column="v.customer")
@@ -1199,6 +1232,26 @@ def get_analyst_reassignment_profile(months=6):
         GROUP BY assignee, severity
         ORDER BY assignee, severity
     """, (str(months), *cust_params, *support_analysts))
+
+
+def get_ops_analyst_scorecard(months=6):
+    """Operations overview scorecard with merged action/severity metrics."""
+    scorecard = get_analyst_scorecard(months)
+    action_profile = get_analyst_action_profile(months)
+    severity_profile = get_analyst_severity_profile(months)
+
+    action_map = {row["assignee"]: row for row in (action_profile or [])}
+    severity_map = {row["assignee"]: row for row in (severity_profile or [])}
+
+    for row in scorecard:
+        assignee = row["assignee"]
+        action_row = action_map.get(assignee, {})
+        severity_row = severity_map.get(assignee, {})
+        row["pct_technical"] = action_row.get("pct_technical")
+        row["pct_scheduling"] = action_row.get("pct_scheduling")
+        row["pct_high_severity"] = severity_row.get("pct_high_severity")
+
+    return scorecard
 
 
 # ── Drill-down ───────────────────────────────────────────────────────
@@ -2489,6 +2542,33 @@ def get_ops_backlog_snapshot(group_name="Customer Support (CS)"):
     return {
         "jan1": (jan1 or {}).get("backlog", 0),
         "now": (now or {}).get("backlog", 0),
+    }
+
+
+def get_ops_overview_kpis(months=6, group_name="Customer Support (CS)"):
+    """Single-row KPI payload for the CS Overview dashboard."""
+    avg_close_rows = get_ops_avg_days_to_close(months=months, group_name=group_name)
+    backlog_snapshot = get_ops_backlog_snapshot(group_name=group_name)
+
+    current_month_avg = avg_close_rows[-1]["avg_days_to_close"] if avg_close_rows else None
+    if avg_close_rows:
+        total_tickets = sum(int(row.get("tickets_closed") or 0) for row in avg_close_rows)
+        weighted_total = sum(
+            float(row.get("avg_days_to_close") or 0) * int(row.get("tickets_closed") or 0)
+            for row in avg_close_rows
+        )
+        overall_avg = round(weighted_total / total_tickets, 1) if total_tickets else None
+    else:
+        overall_avg = None
+
+    backlog_delta = int(backlog_snapshot["jan1"] or 0) - int(backlog_snapshot["now"] or 0)
+    return {
+        "current_month_avg_days_to_close": current_month_avg,
+        "six_month_avg_days_to_close": overall_avg,
+        "backlog_jan1": backlog_snapshot["jan1"],
+        "backlog_now": backlog_snapshot["now"],
+        "backlog_delta": abs(backlog_delta),
+        "backlog_delta_direction": "down" if backlog_delta >= 0 else "up",
     }
 
 

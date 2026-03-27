@@ -15,6 +15,11 @@ window.dash_clientside = window.dash_clientside || {};
 window.dash_clientside.clientside = window.dash_clientside.clientside || {};
 
 window.dash_clientside.clientside.openTeamsLink = function (n_clicks, url) {
-    if (n_clicks && url) { window.open(url, "_blank"); }
+    if (n_clicks && url) { window.location.href = url; }
+    return window.dash_clientside.no_update;
+};
+
+window.dash_clientside.clientside.openEmailLink = function (n_clicks, url) {
+    if (n_clicks && url) { window.location.href = url; }
     return window.dash_clientside.no_update;
 };

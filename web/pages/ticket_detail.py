@@ -7,7 +7,7 @@ import threading
 import urllib.parse
 
 import dash_mantine_components as dmc
-from dash import callback, ctx, dcc, html, Input, Output, State, no_update
+from dash import callback, ctx, dcc, html, Input, MATCH, Output, State, no_update
 from dash_iconify import DashIconify
 import plotly.graph_objects as go
 
@@ -21,6 +21,10 @@ _WORK_ITEMS_SCRIPT = os.path.join(_PROJECT_ROOT, "run_import_work_items.py")
 
 _auto_refresh = {"running": False, "finished": False, "ticket_id": None}
 _auto_lock = threading.Lock()
+
+# Per-instance chat state (keyed by ctx string, e.g. "page" or "modal")
+_chat_state: dict[str, dict] = {}
+_chat_lock = threading.Lock()
 
 
 def _run_auto_refresh(ticket_id):
@@ -96,6 +100,104 @@ def _rescore_and_rebuild(ticket_id: int, ticket_number: str) -> None:
         print(f"[exclusion] Health rollup rebuild error: {exc}", flush=True)
 
 
+# ── Chat helpers ──────────────────────────────────────────────────────
+
+def _build_ticket_context(ticket: dict, actions: list[dict]) -> str:
+    """Serialize ticket metadata + activity thread into Matcha's 'context' field."""
+    lines = [
+        "=== TICKET CONTEXT ===",
+        f"Ticket #: {ticket.get('ticket_number', '—')}",
+        f"Title: {ticket.get('ticket_name', '—')}",
+        f"Status: {ticket.get('status', '—')}",
+        f"Severity: {ticket.get('severity', '—')}",
+        f"Customer: {ticket.get('customer', '—')}",
+        f"Assignee: {ticket.get('assignee', '—')}",
+        f"Product: {ticket.get('product_name', '—')}",
+        f"Age (days): {round(ticket['days_opened']) if ticket.get('days_opened') else '—'}",
+        f"Priority score: {ticket.get('priority', '—')}",
+        f"Complexity: {ticket.get('overall_complexity', '—')}",
+        f"Frustrated: {ticket.get('frustrated', '—')}",
+    ]
+    for key, label in [("issue_summary", "Issue"), ("cause_summary", "Cause"),
+                       ("resolution_summary", "Resolution")]:
+        val = ticket.get(key)
+        if val:
+            lines.append(f"{label}: {val}")
+
+    if actions:
+        lines.append("\n=== TICKET THREAD (most recent messages) ===")
+        for a in actions[-25:]:
+            party = "inHANCE" if a.get("party") == "inh" else "Customer" if a.get("party") == "cust" else "System"
+            creator = a.get("creator_name") or "Unknown"
+            created = str(a.get("created_at") or "")[:16]
+            desc = a.get("cleaned_description") or a.get("description") or "(empty)"
+            if len(desc) > 600:
+                desc = desc[:600] + "…"
+            lines.append(f"[{created}] {party} ({creator}): {desc}")
+
+    return "\n".join(lines)
+
+
+def _render_chat_messages(history: list[dict], pending: bool = False) -> list:
+    """Convert a list of {role, content} dicts into Dash Paper components, newest first."""
+    cards = []
+    if pending:
+        cards.append(
+            dmc.Paper(
+                dmc.Group([
+                    dmc.Badge("Matcha", color="violet", variant="filled", size="sm"),
+                    dmc.Loader(size="xs", type="dots"),
+                    dmc.Text("Thinking…", size="sm", c="dimmed"),
+                ], gap="xs"),
+                withBorder=True, p="sm", radius="sm",
+                style={"borderLeft": "3px solid #7950f2"},
+            )
+        )
+    for msg in reversed(history):
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        is_user = role == "user"
+        cards.append(
+            dmc.Paper(
+                [
+                    dmc.Group(
+                        [dmc.Badge("You" if is_user else "Matcha",
+                                   color="blue" if is_user else "violet",
+                                   variant="filled", size="sm")],
+                        mb=4,
+                    ),
+                    dmc.Text(
+                        str(content),
+                        size="sm",
+                        style={"whiteSpace": "pre-wrap", "lineHeight": 1.6},
+                    ),
+                ],
+                withBorder=True,
+                p="sm",
+                radius="sm",
+                style={"borderLeft": f"3px solid {'#1c7ed6' if is_user else '#7950f2'}"},
+            )
+        )
+    return cards
+
+
+def _run_chat(instance_ctx: str, context: str, messages: list[dict], chat_history: list[dict]) -> None:
+    """Background thread: call Matcha chat API and store the result."""
+    with _chat_lock:
+        _chat_state[instance_ctx] = {"running": True, "result": None, "error": None}
+    try:
+        from matcha_client import call_matcha_chat
+        reply = call_matcha_chat(context=context, messages=messages, chat_history=chat_history)
+        with _chat_lock:
+            _chat_state[instance_ctx]["result"] = reply
+    except Exception as exc:
+        with _chat_lock:
+            _chat_state[instance_ctx]["error"] = str(exc)
+    finally:
+        with _chat_lock:
+            _chat_state[instance_ctx]["running"] = False
+
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 def _badge(label, color="gray", variant="light"):
@@ -157,6 +259,7 @@ def _build_teams_message(ticket):
     do_status = ticket.get("do_status")
 
     lines = [
+        "─── Ticket Reference ───",
         f"📋 Ticket #{tid} — {name}",
         f"Status: {status} | Priority: {severity}",
         f"Customer: {customer}",
@@ -175,7 +278,52 @@ def _build_teams_message(ticket):
         lines.append("")
         lines.append(cx["complexity_summary"])
 
-    # Links
+    # Links — bare URLs so Teams auto-linkifies them in the compose box
+    lines.append("")
+    if tid:
+        lines.append(f"TeamSupport: https://app.na2.teamsupport.com/?TicketNumber={tid}")
+    if do_number:
+        lines.append(f"DevOps: https://dev.azure.com/inHanceUtilities/Impresa/_workitems/edit/{do_number}/")
+
+    return "\n".join(lines)
+
+
+def _build_email_body(ticket):
+    """Build a pre-filled email body from ticket metadata (plain text; URLs auto-link in most clients)."""
+    tid = ticket.get("ticket_number", "")
+    name = ticket.get("ticket_name", "")
+    status = ticket.get("status", "—")
+    severity = ticket.get("severity", "—")
+    customer = ticket.get("customer", "—")
+    assignee = ticket.get("assignee", "—")
+    product = ticket.get("product_name", "—")
+    age = round(ticket["days_opened"]) if ticket.get("days_opened") else "—"
+    do_number = ticket.get("do_number")
+    do_status = ticket.get("do_status")
+
+    lines = [
+        "",
+        "",
+        f"Ticket #{tid} — {name}",
+        "",
+        f"Status:   {status}",
+        f"Priority: {severity}",
+        f"Customer: {customer}",
+        f"Assignee: {assignee}",
+        f"Age:      {age} days",
+        f"Product:  {product}",
+    ]
+    if do_number:
+        do_part = f"DO #{do_number}"
+        if do_status:
+            do_part += f" ({do_status})"
+        lines.append(f"DevOps:   {do_part}")
+
+    cx = data.get_ticket_complexity_detail(ticket.get("ticket_id"))
+    if cx and cx.get("complexity_summary"):
+        lines.append("")
+        lines.append(cx["complexity_summary"])
+
     lines.append("")
     if tid:
         lines.append(f"TeamSupport: https://app.na2.teamsupport.com/?TicketNumber={tid}")
@@ -309,19 +457,21 @@ def _wait_chart(profile):
 
 # ── Layout ───────────────────────────────────────────────────────────
 
-def _build_detail(ticket_id, back_href="/tickets", *, inline=False):
+def _build_detail(ticket_id, back_href=None, back_label="Tickets", *, ctx="page"):
     """Build the full ticket detail content (header + tabs) from DB data.
 
-    When *inline* is True (e.g. embedded inside a modal), the nav row
-    (back link, Share in Teams, Refresh) is omitted so the caller can
-    provide its own navigation affordance.
+    *ctx* is used as the index in all pattern-matched component IDs so the
+    same callbacks fire correctly whether the detail is on the full page
+    (ctx="page") or embedded inside a modal (ctx="modal").
+    *back_href* controls the back-link in the nav row; pass None to hide it.
+    *back_label* is the visible text for the back link (default: "Tickets").
     """
     ticket = data.get_ticket_detail(ticket_id)
     if not ticket:
         return dmc.Stack([
             dmc.Title("Ticket Not Found", order=3),
             dmc.Text(f"No ticket with ID {ticket_id} exists in the database.", c="dimmed"),
-        ] + ([] if inline else [dmc.Anchor("Back to Tickets", href=back_href)]), gap="md")
+        ] + ([dmc.Anchor(f"Back to {back_label}", href=back_href)] if back_href else []), gap="md")
 
     actions = data.get_ticket_actions(ticket_id)
     wait = data.get_ticket_wait_profile(ticket_id)
@@ -333,50 +483,61 @@ def _build_detail(ticket_id, back_href="/tickets", *, inline=False):
         if ticket_number else None
     )
 
-    # Teams deep link — msteams: protocol goes straight to desktop app
+    # Teams deep link — https URL redirects to app and passes message reliably
     teams_message = _build_teams_message(ticket)
     encoded_msg = urllib.parse.quote(teams_message, safe="")
-    teams_url = f"msteams:/l/chat/0/0?users=&message={encoded_msg}"
+    teams_url = f"https://teams.microsoft.com/l/chat/0/0?users=&message={encoded_msg}"
+
+    # Email deep link — mailto: protocol opens default email client
+    email_subject = urllib.parse.quote(f"Ticket #{ticket.get('ticket_number', '')} — {ticket.get('ticket_name', '')}", safe="")
+    email_body = urllib.parse.quote(_build_email_body(ticket), safe="")
+    email_url = f"mailto:?subject={email_subject}&body={email_body}"
 
     # Header
-    nav_row = (
-        None if inline else
-        dmc.Group(
-            [
-                dmc.Anchor(
-                    dmc.Group([DashIconify(icon="tabler:arrow-left", width=16), "Tickets"], gap=4),
-                    href=back_href, size="sm",
-                ),
-                dmc.Group(
-                    [
-                        dmc.Button(
-                            "Share in Teams",
-                            id="ticket-teams-btn",
-                            leftSection=DashIconify(icon="tabler:brand-teams", width=16),
-                            variant="light",
-                            color="violet",
-                            size="compact-sm",
-                        ),
-                        dmc.Button(
-                            "Refresh",
-                            id="ticket-refresh-btn",
-                            leftSection=DashIconify(icon="tabler:refresh", width=16),
-                            variant="light",
-                            size="compact-sm",
-                        ),
-                    ],
-                    ml="auto",
-                    gap="xs",
-                ),
-            ],
-            justify="space-between",
-            mb="sm",
-        )
+    nav_row = dmc.Group(
+        [c for c in [
+            dmc.Anchor(
+                dmc.Group([DashIconify(icon="tabler:arrow-left", width=16), back_label], gap=4),
+                href=back_href, size="sm",
+            ) if back_href else None,
+            dmc.Group(
+                [
+                    dmc.Button(
+                        "Share in Teams",
+                        id={"type": "ticket-teams-btn", "index": ctx},
+                        leftSection=DashIconify(icon="tabler:brand-teams", width=16),
+                        variant="light",
+                        color="violet",
+                        size="compact-sm",
+                    ),
+                    dmc.Button(
+                        "Email",
+                        id={"type": "ticket-email-btn", "index": ctx},
+                        leftSection=DashIconify(icon="tabler:mail", width=16),
+                        variant="light",
+                        color="blue",
+                        size="compact-sm",
+                    ),
+                    dmc.Button(
+                        "Refresh",
+                        id={"type": "ticket-refresh-btn", "index": ctx},
+                        leftSection=DashIconify(icon="tabler:refresh", width=16),
+                        variant="light",
+                        size="compact-sm",
+                    ),
+                ],
+                ml="auto",
+                gap="xs",
+            ),
+        ] if c is not None],
+        justify="space-between",
+        mb="sm",
     )
 
     header = dmc.Paper(
-        [c for c in [
-            None if inline else dcc.Store(id="teams-share-url", data=teams_url),
+        [
+            dcc.Store(id={"type": "teams-share-url", "index": ctx}, data=teams_url),
+            dcc.Store(id={"type": "email-share-url", "index": ctx}, data=email_url),
             nav_row,
             dmc.Group(
                 [
@@ -420,7 +581,7 @@ def _build_detail(ticket_id, back_href="/tickets", *, inline=False):
                     _meta_item("DO Status", ticket.get("do_status", "—")),
                 ],
             ),
-        ] if c is not None],
+        ],
         withBorder=True, p="md", radius="md", shadow="sm",
     )
 
@@ -436,19 +597,19 @@ def _build_detail(ticket_id, back_href="/tickets", *, inline=False):
             dmc.Stack(
                 [
                     dmc.Checkbox(
-                        id="excl-priority", label="Exclude from Priority scoring",
+                        id={"type": "excl-priority", "index": ctx}, label="Exclude from Priority scoring",
                         checked=bool(excl.get("exclude_priority")),
                     ),
                     dmc.Checkbox(
-                        id="excl-sentiment", label="Exclude from Sentiment / Frustration scoring",
+                        id={"type": "excl-sentiment", "index": ctx}, label="Exclude from Sentiment / Frustration scoring",
                         checked=bool(excl.get("exclude_sentiment")),
                     ),
                     dmc.Checkbox(
-                        id="excl-complexity", label="Exclude from Complexity scoring",
+                        id={"type": "excl-complexity", "index": ctx}, label="Exclude from Complexity scoring",
                         checked=bool(excl.get("exclude_complexity")),
                     ),
                     dmc.TextInput(
-                        id="excl-reason",
+                        id={"type": "excl-reason", "index": ctx},
                         label="Reason (optional)",
                         placeholder="e.g. Training bundle — not a real support issue",
                         value=excl.get("reason") or "",
@@ -458,13 +619,13 @@ def _build_detail(ticket_id, back_href="/tickets", *, inline=False):
                         [
                             dmc.Button(
                                 "Save Exclusions",
-                                id="excl-save-btn",
+                                id={"type": "excl-save-btn", "index": ctx},
                                 size="compact-sm",
                                 variant="light",
                                 color="orange",
                                 leftSection=DashIconify(icon="tabler:device-floppy", width=14),
                             ),
-                            html.Div(id="excl-save-status"),
+                            html.Div(id={"type": "excl-save-status", "index": ctx}),
                         ],
                         gap="sm",
                         mt="xs",
@@ -708,6 +869,66 @@ def _build_detail(ticket_id, back_href="/tickets", *, inline=False):
         dmc.TabsTab("Activity", value="activity",
                     leftSection=DashIconify(icon="tabler:activity", width=16)),
     )
+    tab_list.append(
+        dmc.TabsTab("Ask Matcha", value="chat",
+                    leftSection=DashIconify(icon="tabler:robot", width=16)),
+    )
+
+    # Ask Matcha chat panel
+    chat_panel_content = html.Div(
+        [
+            dcc.Store(id={"type": "chat-history", "index": ctx}, data=[]),
+            dcc.Interval(id={"type": "chat-poll", "index": ctx}, interval=2000, disabled=True),
+            # Left column: input + buttons
+            html.Div(
+                [
+                    dmc.TextInput(
+                        id={"type": "chat-input", "index": ctx},
+                        placeholder="Ask anything about this ticket…",
+                        debounce=False,
+                        n_submit=0,
+                        style={"width": "100%"},
+                        mb="xs",
+                    ),
+                    dmc.Stack(
+                        [
+                            dmc.Button(
+                                "Send",
+                                id={"type": "chat-send-btn", "index": ctx},
+                                leftSection=DashIconify(icon="tabler:send", width=14),
+                                size="sm",
+                                fullWidth=True,
+                            ),
+                            dmc.Button(
+                                "Clear",
+                                id={"type": "chat-clear-btn", "index": ctx},
+                                variant="subtle",
+                                color="gray",
+                                size="sm",
+                                fullWidth=True,
+                            ),
+                        ],
+                        gap="xs",
+                    ),
+                ],
+                style={"width": 220, "flexShrink": 0, "paddingRight": 16},
+            ),
+            # Right column: message history (newest at top)
+            html.Div(
+                id={"type": "chat-messages", "index": ctx},
+                style={
+                    "flex": 1,
+                    "minHeight": 200,
+                    "maxHeight": 520,
+                    "overflowY": "auto",
+                    "display": "flex",
+                    "flexDirection": "column",
+                    "gap": "8px",
+                },
+            ),
+        ],
+        style={"display": "flex", "flexDirection": "row", "alignItems": "flex-start", "gap": 0},
+    )
 
     panels = [
         dmc.TabsPanel(thread_content, value="thread", pt="md"),
@@ -725,6 +946,7 @@ def _build_detail(ticket_id, back_href="/tickets", *, inline=False):
     if do_panel:
         panels.append(do_panel)
     panels.append(dmc.TabsPanel(activity_content, value="activity", pt="md"))
+    panels.append(dmc.TabsPanel(chat_panel_content, value="chat", pt="md"))
 
     tabs = dmc.Tabs(
         [dmc.TabsList(tab_list)] + panels,
@@ -734,34 +956,51 @@ def _build_detail(ticket_id, back_href="/tickets", *, inline=False):
     return dmc.Stack([header, tabs], gap="md")
 
 
-def ticket_detail_layout(ticket_id, back_href="/tickets"):
-    """Shell layout: stores ticket_id and wraps _build_detail in a refreshable container."""
-    # Kick off auto-refresh immediately
+def build_ticket_shell(ticket_id, back_href=None, back_label="Tickets", *, ctx="modal"):
+    """Return the full shell (stores, interval, indicator + detail content) for *ticket_id*.
+
+    *ctx* is used as the index in all pattern-matched component IDs, so the same
+    callbacks work whether the ticket is on its own page (ctx="page") or embedded
+    inside a modal (ctx="modal").
+    """
     with _auto_lock:
         already_running = _auto_refresh["running"]
     if not already_running:
         threading.Thread(target=_run_auto_refresh, args=(ticket_id,), daemon=True).start()
 
     return html.Div([
-        dcc.Store(id="ticket-detail-id", data=ticket_id),
-        dcc.Store(id="ticket-detail-back-href", data=back_href),
-        dcc.Interval(id="auto-refresh-poll", interval=2000, disabled=False),
-        html.Div(id="auto-refresh-indicator", children=dmc.Group([
-            dmc.Loader(size="xs", type="dots"),
-            dmc.Text("Syncing latest data…", size="xs", c="dimmed"),
-        ], gap=4), style={"position": "fixed", "bottom": 16, "left": 16, "zIndex": 999,
-                          "background": "white", "padding": "6px 12px", "borderRadius": 8,
-                          "boxShadow": "0 1px 4px rgba(0,0,0,0.15)"}),
-        html.Div(id="ticket-detail-content", children=_build_detail(ticket_id, back_href=back_href)),
+        dcc.Store(id={"type": "ticket-detail-id", "index": ctx}, data=ticket_id),
+        dcc.Store(id={"type": "ticket-detail-back-href", "index": ctx}, data=back_href),
+        dcc.Store(id={"type": "ticket-detail-back-label", "index": ctx}, data=back_label),
+        dcc.Interval(id={"type": "auto-refresh-poll", "index": ctx}, interval=2000, disabled=False),
+        html.Div(
+            id={"type": "auto-refresh-indicator", "index": ctx},
+            children=dmc.Group([
+                dmc.Loader(size="xs", type="dots"),
+                dmc.Text("Syncing latest data…", size="xs", c="dimmed"),
+            ], gap=4),
+            style={"position": "fixed", "bottom": 16, "left": 16, "zIndex": 999,
+                   "background": "white", "padding": "6px 12px", "borderRadius": 8,
+                   "boxShadow": "0 1px 4px rgba(0,0,0,0.15)"},
+        ),
+        html.Div(
+            id={"type": "ticket-detail-content", "index": ctx},
+            children=_build_detail(ticket_id, back_href=back_href, back_label=back_label, ctx=ctx),
+        ),
     ])
+
+
+def ticket_detail_layout(ticket_id, back_href="/tickets"):
+    """Entry point for the /ticket/{id} page route."""
+    return build_ticket_shell(ticket_id, back_href=back_href, ctx="page")
 
 
 def register_callbacks(app):
     @app.callback(
-        Output("ticket-detail-content", "children"),
-        Input("ticket-refresh-btn", "n_clicks"),
-        State("ticket-detail-id", "data"),
-        State("ticket-detail-back-href", "data"),
+        Output({"type": "ticket-detail-content", "index": MATCH}, "children"),
+        Input({"type": "ticket-refresh-btn", "index": MATCH}, "n_clicks"),
+        State({"type": "ticket-detail-id", "index": MATCH}, "data"),
+        State({"type": "ticket-detail-back-href", "index": MATCH}, "data"),
         prevent_initial_call=True,
     )
     def refresh_ticket(n_clicks, ticket_id, back_href):
@@ -776,16 +1015,17 @@ def register_callbacks(app):
         return no_update
 
     @app.callback(
-        Output("auto-refresh-indicator", "children"),
-        Output("auto-refresh-indicator", "style"),
-        Output("auto-refresh-poll", "disabled"),
-        Output("ticket-detail-content", "children", allow_duplicate=True),
-        Input("auto-refresh-poll", "n_intervals"),
-        State("ticket-detail-id", "data"),
-        State("ticket-detail-back-href", "data"),
+        Output({"type": "auto-refresh-indicator", "index": MATCH}, "children"),
+        Output({"type": "auto-refresh-indicator", "index": MATCH}, "style"),
+        Output({"type": "auto-refresh-poll", "index": MATCH}, "disabled"),
+        Output({"type": "ticket-detail-content", "index": MATCH}, "children", allow_duplicate=True),
+        Input({"type": "auto-refresh-poll", "index": MATCH}, "n_intervals"),
+        State({"type": "ticket-detail-id", "index": MATCH}, "data"),
+        State({"type": "ticket-detail-back-href", "index": MATCH}, "data"),
+        State({"type": "ticket-detail-back-label", "index": MATCH}, "data"),
         prevent_initial_call=True,
     )
-    def poll_auto_refresh(_n, ticket_id, back_href):
+    def poll_auto_refresh(_n, ticket_id, back_href, back_label):
         with _auto_lock:
             running = _auto_refresh["running"]
             finished = _auto_refresh["finished"]
@@ -803,7 +1043,8 @@ def register_callbacks(app):
         if finished:
             with _auto_lock:
                 _auto_refresh["finished"] = False
-            return "", {"display": "none"}, True, _build_detail(ticket_id, back_href=back_href or "/tickets")
+            instance_ctx = ctx.triggered_id["index"] if isinstance(ctx.triggered_id, dict) else "page"
+            return "", {"display": "none"}, True, _build_detail(ticket_id, back_href=back_href, back_label=back_label or "Tickets", ctx=instance_ctx)
 
         return "", {"display": "none"}, True, no_update
 
@@ -811,20 +1052,30 @@ def register_callbacks(app):
     from dash import ClientsideFunction
     app.clientside_callback(
         ClientsideFunction(namespace="clientside", function_name="openTeamsLink"),
-        Output("teams-share-url", "data"),  # dummy output (no-op)
-        Input("ticket-teams-btn", "n_clicks"),
-        State("teams-share-url", "data"),
+        Output({"type": "teams-share-url", "index": MATCH}, "data"),  # dummy output (no-op)
+        Input({"type": "ticket-teams-btn", "index": MATCH}, "n_clicks"),
+        State({"type": "teams-share-url", "index": MATCH}, "data"),
+        prevent_initial_call=True,
+    )
+
+    # Email share: clientside opens mailto: link
+    app.clientside_callback(
+        ClientsideFunction(namespace="clientside", function_name="openEmailLink"),
+        Output({"type": "email-share-url", "index": MATCH}, "data"),  # dummy output (no-op)
+        Input({"type": "ticket-email-btn", "index": MATCH}, "n_clicks"),
+        State({"type": "email-share-url", "index": MATCH}, "data"),
         prevent_initial_call=True,
     )
 
     @app.callback(
-        Output("ticket-detail-content", "children", allow_duplicate=True),
-        Input("ticket-teams-btn", "n_clicks"),
-        State("ticket-detail-id", "data"),
-        State("ticket-detail-back-href", "data"),
+        Output({"type": "ticket-detail-content", "index": MATCH}, "children", allow_duplicate=True),
+        Input({"type": "ticket-teams-btn", "index": MATCH}, "n_clicks"),
+        State({"type": "ticket-detail-id", "index": MATCH}, "data"),
+        State({"type": "ticket-detail-back-href", "index": MATCH}, "data"),
+        State({"type": "ticket-detail-back-label", "index": MATCH}, "data"),
         prevent_initial_call=True,
     )
-    def log_teams_share(n_clicks, ticket_id, back_href):
+    def log_teams_share(n_clicks, ticket_id, back_href, back_label):
         if not n_clicks or not ticket_id:
             return no_update
         ticket = data.get_ticket_detail(ticket_id)
@@ -835,16 +1086,17 @@ def register_callbacks(app):
                 "teams_share",
                 detail={"message_preview": msg[:500]},
             )
-        return _build_detail(ticket_id, back_href=back_href or "/tickets")
+        instance_ctx = ctx.triggered_id["index"] if isinstance(ctx.triggered_id, dict) else "page"
+        return _build_detail(ticket_id, back_href=back_href, back_label=back_label or "Tickets", ctx=instance_ctx)
 
     @app.callback(
-        Output("excl-save-status", "children"),
-        Input("excl-save-btn", "n_clicks"),
-        State("ticket-detail-id", "data"),
-        State("excl-priority", "checked"),
-        State("excl-sentiment", "checked"),
-        State("excl-complexity", "checked"),
-        State("excl-reason", "value"),
+        Output({"type": "excl-save-status", "index": MATCH}, "children"),
+        Input({"type": "excl-save-btn", "index": MATCH}, "n_clicks"),
+        State({"type": "ticket-detail-id", "index": MATCH}, "data"),
+        State({"type": "excl-priority", "index": MATCH}, "checked"),
+        State({"type": "excl-sentiment", "index": MATCH}, "checked"),
+        State({"type": "excl-complexity", "index": MATCH}, "checked"),
+        State({"type": "excl-reason", "index": MATCH}, "value"),
         prevent_initial_call=True,
     )
     def save_exclusions(n_clicks, ticket_id, excl_priority, excl_sentiment, excl_complexity, reason):
@@ -868,3 +1120,80 @@ def register_callbacks(app):
             return dmc.Text("Saved — rescoring in background…", size="xs", c="green")
         except Exception as e:
             return dmc.Text(f"Error: {e}", size="xs", c="red")
+
+    # ── Ask Matcha chat callbacks ─────────────────────────────────────
+
+    @app.callback(
+        Output({"type": "chat-messages", "index": MATCH}, "children"),
+        Output({"type": "chat-history", "index": MATCH}, "data"),
+        Output({"type": "chat-poll", "index": MATCH}, "disabled"),
+        Output({"type": "chat-input", "index": MATCH}, "value"),
+        Input({"type": "chat-send-btn", "index": MATCH}, "n_clicks"),
+        Input({"type": "chat-input", "index": MATCH}, "n_submit"),
+        State({"type": "chat-input", "index": MATCH}, "value"),
+        State({"type": "chat-history", "index": MATCH}, "data"),
+        State({"type": "ticket-detail-id", "index": MATCH}, "data"),
+        prevent_initial_call=True,
+    )
+    def chat_send(n_clicks, n_submit, user_text, chat_history, ticket_id):
+        if not n_clicks or not (user_text or "").strip():
+            return no_update, no_update, no_update, no_update
+
+        user_text = user_text.strip()
+        instance_ctx = ctx.triggered_id["index"] if isinstance(ctx.triggered_id, dict) else "page"
+
+        ticket = data.get_ticket_detail(ticket_id)
+        actions = data.get_ticket_actions(ticket_id) if ticket_id else []
+        ticket_ctx_str = _build_ticket_context(ticket, actions) if ticket else ""
+
+        prior_history = list(chat_history or [])
+        new_history = prior_history + [{"role": "user", "content": user_text}]
+        messages = [{"role": "user", "content": user_text}]
+
+        threading.Thread(
+            target=_run_chat,
+            args=(instance_ctx, ticket_ctx_str, messages, prior_history),
+            daemon=True,
+        ).start()
+
+        return _render_chat_messages(new_history, pending=True), new_history, False, ""
+
+    @app.callback(
+        Output({"type": "chat-messages", "index": MATCH}, "children", allow_duplicate=True),
+        Output({"type": "chat-history", "index": MATCH}, "data", allow_duplicate=True),
+        Output({"type": "chat-poll", "index": MATCH}, "disabled", allow_duplicate=True),
+        Input({"type": "chat-poll", "index": MATCH}, "n_intervals"),
+        State({"type": "chat-history", "index": MATCH}, "data"),
+        prevent_initial_call=True,
+    )
+    def chat_poll(n_intervals, chat_history):
+        instance_ctx = ctx.triggered_id["index"] if isinstance(ctx.triggered_id, dict) else "page"
+
+        with _chat_lock:
+            state = _chat_state.get(instance_ctx, {})
+
+        if state.get("running"):
+            return no_update, no_update, False
+
+        result = state.get("result")
+        error = state.get("error")
+
+        if result is not None or error is not None:
+            reply = result if result is not None else f"[Error communicating with Matcha: {error}]"
+            new_history = list(chat_history or []) + [{"role": "assistant", "content": reply}]
+            with _chat_lock:
+                _chat_state.pop(instance_ctx, None)
+            return _render_chat_messages(new_history), new_history, True
+
+        return no_update, no_update, True
+
+    @app.callback(
+        Output({"type": "chat-messages", "index": MATCH}, "children", allow_duplicate=True),
+        Output({"type": "chat-history", "index": MATCH}, "data", allow_duplicate=True),
+        Input({"type": "chat-clear-btn", "index": MATCH}, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def chat_clear(n_clicks):
+        if not n_clicks:
+            return no_update, no_update
+        return [], []

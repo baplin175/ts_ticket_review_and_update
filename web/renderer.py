@@ -97,13 +97,24 @@ def render_section(section_def):
     except ValueError as exc:
         return _render_error(str(exc), title=section_def.get("title") or "Invalid section")
 
-    widgets = [render_widget(widget_def) for widget_def in section_def.get("widgets", [])]
+    widget_defs = section_def.get("widgets", [])
+    layout = section_def.get("layout") or {}
+    columns = int(layout.get("columns") or section_def.get("layout_columns") or 1)
+    widgets = [render_widget(widget_def) for widget_def in widget_defs]
     stack_children = []
     if section_def.get("title"):
         stack_children.append(dmc.Text(section_def["title"], fw=600, size="lg"))
     if section_def.get("description"):
         stack_children.append(dmc.Text(section_def["description"], c="dimmed", size="sm"))
-    stack_children.extend(widgets)
+    if columns > 1:
+        stack_children.append(
+            dmc.SimpleGrid(
+                cols={"base": 1, "md": columns},
+                children=widgets,
+            )
+        )
+    else:
+        stack_children.extend(widgets)
     return dmc.Stack(stack_children, gap="md")
 
 
@@ -325,14 +336,27 @@ def _render_chart(comp):
     x = comp.get("x")
     y = comp.get("y")
     color = comp.get("color")
-    title = comp.get("title", "")
     height = comp.get("height", 400)
     chart_id = comp.get("id", f"yaml-chart-{comp['query']}")
+    sort_by = comp.get("sort_by")
+    sort_dir = (comp.get("sort_dir") or "asc").lower()
+    if sort_by:
+        rows = sorted(rows, key=lambda row: row.get(sort_by) is None or row.get(sort_by), reverse=(sort_dir == "desc"))
 
-    fig = _build_figure(rows, chart_type, x, y, color, height)
-
-    if title:
-        fig.update_layout(title=title)
+    fig = _build_figure(
+        rows,
+        chart_type,
+        x,
+        y,
+        color,
+        height,
+        barmode=comp.get("barmode"),
+        series_labels=comp.get("series_labels"),
+    )
+    if comp.get("xaxis_title"):
+        fig.update_xaxes(title_text=comp["xaxis_title"])
+    if comp.get("yaxis_title"):
+        fig.update_yaxes(title_text=comp["yaxis_title"])
 
     return dcc.Graph(
         id=chart_id,
@@ -341,7 +365,7 @@ def _render_chart(comp):
     )
 
 
-def _build_figure(rows, chart_type, x, y, color, height):
+def _build_figure(rows, chart_type, x, y, color, height, barmode=None, series_labels=None):
     fig = go.Figure()
     y_fields = y if isinstance(y, list) else [y]
 
@@ -358,7 +382,7 @@ def _build_figure(rows, chart_type, x, y, color, height):
         x_vals = [r[x] for r in rows]
         for yf in y_fields:
             y_vals = [r[yf] for r in rows]
-            name = yf if len(y_fields) > 1 else None
+            name = series_labels.get(yf, yf) if len(y_fields) > 1 and isinstance(series_labels, dict) else yf if len(y_fields) > 1 else None
             _add_trace(fig, chart_type, x_vals, y_vals, name)
 
     fig.update_layout(
@@ -366,7 +390,7 @@ def _build_figure(rows, chart_type, x, y, color, height):
         margin=dict(l=40, r=20, t=10, b=40),
         height=height,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        barmode="stack" if chart_type == "stacked_bar" else None,
+        barmode=barmode or ("stack" if chart_type == "stacked_bar" else "group" if chart_type in ("bar", "horizontal_bar") else None),
     )
     return fig
 
@@ -397,11 +421,26 @@ def _render_stat_row(comp):
         value = item.get("value")
         if value is None and item.get("field"):
             value = row.get(item["field"], "\u2014")
+        badge = None
+        badge_field = item.get("badge_field")
+        if badge_field:
+            badge_value = row.get(badge_field)
+            if badge_value is not None and badge_value != "":
+                prefix = item.get("badge_prefix", "")
+                direction_field = item.get("badge_direction_field")
+                direction = (row.get(direction_field) if direction_field else item.get("badge_direction")) or ""
+                icon = "↓ " if direction == "down" else "↑ " if direction == "up" else ""
+                badge = {
+                    "text": f"{icon}{prefix}{badge_value}",
+                    "color": item.get("badge_color_down", "green") if direction == "down" else item.get("badge_color_up", "red") if direction == "up" else item.get("badge_color", "gray"),
+                }
         cards.append(_stat_card(
             title=item.get("title", ""),
-            value=value,
+            value=_format_value(value, item.get("format")),
             icon=item.get("icon", "tabler:chart-bar"),
             color=item.get("color", "blue"),
+            subtitle=item.get("subtitle"),
+            badge=badge,
         ))
 
     return dmc.SimpleGrid(
@@ -410,24 +449,70 @@ def _render_stat_row(comp):
     )
 
 
-def _stat_card(title, value, icon, color):
+def _format_value(value, fmt):
+    if value in (None, ""):
+        return "\u2014"
+    if not fmt:
+        return value
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return value
+
+    if fmt == "fixed1":
+        return f"{num:.1f}"
+    if fmt == "fixed2":
+        return f"{num:.2f}"
+    if fmt == "int":
+        return f"{int(round(num))}"
+    if fmt == "percent0":
+        return f"{num:.0f}%"
+    if fmt == "percent1":
+        return f"{num:.1f}%"
+    return value
+
+
+def _stat_card(title, value, icon, color, subtitle=None, badge=None):
+    title_stack = [
+        dmc.Text(title, size="xs", c="dimmed", tt="uppercase", fw=700),
+    ]
+    if subtitle:
+        subtitle_lines = subtitle if isinstance(subtitle, list) else [subtitle]
+        for line in subtitle_lines:
+            title_stack.append(dmc.Text(str(line), size="xs", c="dimmed"))
+    value_group = [dmc.Title(str(value), order=3)]
+    if badge:
+        value_group.append(
+            dmc.Badge(
+                badge["text"],
+                color=badge.get("color", "gray"),
+                variant="light",
+                size="lg",
+            )
+        )
     return dmc.Paper(
         [
             dmc.Group(
                 [
                     dmc.Stack(
-                        [
-                            dmc.Text(title, size="xs", c="dimmed", tt="uppercase", fw=700),
-                            dmc.Title(str(value), order=3),
-                        ],
+                        title_stack,
                         gap=0,
                     ),
-                    dmc.ThemeIcon(
-                        DashIconify(icon=icon, width=28),
-                        variant="light",
-                        color=color,
-                        size=50,
-                        radius="md",
+                    dmc.Stack(
+                        [
+                            dmc.Group(
+                                value_group,
+                                gap="xs",
+                            ),
+                            dmc.ThemeIcon(
+                                DashIconify(icon=icon, width=28),
+                                variant="light",
+                                color=color,
+                                size=50,
+                                radius="md",
+                            ),
+                        ],
+                        align="flex-end",
                     ),
                 ],
                 justify="space-between",
@@ -494,6 +579,8 @@ def validate_widget(widget_def):
             raise ValueError("Chart widget is missing 'x'.")
         if not widget_def.get("y"):
             raise ValueError("Chart widget is missing 'y'.")
+        if widget_def.get("sort_dir") and widget_def.get("sort_dir") not in {"asc", "desc"}:
+            raise ValueError("Chart widget 'sort_dir' must be 'asc' or 'desc'.")
 
     if ctype == "stat_row":
         items = widget_def.get("items", [])

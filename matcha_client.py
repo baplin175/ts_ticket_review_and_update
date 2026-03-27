@@ -31,6 +31,95 @@ def _extract_reply_text(data: object) -> str:
     return str(output) if output is not None else ""
 
 
+def call_matcha_chat(
+    context: str,
+    messages: list[dict],
+    chat_history: list[dict] | None = None,
+    timeout: int = 120,
+    max_retries: int = MAX_RETRIES,
+    retry_backoff: int = RETRY_BACKOFF,
+    inference_server: int | None = MATCHA_RESPONSE_LLM,
+) -> str:
+    """Multi-turn chat against the Matcha completions API.
+
+    Args:
+        context:      Ticket/customer context injected as the 'context' field (not RAG'd).
+        messages:     Current turn — e.g. [{"role": "user", "content": "..."}].
+        chat_history: Prior turns in API format; assistant content will be normalized
+                      to the array form the API expects.
+        timeout:      HTTP timeout in seconds.
+        inference_server: Matcha LLM id override.
+
+    Returns:
+        The assistant reply as a plain string.
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "MATCHA-API-KEY": MATCHA_API_KEY,
+    }
+
+    # Normalize assistant messages in history to the array content format the API expects
+    def _normalize_history(history: list[dict]) -> list[dict]:
+        normalized = []
+        for msg in history:
+            if msg.get("role") == "assistant":
+                content = msg["content"]
+                if isinstance(content, str):
+                    content = [{"type": "output_text", "text": content}]
+                normalized.append({"role": "assistant", "content": content})
+            else:
+                normalized.append(msg)
+        return normalized
+
+    payload: dict = {
+        "mission_id": MATCHA_MISSION_ID,
+        "messages": messages,
+        "context": context,
+    }
+    if chat_history:
+        payload["chat_history"] = _normalize_history(chat_history)
+    if inference_server:
+        payload["options"] = {"responseLLM": inference_server}
+
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = requests.post(
+                MATCHA_URL, json=payload, headers=headers, timeout=timeout
+            )
+            reply_text = _extract_reply_text(response.json())
+            _log_api_call(
+                "POST", MATCHA_URL,
+                payload=payload,
+                status=response.status_code,
+                response_body=reply_text,
+            )
+            if response.status_code >= 500 and attempt < max_retries:
+                wait = retry_backoff * (2 ** (attempt - 1))
+                print(f"    [matcha] Attempt {attempt}/{max_retries} server error ({response.status_code})", flush=True)
+                print(f"    [matcha] Retrying in {wait}s ...", flush=True)
+                last_error = requests.exceptions.HTTPError(
+                    f"Server error {response.status_code}", response=response
+                )
+                time.sleep(wait)
+                continue
+            response.raise_for_status()
+            return reply_text
+        except (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+        ) as exc:
+            _log_api_call("POST", MATCHA_URL, payload=payload, error=str(exc))
+            last_error = exc
+            if attempt < max_retries:
+                wait = retry_backoff * (2 ** (attempt - 1))
+                print(f"    [matcha] Attempt {attempt}/{max_retries} failed: {exc}", flush=True)
+                print(f"    [matcha] Retrying in {wait}s ...", flush=True)
+                time.sleep(wait)
+
+    raise last_error  # type: ignore[misc]
+
+
 def call_matcha(
     prompt: str,
     timeout: int = 300,

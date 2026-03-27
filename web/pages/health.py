@@ -1325,9 +1325,9 @@ def register_health_callbacks(app):
         if not ticket_id:
             return {}, [], {"display": "none"}
         try:
-            from .ticket_detail import _build_detail
+            from .ticket_detail import build_ticket_shell
         except ImportError:
-            from web.pages.ticket_detail import _build_detail
+            from web.pages.ticket_detail import build_ticket_shell
         back_btn = dmc.Button(
             "\u2190 Customer Tickets",
             id="health-drilldown-back-btn",
@@ -1335,8 +1335,8 @@ def register_health_callbacks(app):
             size="compact-sm",
             mb="sm",
         )
-        detail = _build_detail(ticket_id, inline=True)
-        return {"display": "none"}, [back_btn, detail], {}
+        shell = build_ticket_shell(ticket_id, back_href=None, ctx="modal")
+        return {"display": "none"}, [back_btn, shell], {}
 
     @app.callback(
         Output("health-drilldown-ticket-id", "data", allow_duplicate=True),

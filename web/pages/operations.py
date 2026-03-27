@@ -494,7 +494,7 @@ def operations_layout():
 
     return dmc.Stack(
         [
-            dmc.Title("Overview", order=2),
+            dmc.Title("CS Overview", order=2),
             dmc.Text(
                 "Analyst activity metrics — team workload distribution, "
                 "skill mix, and contribution patterns.",
