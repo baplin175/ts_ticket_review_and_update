@@ -64,6 +64,7 @@ def extract_ticket_row(ticket_raw: dict, now: datetime) -> dict:
         or ""
     ).strip() or None
     customer = str(ticket_raw.get("PrimaryCustomer") or "").strip() or None
+    do_number = str(ticket_raw.get("DO") or "").strip() or None
 
     return {
         "ticket_id": int(tid) if tid else None,
@@ -74,6 +75,7 @@ def extract_ticket_row(ticket_raw: dict, now: datetime) -> dict:
         "product_name": product_name,
         "assignee": assignee,
         "customer": customer,
+        "do_number": do_number,
         "date_created": date_created,
         "date_modified": date_modified,
         "closed_at": closed_at,

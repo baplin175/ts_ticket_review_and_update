@@ -29,8 +29,11 @@ See [DOMAIN_MODEL.md](DOMAIN_MODEL.md) for the complete operational domain model
 ## Architecture
 
 ```
-config.py              — Centralised settings (API creds, limits, target ticket, output dir, stage toggles, FORCE_ENRICHMENT, DATABASE_URL, SAFETY_BUFFER_MINUTES, INITIAL_BACKFILL_DAYS, MATCHA_RESPONSE_LLM optional model override)
+config.py              — Centralised settings (API creds, limits, target ticket, output dir, stage toggles, FORCE_ENRICHMENT, DATABASE_URL, SAFETY_BUFFER_MINUTES, INITIAL_BACKFILL_DAYS, MATCHA_RESPONSE_LLM optional model override, AZDEVOPS_BASE/AZDEVOPS_API_KEY/AZDEVOPS_DEFAULT_PROJECT for Azure DevOps Gateway)
 ts_client.py           — TeamSupport REST API client (fetch tickets, activities, inHANCE users, all-users name→ID mapping, update_ticket with auto LastInhComment/LastCustComment, fetch_ticket_by_id)
+azdevops_client.py     — Azure DevOps Gateway REST client (work items: get/query/create/update/comments/revisions/updates/attachments/relations; iterations: list/current; teams: list/members/area-paths; repos: list/branches/commits/pull-requests/threads; pipelines: list/runs; tests: runs/results; wiki: list/pages; convenience helpers: fetch_open_work_items, fetch_work_items_by_state; all functions default to AZDEVOPS_DEFAULT_PROJECT=Impresa)
+run_import_work_items.py — Pull open Azure DevOps work items into DB for configured projects (default: Impresa, PowerManager, Datawest); runs migration, queries gateway via WIQL, upserts into work_items table; accepts project names as CLI args
+run_import_work_item_updates.py — Pull field-level update history for all non-PBI work items into work_item_updates table; fetches from /work-items/{id}/updates for Bug, Epic, Feature, Task items across configured projects; stores field changes, relation changes, and revised-by metadata as JSONB
 activity_cleaner.py    — Text-cleaning pipeline (HTML→text, boilerplate/signature removal)
 matcha_client.py       — Matcha LLM API client (send prompts, extract responses, optional responseLLM override via config)
 prompt_store.py        — DB-backed prompt/version store and seed loader; runtime source of truth for prompts used by enrichment and RCA passes
@@ -80,6 +83,7 @@ web/pages/operations.py — Operations dashboard: analyst activity metrics cover
 web/pages/deep_dive.py — Deep Dive page: per-analyst / per-product operational analytics with multi-select filter bar (analyst, product, time range defaulting to 12 months). KPI stat cards (tickets closed, avg resolution days, avg complexity, frustrated count/%, avg first response hours). Tickets by Severity bar chart, Action Mix donut (InHance action class distribution), Monthly Closure Trend line chart, Resolution Time Distribution histogram (< 1d / 1-7d / 7-30d / 30-90d / 90+d), Avg Days to Close Over Time line chart (monthly average days from creation to close with ticket count on hover), Resolution Time by Analyst grouped bar chart (avg vs median days per analyst, hover shows ticket count / first response time / frustrated %), Workload Heatmap (analyst × product with hover showing avg days/complexity/frustrated), and filterable AG Grid of matching tickets with CSV export. All charts and grid update dynamically when filters change (custom)
 web/pages/root_cause.py — Root Cause Analytics dashboard: tabbed layout (Dashboard + Detail + Glossary). Dashboard tab: KPI stat cards (tickets analyzed, mechanisms found, interventions mapped, pipeline completion %, top mechanism), pipeline completion funnel chart, mechanism class distribution (horizontal bar), intervention type breakdown (donut), component treemap, operation verb frequency bar chart, Sankey flow diagram (Component → Mechanism Class → Intervention Type), root cause by product (stacked bar), Top Failure Patterns by Product section (grouped horizontal bar chart of top 5 L1 clusters per product + AG Grid with row-click drill-down modal showing example tickets from v_cluster_examples), top engineering fixes AG Grid (ROI-ranked from the latest deterministic cluster run) with multi-row checkbox selection and "View Tickets" drill-down modal; Cluster Catalog AG Grid with Subcluster Breakdown chart — segmented control toggles between "By Component" (aggregated, default) and "Component → Operation" (granular) views to avoid an oversized Other bucket when component/operation pairs are too fragmented. Detail tab: original AG Grid of pass-processed tickets with CSV export, row-click expands Pass 1/2/3 cards + cleaned thread text. Glossary tab: reference guide for pipeline passes, canonical failure grammar fields, all 14 mechanism classes, all 8 intervention types, and dashboard metrics (custom)
 web/pages/config_view.py — Pipeline config editor plus prompt administration UI (editable settings with Save button writes to config.py + live reload; MATCHA_RESPONSE_LLM model override, toggles, text fields, sync status; Prompts section edits DB-backed prompts by creating new versions rather than overwriting; custom)
+web/pages/devops.py    — DOs (DevOps) dashboard page: KPI stat cards (total open, bugs, features, tasks, epics), AG Grid of all open non-PBI work items across Impresa/PowerManager/Datawest with state color-coding, floating filters, CSV export, pagination; data from work_items table (custom)
 web_requirements.txt   — Python dependencies for the web dashboard (dash, dash-mantine-components, dash-ag-grid, PyYAML, etc.)
 pipeline/__init__.py   — Standalone CSV pipeline package (no DB dependency, self-contained)
 pipeline/csv_runner.py — CSV-only pipeline orchestrator: Pass 1→3→4→5 using Matcha LLM + existing parsers, per-row error isolation, background job manager with disk + blob-persisted state tracking, progress callbacks; all output CSVs include `prompt_version` column for traceability; `_load_prompt` warns when falling back to flat-file prompts; uploads each pass CSV to Azure Blob Storage on completion so results survive container restarts; per-job run.log captured via JobLogger (timestamps, per-row failures, tracebacks) and uploaded to blob on completion
@@ -1937,3 +1941,56 @@ dded `AND COALESCE(t.group_name, '') != 'Marketing'` |
 | `run_export_pipeline_input.py` | SQL query | Added `AND COALESCE(t.group_name, '') != 'Marketing'` |
 
 After applying: verified 2025-01-01 counts dropped from 655 → 307 (consistent between daily and severity views), confirming 348 marketing-group tickets excluded.
+
+## DO # Field — TeamSupport Custom Field (Migration 042)
+
+### Purpose
+
+Surface the TeamSupport custom field "DO #" (API field name `DO`) — which links a ticket to an Azure DevOps work item — across the database and all dashboard ticket views.
+
+### Migration 042 — `042_add_do_number.sql`
+
+- Adds `do_number TEXT` column to `tickets` table
+- Backfills from `source_payload->>'DO'` for existing tickets (28 tickets populated)
+- Creates index `idx_tickets_do_number` on non-null values
+- Rebuilds `vw_ticket_analytics_core` and `vw_operational_open_tickets` to include `t.do_number`
+
+### Code Changes
+
+| File | Change |
+|------|--------|
+| `ingest/extractors.py` | Extracts `do_number` from ticket raw payload `DO` field |
+| `db.py` | `upsert_ticket()` includes `do_number` in INSERT/ON CONFLICT with `COALESCE(EXCLUDED.do_number, tickets.do_number)` |
+| `web/pages/tickets.py` | Added `DO #` column to ticket grid |
+| `web/pages/overview.py` | Added `DO #` column to drill-down grid |
+| `web/pages/health.py` | Added `DO #` column to drill-down grid |
+| `web/pages/deep_dive.py` | Added `DO #` column to ticket grid |
+| `web/pages/operations.py` | Added `DO #` column to swooper detail grid |
+| `web/pages/ticket_detail.py` | Added `DO #` to metadata header |
+
+## DO Status — Work Item State on Ticket Views (Migration 043)
+
+### Purpose
+
+The `do_number` on a ticket corresponds to a `work_item_id` in the `work_items` table (Azure DevOps). Migration 043 joins `work_items` into `vw_ticket_analytics_core` so every ticket with a DO # automatically shows the current work item state (e.g. Active, Code Complete, Test Complete, Rejected).
+
+### Migration 043 — `043_add_do_status_to_views.sql`
+
+- Rebuilds `vw_ticket_analytics_core` with `LEFT JOIN work_items wi ON wi.work_item_id = t.do_number::integer` exposing `wi.state AS do_status`
+- Rebuilds `vw_operational_open_tickets` (depends on the core view)
+
+### Code Changes
+
+| File | Change |
+|------|--------|
+| `web/data.py` | Added `do_number, do_status` to SELECT in `get_ticket_list`, `get_tickets_by_customers`, `get_analyst_swooper_tickets`, `get_tickets_by_fixes` |
+| `web/pages/tickets.py` | Added `DO Status` column to ticket grid |
+| `web/pages/overview.py` | Added `DO Status` column to drill-down grid |
+| `web/pages/health.py` | Added `DO Status` column to drill-down grid |
+| `web/pages/deep_dive.py` | Added `DO Status` column to ticket grid |
+| `web/pages/operations.py` | Added `DO Status` column to swooper detail grid |
+| `web/pages/ticket_detail.py` | Added `DO Status` to metadata header |
+
+## DOs Page — Refresh Button
+
+Added a "Refresh from Azure DevOps" button to the DOs dashboard page. Clicking it runs `run_import_work_items.py` as a background subprocess with live progress polling (1.5s interval). Shows a log panel during import and a success/failure indicator on completion. On success, the grid automatically reloads with fresh data.

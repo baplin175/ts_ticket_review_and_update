@@ -205,6 +205,41 @@ def test_complete_ingest_run_updates_status(patch_pool):
     conn.commit.assert_called_once()
 
 
+# ── connection pool helpers ─────────────────────────────────────────
+
+def test_get_conn_uses_unkeyed_pool_connection(monkeypatch):
+    import db
+
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value.__enter__ = MagicMock(return_value=cur)
+    conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    pool = MagicMock()
+    pool.getconn.return_value = conn
+
+    monkeypatch.setattr(db, "get_pool", lambda: pool)
+    monkeypatch.setattr(db, "DATABASE_SCHEMA", "tickets_ai")
+
+    result = db.get_conn()
+
+    assert result is conn
+    pool.getconn.assert_called_once_with()
+    cur.execute.assert_called_once_with("SET search_path TO %s;", ("tickets_ai",))
+
+
+def test_put_conn_returns_connection_without_manual_key(monkeypatch):
+    import db
+
+    conn = MagicMock()
+    pool = MagicMock()
+
+    monkeypatch.setattr(db, "get_pool", lambda: pool)
+
+    db.put_conn(conn)
+
+    pool.putconn.assert_called_once_with(conn)
+
+
 # ── get_latest_enrichment_hash ───────────────────────────────────────
 
 def test_get_latest_enrichment_hash_returns_hash():

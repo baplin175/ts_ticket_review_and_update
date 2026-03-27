@@ -113,6 +113,8 @@ _TICKET_COLS = [
     {"field": "closed_at", "headerName": "Closed", "width": 120,
      "valueFormatter": {"function": "params.value ? new Date(params.value).toLocaleDateString() : ''"},
      "sort": "desc"},
+    {"field": "do_number", "headerName": "DO #", "width": 90},
+    {"field": "do_status", "headerName": "DO Status", "width": 110},
 ]
 
 

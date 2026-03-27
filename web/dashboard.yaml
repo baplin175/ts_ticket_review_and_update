@@ -57,6 +57,12 @@ pages:
     module: web.pages.tickets
     layout_func: tickets_layout
 
+  - label: DOs
+    route: /devops
+    icon: tabler:brand-azure
+    module: web.pages.devops
+    layout_func: devops_layout
+
   - label: Operations
     route: /operations
     icon: tabler:zoom-scan

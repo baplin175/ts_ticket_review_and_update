@@ -55,6 +55,39 @@ def query_one(sql, params=()):
         db.put_conn(conn)
 
 
+# ── Azure DevOps work items ─────────────────────────────────────────
+
+def get_open_work_items():
+    """Return all non-closed, non-PBI work items across all projects."""
+    return query("""
+        SELECT work_item_id, project, work_item_type, title, state, reason,
+               assigned_to, area_path, iteration_path, priority,
+               board_column, tags, billable, work_type, comment_count,
+               created_date, changed_date, state_change_date,
+               completed_work, remaining_work, original_estimate
+        FROM work_items
+        WHERE state NOT IN ('Closed', 'Removed')
+          AND work_item_type <> 'Product Backlog Item'
+        ORDER BY changed_date DESC
+    """)
+
+
+def get_work_item_kpis():
+    """Return summary KPI stats for open non-PBI work items."""
+    return query_one("""
+        SELECT COUNT(*) AS total_open,
+               COUNT(*) FILTER (WHERE work_item_type = 'Bug') AS bugs,
+               COUNT(*) FILTER (WHERE work_item_type = 'Feature') AS features,
+               COUNT(*) FILTER (WHERE work_item_type = 'Task') AS tasks,
+               COUNT(*) FILTER (WHERE work_item_type = 'Epic') AS epics,
+               COUNT(DISTINCT project) AS projects,
+               COUNT(DISTINCT assigned_to) AS assignees
+        FROM work_items
+        WHERE state NOT IN ('Closed', 'Removed')
+          AND work_item_type <> 'Product Backlog Item'
+    """)
+
+
 EXCLUDED_HEALTH_GROUPS = ("Marketing", "Sales (S)")
 EXCLUDED_CUSTOMERS = ("InHance Internal",)
 
@@ -254,7 +287,8 @@ def get_ticket_list():
                date_created, date_modified, days_opened, days_since_modified,
                action_count, customer_message_count, inhance_message_count,
                priority, priority_explanation,
-               overall_complexity, frustrated
+               overall_complexity, frustrated,
+               do_number, do_status
         FROM vw_ticket_analytics_core
         WHERE {cust_sql}
         ORDER BY date_modified DESC NULLS LAST
@@ -458,7 +492,8 @@ def get_tickets_by_customers(customer_names, group_names=None):
     return query(f"""
         SELECT v.ticket_id, v.ticket_number, v.ticket_name, v.status, v.severity,
                v.group_name, v.product_name, v.assignee, v.customer, v.days_opened, v.priority,
-               v.overall_complexity, v.frustrated, v.date_modified
+               v.overall_complexity, v.frustrated, v.date_modified,
+               v.do_number, v.do_status
         FROM vw_operational_open_tickets v
         WHERE v.customer IN ({placeholders})
           {group_extra}
@@ -965,6 +1000,7 @@ def get_analyst_swooper_tickets(assignee, months=6):
         SELECT v.ticket_id, v.ticket_number, v.ticket_name, v.status, v.severity,
                v.product_name, v.assignee, v.customer, v.days_opened, v.priority,
                v.overall_complexity, v.frustrated, v.date_modified, v.closed_at,
+               v.do_number, v.do_status,
                tw.total_inh, tw.own,
                CASE WHEN tw.total_inh > 0 THEN ROUND(tw.own::numeric / tw.total_inh, 3) ELSE 1 END AS own_ratio
         FROM ticket_work tw
@@ -1479,6 +1515,7 @@ def get_tickets_by_fixes(fix_keys):
         SELECT DISTINCT v.ticket_id, v.ticket_number, v.ticket_name, v.status, v.severity,
                v.product_name, v.assignee, v.customer, v.days_opened, v.priority,
                v.overall_complexity, v.frustrated, v.date_modified,
+               v.do_number, v.do_status,
                tc.cluster_id AS mechanism_class, p4.intervention_type, p4.intervention_action
         FROM vw_latest_mechanism_ticket_clusters tc
         JOIN latest_p4 p4 ON p4.ticket_id = tc.ticket_id

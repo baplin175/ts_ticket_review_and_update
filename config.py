@@ -83,6 +83,11 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:kaplah@localhost
 # All pipeline tables are created in this schema (not public).
 DATABASE_SCHEMA = os.getenv("DATABASE_SCHEMA", "tickets_ai")
 
+# ── Azure DevOps Gateway ──────────────────────────────────────────────
+AZDEVOPS_BASE = os.getenv("AZDEVOPS_BASE", "https://azdevops-gateway.happybush-a3041e99.eastus.azurecontainerapps.io")
+AZDEVOPS_API_KEY = os.getenv("AZDEVOPS_API_KEY", "tbqoU-WI2-pxWNWqzgJiKmmjjxqrNr2V2Ycj7UbYhpw")
+AZDEVOPS_DEFAULT_PROJECT = os.getenv("AZDEVOPS_DEFAULT_PROJECT", "Impresa")
+
 # ── Webhook receiver ─────────────────────────────────────────────────
 # Shared secret for verifying inbound TeamSupport webhook payloads.
 # The receiver checks the Authorization header ("Bearer <token>") against

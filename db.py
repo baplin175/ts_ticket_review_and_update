@@ -56,7 +56,14 @@ def get_conn():
 
 def put_conn(conn) -> None:
     """Return a connection to the pool."""
-    get_pool().putconn(conn)
+    try:
+        get_pool().putconn(conn)
+    except psycopg2.pool.PoolError:
+        # Connection may belong to a stale pool (e.g. after Dash reloader).
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def close_pool() -> None:
@@ -200,7 +207,7 @@ def upsert_ticket(ticket: Dict[str, Any], *, now: Optional[datetime] = None) -> 
                     status, severity, product_name, assignee, group_name, customer,
                     date_created, date_modified, closed_at,
                     days_opened, days_since_modified,
-                    source_updated_at, source_payload,
+                    source_updated_at, source_payload, do_number,
                     first_ingested_at, last_ingested_at, last_seen_at
                 ) VALUES (
                     %(ticket_id)s, %(ticket_number)s, %(ticket_name)s,
@@ -208,7 +215,7 @@ def upsert_ticket(ticket: Dict[str, Any], *, now: Optional[datetime] = None) -> 
                     %(assignee)s, %(group_name)s, %(customer)s,
                     %(date_created)s, %(date_modified)s, %(closed_at)s,
                     %(days_opened)s, %(days_since_modified)s,
-                    %(source_updated_at)s, %(source_payload)s,
+                    %(source_updated_at)s, %(source_payload)s, %(do_number)s,
                     %(now)s, %(now)s, %(now)s
                 )
                 ON CONFLICT (ticket_id) DO UPDATE SET
@@ -227,6 +234,7 @@ def upsert_ticket(ticket: Dict[str, Any], *, now: Optional[datetime] = None) -> 
                     days_since_modified = EXCLUDED.days_since_modified,
                     source_updated_at   = EXCLUDED.source_updated_at,
                     source_payload      = COALESCE(EXCLUDED.source_payload, tickets.source_payload),
+                    do_number           = COALESCE(EXCLUDED.do_number, tickets.do_number),
                     last_ingested_at    = %(now)s,
                     last_seen_at        = %(now)s;
             """, {
@@ -247,9 +255,180 @@ def upsert_ticket(ticket: Dict[str, Any], *, now: Optional[datetime] = None) -> 
                 "source_updated_at": ticket.get("source_updated_at"),
                 "source_payload": psycopg2.extras.Json(ticket.get("source_payload"))
                     if ticket.get("source_payload") is not None else None,
+                "do_number": ticket.get("do_number"),
                 "now": now,
             })
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def upsert_work_item(item: Dict[str, Any], *, now: Optional[datetime] = None) -> None:
+    """Insert or update an Azure DevOps work item row.  Idempotent on work_item_id."""
+    now = now or datetime.now(timezone.utc)
+    wid = item["work_item_id"]
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO work_items (
+                    work_item_id, project, work_item_type, title, state, reason,
+                    assigned_to, assigned_to_email, area_path, iteration_path,
+                    priority, severity, created_date, changed_date,
+                    state_change_date, activated_date, board_column, tags,
+                    description, completed_work, remaining_work, original_estimate,
+                    value_area, billable, work_type, comment_count, rev,
+                    source_payload,
+                    first_ingested_at, last_ingested_at, last_seen_at
+                ) VALUES (
+                    %(work_item_id)s, %(project)s, %(work_item_type)s, %(title)s,
+                    %(state)s, %(reason)s,
+                    %(assigned_to)s, %(assigned_to_email)s,
+                    %(area_path)s, %(iteration_path)s,
+                    %(priority)s, %(severity)s,
+                    %(created_date)s, %(changed_date)s,
+                    %(state_change_date)s, %(activated_date)s,
+                    %(board_column)s, %(tags)s,
+                    %(description)s, %(completed_work)s,
+                    %(remaining_work)s, %(original_estimate)s,
+                    %(value_area)s, %(billable)s, %(work_type)s,
+                    %(comment_count)s, %(rev)s,
+                    %(source_payload)s,
+                    %(now)s, %(now)s, %(now)s
+                )
+                ON CONFLICT (work_item_id) DO UPDATE SET
+                    project             = EXCLUDED.project,
+                    work_item_type      = EXCLUDED.work_item_type,
+                    title               = EXCLUDED.title,
+                    state               = EXCLUDED.state,
+                    reason              = EXCLUDED.reason,
+                    assigned_to         = EXCLUDED.assigned_to,
+                    assigned_to_email   = EXCLUDED.assigned_to_email,
+                    area_path           = EXCLUDED.area_path,
+                    iteration_path      = EXCLUDED.iteration_path,
+                    priority            = EXCLUDED.priority,
+                    severity            = EXCLUDED.severity,
+                    created_date        = COALESCE(EXCLUDED.created_date, work_items.created_date),
+                    changed_date        = EXCLUDED.changed_date,
+                    state_change_date   = EXCLUDED.state_change_date,
+                    activated_date      = EXCLUDED.activated_date,
+                    board_column        = EXCLUDED.board_column,
+                    tags                = EXCLUDED.tags,
+                    description         = EXCLUDED.description,
+                    completed_work      = EXCLUDED.completed_work,
+                    remaining_work      = EXCLUDED.remaining_work,
+                    original_estimate   = EXCLUDED.original_estimate,
+                    value_area          = EXCLUDED.value_area,
+                    billable            = EXCLUDED.billable,
+                    work_type           = EXCLUDED.work_type,
+                    comment_count       = EXCLUDED.comment_count,
+                    rev                 = EXCLUDED.rev,
+                    source_payload      = COALESCE(EXCLUDED.source_payload, work_items.source_payload),
+                    last_ingested_at    = %(now)s,
+                    last_seen_at        = %(now)s;
+            """, {
+                "work_item_id": wid,
+                "project": item.get("project"),
+                "work_item_type": item.get("work_item_type"),
+                "title": item.get("title"),
+                "state": item.get("state"),
+                "reason": item.get("reason"),
+                "assigned_to": item.get("assigned_to"),
+                "assigned_to_email": item.get("assigned_to_email"),
+                "area_path": item.get("area_path"),
+                "iteration_path": item.get("iteration_path"),
+                "priority": item.get("priority"),
+                "severity": item.get("severity"),
+                "created_date": item.get("created_date"),
+                "changed_date": item.get("changed_date"),
+                "state_change_date": item.get("state_change_date"),
+                "activated_date": item.get("activated_date"),
+                "board_column": item.get("board_column"),
+                "tags": item.get("tags"),
+                "description": item.get("description"),
+                "completed_work": item.get("completed_work"),
+                "remaining_work": item.get("remaining_work"),
+                "original_estimate": item.get("original_estimate"),
+                "value_area": item.get("value_area"),
+                "billable": item.get("billable"),
+                "work_type": item.get("work_type"),
+                "comment_count": item.get("comment_count"),
+                "rev": item.get("rev"),
+                "source_payload": psycopg2.extras.Json(item.get("source_payload"))
+                    if item.get("source_payload") is not None else None,
+                "now": now,
+            })
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def upsert_work_item_updates(work_item_id: int, updates: list,
+                             *, now: Optional[datetime] = None) -> int:
+    """Bulk-upsert Azure DevOps update records for a single work item.
+
+    Returns the number of rows upserted.
+    """
+    now = now or datetime.now(timezone.utc)
+    if not updates:
+        return 0
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            for u in updates:
+                revised_by_obj = u.get("revisedBy") or {}
+                rel = u.get("relations") or {}
+                cur.execute("""
+                    INSERT INTO work_item_updates (
+                        work_item_id, update_id, rev,
+                        revised_by, revised_by_email, revised_date,
+                        field_changes, relations_added, relations_removed,
+                        source_payload,
+                        first_ingested_at, last_ingested_at
+                    ) VALUES (
+                        %(work_item_id)s, %(update_id)s, %(rev)s,
+                        %(revised_by)s, %(revised_by_email)s, %(revised_date)s,
+                        %(field_changes)s, %(relations_added)s, %(relations_removed)s,
+                        %(source_payload)s,
+                        %(now)s, %(now)s
+                    )
+                    ON CONFLICT (work_item_id, update_id) DO UPDATE SET
+                        rev                 = EXCLUDED.rev,
+                        revised_by          = EXCLUDED.revised_by,
+                        revised_by_email    = EXCLUDED.revised_by_email,
+                        revised_date        = EXCLUDED.revised_date,
+                        field_changes       = EXCLUDED.field_changes,
+                        relations_added     = EXCLUDED.relations_added,
+                        relations_removed   = EXCLUDED.relations_removed,
+                        source_payload      = COALESCE(EXCLUDED.source_payload, work_item_updates.source_payload),
+                        last_ingested_at    = %(now)s;
+                """, {
+                    "work_item_id": work_item_id,
+                    "update_id": u.get("id"),
+                    "rev": u.get("rev"),
+                    "revised_by": revised_by_obj.get("displayName"),
+                    "revised_by_email": revised_by_obj.get("uniqueName"),
+                    "revised_date": u.get("revisedDate"),
+                    "field_changes": psycopg2.extras.Json(u.get("fields"))
+                        if u.get("fields") else None,
+                    "relations_added": psycopg2.extras.Json(rel.get("added"))
+                        if rel.get("added") else None,
+                    "relations_removed": psycopg2.extras.Json(rel.get("removed"))
+                        if rel.get("removed") else None,
+                    "source_payload": psycopg2.extras.Json(u)
+                        if u else None,
+                    "now": now,
+                })
+        conn.commit()
+        return len(updates)
     except Exception:
         conn.rollback()
         raise

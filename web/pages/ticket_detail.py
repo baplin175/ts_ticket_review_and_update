@@ -260,7 +260,7 @@ def _build_detail(ticket_id, back_href="/tickets"):
             ),
             dmc.Divider(my="sm"),
             dmc.SimpleGrid(
-                cols={"base": 2, "sm": 4, "lg": 6},
+                cols={"base": 2, "sm": 4, "lg": 7},
                 children=[
                     _meta_item("Created", _format_dt(ticket.get("date_created"))),
                     _meta_item("Modified", _format_dt(ticket.get("date_modified"))),
@@ -268,6 +268,8 @@ def _build_detail(ticket_id, back_href="/tickets"):
                     _meta_item("Messages", ticket.get("action_count", "—")),
                     _meta_item("Customer Msgs", ticket.get("customer_message_count", "—")),
                     _meta_item("inHANCE Msgs", ticket.get("inhance_message_count", "—")),
+                    _meta_item("DO #", ticket.get("do_number", "—")),
+                    _meta_item("DO Status", ticket.get("do_status", "—")),
                 ],
             ),
         ],
