@@ -313,7 +313,8 @@ def get_ticket_list():
                action_count, customer_message_count, inhance_message_count,
                priority, priority_explanation,
                overall_complexity, frustrated,
-               do_number, do_status
+               do_number, do_status,
+               do_aligned, do_mismatch_label, do_alignment_explanation
         FROM vw_ticket_analytics_core
         WHERE {cust_sql}
         ORDER BY date_modified DESC NULLS LAST

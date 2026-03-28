@@ -118,6 +118,18 @@ def main() -> None:
 
     print(f"[work-items] Done — {total} work items upserted.", flush=True)
 
+    # Re-evaluate DO alignment for all tickets linked to a DO.
+    # The hash-based skip in run_do_alignment ensures only tickets whose
+    # DO state or latest comment has changed since the last run are re-scored.
+    import db as _db
+    if total > 0 and _db._is_enabled():
+        try:
+            from run_do_alignment import main as do_alignment_main
+            print("[work-items] Running DO alignment for linked tickets\u2026", flush=True)
+            do_alignment_main()
+        except Exception as exc:
+            print(f"[work-items] DO alignment error: {exc}", flush=True)
+
 
 if __name__ == "__main__":
     main()

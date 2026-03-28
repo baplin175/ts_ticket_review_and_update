@@ -150,6 +150,29 @@ COLUMN_DEFS = [
     {"field": "do_number", "headerName": "DO #", "width": 90,
      "cellRenderer": "DOLink"},
     {"field": "do_status", "headerName": "DO Status", "width": 110},
+    {
+        "field": "do_mismatch_label",
+        "headerName": "DO Align",
+        "width": 160,
+        "cellStyle": {
+            "function": (
+                "params.value === 'aligned' || params.value == null ? {} : "
+                "params.value === 'do_stalled_or_abandoned' ? {'backgroundColor': '#fff3cd', 'color': '#856404'} : "
+                "{'backgroundColor': '#f8d7da', 'color': '#721c24'}"
+            )
+        },
+        "valueFormatter": {
+            "function": (
+                "({'ticket_open_do_closed': 'Open / DO Closed',"
+                "  'ticket_closed_do_active': 'Closed / DO Active',"
+                "  'do_stalled_or_abandoned': 'DO Stalled',"
+                "  'do_scope_mismatch': 'Scope Mismatch',"
+                "  'unclear': 'Unclear',"
+                "  'aligned': 'Aligned'})[params.value] || params.value || '—'"
+            )
+        },
+        "tooltipField": "do_alignment_explanation",
+    },
 ]
 
 DEFAULT_COL_DEF = {

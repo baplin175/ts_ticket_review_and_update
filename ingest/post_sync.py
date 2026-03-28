@@ -88,3 +88,16 @@ def enrich_tickets(
         rebuild_product_ticket_health()
     except Exception as exc:
         print(f"[ingest] Health rollup error: {exc}", flush=True)
+    # DO alignment — runs for any touched ticket that has a linked DO;
+    # tickets without a do_number are filtered out inside run_do_alignment.
+    from run_do_alignment import main as do_alignment_main
+    print(
+        f"\n[ingest] Post-sync: running DO alignment for {len(ticket_ids)} ticket(s)\u2026",
+        flush=True,
+    )
+    try:
+        do_alignment_main(ticket_ids=ticket_ids, force=False)
+    except SystemExit:
+        print("[ingest] DO alignment stage exited.", flush=True)
+    except Exception as exc:
+        print(f"[ingest] DO alignment error: {exc}", flush=True)

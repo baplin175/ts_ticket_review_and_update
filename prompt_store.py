@@ -87,6 +87,27 @@ PROMPT_SEEDS: tuple[PromptSeed, ...] = (
         filename="customer_health_improvement_plan.md",
         version=1,
     ),
+    PromptSeed(
+        key="ticket_chat_system",
+        title="Ticket Chat System Prompt",
+        description="Standing analyst instructions injected as context for ticket-level Matcha chat. Tells Matcha to flag status clarity issues, DO/ticket mismatches, and DO comment drift.",
+        filename="ticket_chat_system.md",
+        version=3,
+    ),
+    PromptSeed(
+        key="customer_chat_system",
+        title="Customer Chat System Prompt",
+        description="Standing analyst instructions injected as context for customer-level Matcha chat. Tells Matcha to flag urgent tickets, status/DO mismatches, and overall customer health.",
+        filename="customer_chat_system.md",
+        version=1,
+    ),
+    PromptSeed(
+        key="do_alignment",
+        title="DO Alignment",
+        description="Checks whether the linked Azure DevOps Delivery Order state and recent comments match the current situation of the customer ticket. Detects stalled DOs, scope mismatches, and status drift.",
+        filename="do_alignment.md",
+        version=2,
+    ),
 )
 
 _SEED_BY_KEY = {seed.key: seed for seed in PROMPT_SEEDS}

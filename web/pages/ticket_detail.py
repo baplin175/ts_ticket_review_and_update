@@ -102,9 +102,24 @@ def _rescore_and_rebuild(ticket_id: int, ticket_number: str) -> None:
 
 # ── Chat helpers ──────────────────────────────────────────────────────
 
-def _build_ticket_context(ticket: dict, actions: list[dict]) -> str:
+def _build_ticket_context(ticket: dict, actions: list[dict], do_comments: list[dict] | None = None) -> str:
     """Serialize ticket metadata + activity thread into Matcha's 'context' field."""
-    lines = [
+    import re as _re
+    from prompt_store import get_prompt
+
+    do_number = ticket.get("do_number")
+    do_status = ticket.get("do_status")
+
+    try:
+        system_prompt = get_prompt("ticket_chat_system", allow_fallback=True)["content"].strip()
+    except Exception:
+        system_prompt = None
+
+    lines = []
+    if system_prompt:
+        lines += ["=== ANALYST INSTRUCTIONS ===", system_prompt, ""]
+
+    lines += [
         "=== TICKET CONTEXT ===",
         f"Ticket #: {ticket.get('ticket_number', '—')}",
         f"Title: {ticket.get('ticket_name', '—')}",
@@ -118,11 +133,30 @@ def _build_ticket_context(ticket: dict, actions: list[dict]) -> str:
         f"Complexity: {ticket.get('overall_complexity', '—')}",
         f"Frustrated: {ticket.get('frustrated', '—')}",
     ]
+    if do_number:
+        lines.append(f"Linked DO #: {do_number} | DO Status: {do_status or '—'}")
+
     for key, label in [("issue_summary", "Issue"), ("cause_summary", "Cause"),
                        ("resolution_summary", "Resolution")]:
         val = ticket.get(key)
         if val:
             lines.append(f"{label}: {val}")
+
+    if do_comments:
+        lines.append("\n=== RECENT DO COMMENTS (most recent first) ===")
+        for c in do_comments[:5]:
+            author = c.get("createdBy", {}).get("displayName", "Unknown")
+            created = c.get("createdDate", "")[:16].replace("T", " ")
+            text_html = c.get("text", "")
+            text_clean = _re.sub(r"<[^>]+>", " ", text_html)
+            text_clean = _re.sub(r"\s+", " ", text_clean).strip()
+            text_clean = (text_clean
+                          .replace("&nbsp;", " ").replace("&amp;", "&")
+                          .replace("&lt;", "<").replace("&gt;", ">")
+                          .replace("&quot;", '"'))
+            if len(text_clean) > 600:
+                text_clean = text_clean[:600] + "…"
+            lines.append(f"[{created}] {author}: {text_clean}")
 
     if actions:
         lines.append("\n=== TICKET THREAD (most recent messages) ===")
@@ -341,6 +375,32 @@ def _meta_item(label, value):
         ],
         gap=2,
     )
+
+
+_ALIGNMENT_LABEL_TEXT = {
+    "aligned": ("Aligned", "green"),
+    "ticket_open_do_closed": ("Open / DO Closed", "red"),
+    "ticket_closed_do_active": ("Closed / DO Active", "red"),
+    "do_stalled_or_abandoned": ("DO Stalled", "yellow"),
+    "do_scope_mismatch": ("Scope Mismatch", "red"),
+    "unclear": ("Unclear", "gray"),
+}
+
+
+def _build_do_alignment_meta(ticket: dict) -> list:
+    """Return a list containing one meta-style stack for DO Alignment (empty list if no data)."""
+    label = ticket.get("do_mismatch_label")
+    explanation = ticket.get("do_alignment_explanation")
+    if not label:
+        return []
+    text, color = _ALIGNMENT_LABEL_TEXT.get(label, (label, "gray"))
+    children = [
+        dmc.Text("DO Align", size="xs", c="dimmed", tt="uppercase", fw=700),
+        dmc.Badge(text, color=color, variant="light", size="sm"),
+    ]
+    if explanation and label != "aligned":
+        children.append(dmc.Text(explanation, size="xs", c="dimmed", mt=2, style={"maxWidth": 260}))
+    return [dmc.Stack(children, gap=2)]
 
 
 # ── Score cards ──────────────────────────────────────────────────────
@@ -579,6 +639,7 @@ def _build_detail(ticket_id, back_href=None, back_label="Tickets", *, ctx="page"
                     _meta_item("inHANCE Msgs", ticket.get("inhance_message_count", "—")),
                     _meta_item("DO #", ticket.get("do_number", "—")),
                     _meta_item("DO Status", ticket.get("do_status", "—")),
+                    *(_build_do_alignment_meta(ticket) if ticket.get("do_number") else []),
                 ],
             ),
         ],
@@ -803,10 +864,31 @@ def _build_detail(ticket_id, back_href=None, back_label="Tickets", *, ctx="page"
         else:
             comments_section = dmc.Text("No comments on this work item.", c="dimmed", ta="center", py="md")
 
-        do_content = dmc.Stack(
-            [wi_header, wi_title, dmc.Divider(my="sm"), comments_section],
-            gap="sm",
-        )
+        # DO alignment callout — shown when misaligned or partially aligned
+        alignment_alert = None
+        do_aligned = ticket.get("do_aligned")
+        do_mismatch_label = ticket.get("do_mismatch_label")
+        do_explanation = ticket.get("do_alignment_explanation")
+        if do_aligned and do_aligned != "Yes":
+            _atext, _acolor = _ALIGNMENT_LABEL_TEXT.get(
+                do_mismatch_label, (do_mismatch_label or "Mismatch", "gray")
+            )
+            alignment_alert = dmc.Alert(
+                children=[
+                    dmc.Text(do_explanation or "Alignment issue detected.", size="sm"),
+                ],
+                title=f"DO Alignment: {_atext}",
+                color=_acolor,
+                icon=DashIconify(icon="tabler:alert-triangle", width=18),
+                mb="sm",
+            )
+
+        do_content_children = [wi_header, wi_title]
+        if alignment_alert:
+            do_content_children.append(alignment_alert)
+        do_content_children += [dmc.Divider(my="sm"), comments_section]
+
+        do_content = dmc.Stack(do_content_children, gap="sm")
 
         do_tab = dmc.TabsTab(
             f"DO #{do_number}", value="devops",
@@ -877,21 +959,7 @@ def _build_detail(ticket_id, back_href=None, back_label="Tickets", *, ctx="page"
     # Ask Matcha chat panel
     chat_panel_content = html.Div(
         [
-            # Message history — scrollable, fills available space
-            html.Div(
-                id={"type": "chat-messages", "index": ctx},
-                style={
-                    "minHeight": 300,
-                    "maxHeight": 480,
-                    "overflowY": "auto",
-                    "display": "flex",
-                    "flexDirection": "column",
-                    "gap": "8px",
-                    "marginBottom": "12px",
-                    "padding": "4px 2px",
-                },
-            ),
-            # Input row — full width at the bottom
+            # Input row — full width at the top
             dmc.Textarea(
                 id={"type": "chat-input", "index": ctx},
                 placeholder="Ask anything about this ticket… (Enter to send, Shift+Enter for newline)",
@@ -920,6 +988,20 @@ def _build_detail(ticket_id, back_href=None, back_label="Tickets", *, ctx="page"
                     ),
                 ],
                 gap="xs",
+                mb="sm",
+            ),
+            # Message history — scrollable, most recent first
+            html.Div(
+                id={"type": "chat-messages", "index": ctx},
+                style={
+                    "minHeight": 300,
+                    "maxHeight": 480,
+                    "overflowY": "auto",
+                    "display": "flex",
+                    "flexDirection": "column",
+                    "gap": "8px",
+                    "padding": "4px 2px",
+                },
             ),
         ],
         className="chat-left-col",
@@ -1160,7 +1242,10 @@ def register_callbacks(app):
 
         ticket = data.get_ticket_detail(ticket_id)
         actions = data.get_ticket_actions(ticket_id) if ticket_id else []
-        ticket_ctx_str = _build_ticket_context(ticket, actions) if ticket else ""
+        do_comments = []
+        if ticket and ticket.get("do_number"):
+            do_comments = data.get_do_comments(ticket["do_number"])
+        ticket_ctx_str = _build_ticket_context(ticket, actions, do_comments) if ticket else ""
 
         prior_history = list(chat_history or [])
         new_history = prior_history + [{"role": "user", "content": user_text}]
@@ -1218,9 +1303,12 @@ def register_callbacks(app):
         Output({"type": "chat-messages", "index": MATCH}, "children", allow_duplicate=True),
         Input({"type": "ticket-detail-content", "index": MATCH}, "children"),
         State({"type": "chat-history", "index": MATCH}, "data"),
+        State({"type": "chat-poll", "index": MATCH}, "disabled"),
         prevent_initial_call=True,
     )
-    def restore_chat_after_refresh(_, chat_history):
+    def restore_chat_after_refresh(_, chat_history, chat_poll_disabled):
         if not chat_history:
             return no_update
-        return _render_chat_messages(chat_history)
+        # If the poll is still active a response is in flight — restore with pending indicator
+        pending = not chat_poll_disabled
+        return _render_chat_messages(chat_history, pending=pending)

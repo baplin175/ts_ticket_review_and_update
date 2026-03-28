@@ -110,7 +110,12 @@ def _cfg_card(title, icon, items):
     )
 
 
-_PROMPT_KEYS = [seed.key for seed in PROMPT_SEEDS]
+_PROMPT_GROUPS = [
+    ("Enrichment",  "tabler:sparkles",          ["sentiment", "ai_priority", "complexity", "do_alignment"]),
+    ("Root Cause",  "tabler:analyze",            ["pass1_phenomenon", "pass2_grammar", "pass3_mechanism", "pass4_intervention", "pass5_cluster_key"]),
+    ("Health",      "tabler:heart-rate-monitor", ["customer_health_explanation", "customer_health_improvement_plan"]),
+    ("Chat",        "tabler:messages",           ["ticket_chat_system", "customer_chat_system"]),
+]
 
 
 def _format_prompt_timestamp(value):
@@ -193,32 +198,41 @@ def _prompts_section():
             withBorder=True, p="md", radius="md", shadow="sm",
         )
 
-    items = [_prompt_editor_card(prompt) for prompt in prompts]
-    return dmc.Paper(
-        [
-            dmc.Group(
+    prompt_by_key = {p["prompt_key"]: p for p in prompts}
+
+    group_cards = []
+    for group_title, group_icon, keys in _PROMPT_GROUPS:
+        items = [_prompt_editor_card(prompt_by_key[k]) for k in keys if k in prompt_by_key]
+        if not items:
+            continue
+        group_cards.append(
+            dmc.Paper(
                 [
-                    dmc.ThemeIcon(
-                        DashIconify(icon="tabler:message-2-code", width=20),
-                        variant="light", color="grape", size=36, radius="md",
-                    ),
-                    dmc.Stack(
+                    dmc.Group(
                         [
-                            dmc.Text("Prompts", fw=700, size="md"),
-                            dmc.Text(
-                                "Prompt edits are stored as new DB versions and used by the active pipeline.",
-                                size="sm",
-                                c="dimmed",
+                            dmc.ThemeIcon(
+                                DashIconify(icon=group_icon, width=18),
+                                variant="light", color="grape", size=32, radius="md",
                             ),
+                            dmc.Text(group_title, fw=700, size="sm"),
                         ],
-                        gap=0,
+                        gap="xs", mb="sm",
                     ),
+                    dmc.Accordion(items, chevronPosition="left", variant="separated"),
                 ],
-                gap="sm", mb="sm",
+                withBorder=True, p="md", radius="md", shadow="sm",
+            )
+        )
+
+    return dmc.Stack(
+        [
+            dmc.Text(
+                "Prompt edits are stored as new DB versions and used by the active pipeline.",
+                size="sm", c="dimmed",
             ),
-            dmc.Accordion(items, chevronPosition="left", variant="separated"),
+            *group_cards,
         ],
-        withBorder=True, p="md", radius="md", shadow="sm",
+        gap="md",
     )
 
 
@@ -253,108 +267,143 @@ def config_layout():
 
     return dmc.Stack(
         [
-            dmc.Title("Pipeline Configuration", order=2),
-            dmc.Text("Edit settings below and click Save. Changes are written to config.py.", size="sm", c="dimmed"),
-
-            # Save button + feedback
-            dmc.Group([
-                dmc.Button(
-                    "Save Configuration",
-                    id="config-save-btn",
-                    leftSection=DashIconify(icon="tabler:device-floppy", width=18),
-                    color="blue",
-                ),
-                dmc.Text(id="config-save-feedback", size="sm", c="green"),
-            ], gap="md"),
-
-            dmc.SimpleGrid(
-                cols={"base": 1, "lg": 2},
-                children=[
-                    _cfg_card("TeamSupport API", "tabler:api", [
-                        _edit_item("cfg-ts-base", "TS_BASE", config.TS_BASE),
-                        _edit_item("cfg-ts-key", "TS_KEY", config.TS_KEY, masked=True),
-                        _edit_item("cfg-ts-user-id", "TS_USER_ID", config.TS_USER_ID),
-                    ]),
-
-                    _cfg_card("Matcha LLM", "tabler:brain", [
-                        _edit_item("cfg-matcha-url", "MATCHA_URL", config.MATCHA_URL),
-                        _edit_item("cfg-matcha-api-key", "MATCHA_API_KEY", config.MATCHA_API_KEY, masked=True),
-                        _edit_item("cfg-matcha-mission-id", "MATCHA_MISSION_ID", config.MATCHA_MISSION_ID),
-                        dmc.Group(
-                            [
-                                dmc.Text("MATCHA_RESPONSE_LLM", size="sm", fw=600, w=220),
-                                dmc.Select(
-                                    id="cfg-matcha-response-llm",
-                                    data=model_options,
-                                    value=response_llm_val,
-                                    placeholder="Select model or leave blank for mission default",
-                                    clearable=True,
-                                    searchable=True,
-                                    style={"flex": 1},
-                                ),
-                            ],
-                            gap="sm",
-                            wrap="nowrap",
+            dmc.Tabs(
+                [
+                    dmc.TabsList([
+                        dmc.TabsTab(
+                            "Settings",
+                            value="settings",
+                            leftSection=DashIconify(icon="tabler:adjustments", width=16),
+                        ),
+                        dmc.TabsTab(
+                            "Prompts",
+                            value="prompts",
+                            leftSection=DashIconify(icon="tabler:message-2-code", width=16),
                         ),
                     ]),
 
-                    _cfg_card("Pull Limits", "tabler:adjustments", [
-                        _edit_item("cfg-max-tickets", "MAX_TICKETS", config.MAX_TICKETS),
-                        _edit_item("cfg-target-tickets", "TARGET_TICKETS",
-                                   ", ".join(config.TARGET_TICKETS) if config.TARGET_TICKETS else "",
-                                   placeholder="Comma-separated ticket numbers"),
-                    ]),
+                    # ── Settings tab ──────────────────────────────────
+                    dmc.TabsPanel(
+                        dmc.Stack(
+                            [
+                                # Save button + feedback
+                                dmc.Group([
+                                    dmc.Button(
+                                        "Save Configuration",
+                                        id="config-save-btn",
+                                        leftSection=DashIconify(icon="tabler:device-floppy", width=18),
+                                        color="blue",
+                                    ),
+                                    dmc.Text(id="config-save-feedback", size="sm", c="green"),
+                                ], gap="md"),
 
-                    _cfg_card("Stage Toggles", "tabler:toggle-right", [
-                        _toggle_item("cfg-run-sentiment", "RUN_SENTIMENT", config.RUN_SENTIMENT),
-                        _toggle_item("cfg-run-priority", "RUN_PRIORITY", config.RUN_PRIORITY),
-                        _toggle_item("cfg-run-complexity", "RUN_COMPLEXITY", config.RUN_COMPLEXITY),
-                        _toggle_item("cfg-force-enrichment", "FORCE_ENRICHMENT", config.FORCE_ENRICHMENT),
-                    ]),
+                                dmc.SimpleGrid(
+                                    cols={"base": 1, "lg": 2},
+                                    children=[
+                                        _cfg_card("TeamSupport API", "tabler:api", [
+                                            _edit_item("cfg-ts-base", "TS_BASE", config.TS_BASE),
+                                            _edit_item("cfg-ts-key", "TS_KEY", config.TS_KEY, masked=True),
+                                            _edit_item("cfg-ts-user-id", "TS_USER_ID", config.TS_USER_ID),
+                                        ]),
 
-                    _cfg_card("Write-Back & Output", "tabler:upload", [
-                        _toggle_item("cfg-ts-writeback", "TS_WRITEBACK", config.TS_WRITEBACK),
-                        _toggle_item("cfg-skip-output-files", "SKIP_OUTPUT_FILES", config.SKIP_OUTPUT_FILES),
-                        _edit_item("cfg-output-dir", "OUTPUT_DIR", config.OUTPUT_DIR),
-                    ]),
+                                        _cfg_card("Matcha LLM", "tabler:brain", [
+                                            _edit_item("cfg-matcha-url", "MATCHA_URL", config.MATCHA_URL),
+                                            _edit_item("cfg-matcha-api-key", "MATCHA_API_KEY", config.MATCHA_API_KEY, masked=True),
+                                            _edit_item("cfg-matcha-mission-id", "MATCHA_MISSION_ID", config.MATCHA_MISSION_ID),
+                                            dmc.Group(
+                                                [
+                                                    dmc.Text("MATCHA_RESPONSE_LLM", size="sm", fw=600, w=220),
+                                                    dmc.Select(
+                                                        id="cfg-matcha-response-llm",
+                                                        data=model_options,
+                                                        value=response_llm_val,
+                                                        placeholder="Select model or leave blank for mission default",
+                                                        clearable=True,
+                                                        searchable=True,
+                                                        style={"flex": 1},
+                                                    ),
+                                                ],
+                                                gap="sm",
+                                                wrap="nowrap",
+                                            ),
+                                        ]),
 
-                    _cfg_card("Database", "tabler:database", [
-                        _edit_item("cfg-database-url", "DATABASE_URL", config.DATABASE_URL, masked=True),
-                        _edit_item("cfg-database-schema", "DATABASE_SCHEMA", config.DATABASE_SCHEMA),
-                    ]),
+                                        _cfg_card("Pull Limits", "tabler:adjustments", [
+                                            _edit_item("cfg-max-tickets", "MAX_TICKETS", config.MAX_TICKETS),
+                                            _edit_item("cfg-target-tickets", "TARGET_TICKETS",
+                                                       ", ".join(config.TARGET_TICKETS) if config.TARGET_TICKETS else "",
+                                                       placeholder="Comma-separated ticket numbers"),
+                                        ]),
 
-                    _cfg_card("Incremental Sync", "tabler:refresh", [
-                        _edit_item("cfg-safety-buffer", "SAFETY_BUFFER_MINUTES", config.SAFETY_BUFFER_MINUTES),
-                        _edit_item("cfg-initial-backfill", "INITIAL_BACKFILL_DAYS", config.INITIAL_BACKFILL_DAYS),
-                    ]),
+                                        _cfg_card("Stage Toggles", "tabler:toggle-right", [
+                                            _toggle_item("cfg-run-sentiment", "RUN_SENTIMENT", config.RUN_SENTIMENT),
+                                            _toggle_item("cfg-run-priority", "RUN_PRIORITY", config.RUN_PRIORITY),
+                                            _toggle_item("cfg-run-complexity", "RUN_COMPLEXITY", config.RUN_COMPLEXITY),
+                                            _toggle_item("cfg-force-enrichment", "FORCE_ENRICHMENT", config.FORCE_ENRICHMENT),
+                                        ]),
 
-                    _cfg_card("Logging", "tabler:file-text", [
-                        _toggle_item("cfg-log-to-file", "LOG_TO_FILE", config.LOG_TO_FILE),
-                        _toggle_item("cfg-log-api-calls", "LOG_API_CALLS", config.LOG_API_CALLS),
-                    ]),
-                ],
-            ),
+                                        _cfg_card("Write-Back & Output", "tabler:upload", [
+                                            _toggle_item("cfg-ts-writeback", "TS_WRITEBACK", config.TS_WRITEBACK),
+                                            _toggle_item("cfg-skip-output-files", "SKIP_OUTPUT_FILES", config.SKIP_OUTPUT_FILES),
+                                            _edit_item("cfg-output-dir", "OUTPUT_DIR", config.OUTPUT_DIR),
+                                        ]),
 
-            dmc.Text(id="prompt-save-feedback", size="sm", c="green"),
-            dmc.Box(id="config-prompts-section", children=_prompts_section()),
+                                        _cfg_card("Database", "tabler:database", [
+                                            _edit_item("cfg-database-url", "DATABASE_URL", config.DATABASE_URL, masked=True),
+                                            _edit_item("cfg-database-schema", "DATABASE_SCHEMA", config.DATABASE_SCHEMA),
+                                        ]),
 
-            # Sync status section
-            dmc.Paper(
-                [
-                    dmc.Group(
-                        [
-                            dmc.ThemeIcon(
-                                DashIconify(icon="tabler:cloud-download", width=20),
-                                variant="light", color="teal", size=36, radius="md",
-                            ),
-                            dmc.Text("Sync Status", fw=700, size="md"),
-                        ],
-                        gap="sm", mb="sm",
+                                        _cfg_card("Incremental Sync", "tabler:refresh", [
+                                            _edit_item("cfg-safety-buffer", "SAFETY_BUFFER_MINUTES", config.SAFETY_BUFFER_MINUTES),
+                                            _edit_item("cfg-initial-backfill", "INITIAL_BACKFILL_DAYS", config.INITIAL_BACKFILL_DAYS),
+                                        ]),
+
+                                        _cfg_card("Logging", "tabler:file-text", [
+                                            _toggle_item("cfg-log-to-file", "LOG_TO_FILE", config.LOG_TO_FILE),
+                                            _toggle_item("cfg-log-api-calls", "LOG_API_CALLS", config.LOG_API_CALLS),
+                                        ]),
+                                    ],
+                                ),
+
+                                # Sync status section
+                                dmc.Paper(
+                                    [
+                                        dmc.Group(
+                                            [
+                                                dmc.ThemeIcon(
+                                                    DashIconify(icon="tabler:cloud-download", width=20),
+                                                    variant="light", color="teal", size=36, radius="md",
+                                                ),
+                                                dmc.Text("Sync Status", fw=700, size="md"),
+                                            ],
+                                            gap="sm", mb="sm",
+                                        ),
+                                        dmc.Stack(sync_items, gap="xs") if sync_items
+                                        else dmc.Text("No sync state recorded yet.", c="dimmed", size="sm"),
+                                    ],
+                                    withBorder=True, p="md", radius="md", shadow="sm",
+                                ),
+                            ],
+                            gap="md",
+                        ),
+                        value="settings",
+                        pt="md",
                     ),
-                    dmc.Stack(sync_items, gap="xs") if sync_items
-                    else dmc.Text("No sync state recorded yet.", c="dimmed", size="sm"),
+
+                    # ── Prompts tab ───────────────────────────────────
+                    dmc.TabsPanel(
+                        dmc.Stack(
+                            [
+                                dmc.Text(id="prompt-save-feedback", size="sm", c="green"),
+                                dmc.Box(id="config-prompts-section", children=_prompts_section()),
+                            ],
+                            gap="sm",
+                        ),
+                        value="prompts",
+                        pt="md",
+                    ),
                 ],
-                withBorder=True, p="md", radius="md", shadow="sm",
+                value="settings",
             ),
         ],
         gap="md",

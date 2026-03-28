@@ -2182,6 +2182,238 @@ def invalidate_stale_pass5(
         put_conn(conn)
 
 
+# ── DO alignment helpers ─────────────────────────────────────────────
+
+def upsert_work_item_comments(work_item_id: int, comments: list,
+                               *, now: Optional[datetime] = None) -> int:
+    """Bulk-upsert Azure DevOps comment records for a single work item.
+
+    Returns the number of rows upserted.
+    """
+    now = now or datetime.now(timezone.utc)
+    if not comments:
+        return 0
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            for c in comments:
+                created_by_obj = c.get("createdBy") or {}
+                cur.execute("""
+                    INSERT INTO work_item_comments (
+                        work_item_id, comment_id, created_date, modified_date,
+                        created_by, created_by_email, text,
+                        source_payload,
+                        first_ingested_at, last_ingested_at
+                    ) VALUES (
+                        %(work_item_id)s, %(comment_id)s,
+                        %(created_date)s, %(modified_date)s,
+                        %(created_by)s, %(created_by_email)s, %(text)s,
+                        %(source_payload)s,
+                        %(now)s, %(now)s
+                    )
+                    ON CONFLICT (work_item_id, comment_id) DO UPDATE SET
+                        created_date     = EXCLUDED.created_date,
+                        modified_date    = EXCLUDED.modified_date,
+                        created_by       = EXCLUDED.created_by,
+                        created_by_email = EXCLUDED.created_by_email,
+                        text             = EXCLUDED.text,
+                        source_payload   = COALESCE(EXCLUDED.source_payload, work_item_comments.source_payload),
+                        last_ingested_at = %(now)s;
+                """, {
+                    "work_item_id": work_item_id,
+                    "comment_id": c.get("id"),
+                    "created_date": c.get("createdDate"),
+                    "modified_date": c.get("modifiedDate"),
+                    "created_by": created_by_obj.get("displayName"),
+                    "created_by_email": created_by_obj.get("uniqueName"),
+                    "text": c.get("text"),
+                    "source_payload": psycopg2.extras.Json(c) if c else None,
+                    "now": now,
+                })
+        conn.commit()
+        return len(comments)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def fetch_do_state_transitions(work_item_id: int, *, limit: int = 10) -> List[Dict[str, Any]]:
+    """Return recent state transitions for a work item from work_item_updates."""
+    rows = fetch_all(
+        """
+        SELECT revised_by, revised_date,
+               field_changes->'System.State'->>'oldValue' AS old_state,
+               field_changes->'System.State'->>'newValue' AS new_state
+        FROM work_item_updates
+        WHERE work_item_id = %s
+          AND field_changes ? 'System.State'
+        ORDER BY revised_date DESC
+        LIMIT %s;
+        """,
+        (work_item_id, limit),
+    )
+    return [
+        {
+            "revised_by": r[0],
+            "revised_date": r[1].isoformat() if r[1] else None,
+            "old_state": r[2],
+            "new_state": r[3],
+        }
+        for r in rows
+    ]
+
+
+def fetch_do_comments(work_item_id: int, *, limit: int = 8) -> List[Dict[str, Any]]:
+    """Return recent comments for a work item from work_item_comments, newest first."""
+    rows = fetch_all(
+        """
+        SELECT created_by, created_date, text
+        FROM work_item_comments
+        WHERE work_item_id = %s
+          AND text IS NOT NULL
+          AND text != ''
+        ORDER BY created_date DESC
+        LIMIT %s;
+        """,
+        (work_item_id, limit),
+    )
+    return [
+        {
+            "created_by": r[0],
+            "created_date": r[1].isoformat() if r[1] else None,
+            "text": r[2],
+        }
+        for r in rows
+    ]
+
+
+def fetch_tickets_for_do_alignment(
+    *,
+    ticket_ids: Optional[List[int]] = None,
+    ticket_numbers: Optional[List[str]] = None,
+    limit: int = 0,
+) -> List[Dict[str, Any]]:
+    """Return tickets with a linked DO, ready for alignment enrichment.
+
+    Includes the input_hash from the most recent alignment run so the caller
+    can skip unchanged tickets.  Applies the standard marketing/Open exclusions.
+    """
+    filters = [
+        "t.do_number IS NOT NULL",
+        "t.do_number != ''",
+        "COALESCE(t.status, '') != 'Open'",
+        "COALESCE(t.assignee, '') != 'Marketing'",
+        "COALESCE(t.group_name, '') != 'Marketing'",
+    ]
+    params: List[Any] = []
+
+    if ticket_ids:
+        placeholders = ",".join(["%s"] * len(ticket_ids))
+        filters.append(f"t.ticket_id IN ({placeholders})")
+        params.extend(ticket_ids)
+    if ticket_numbers:
+        placeholders = ",".join(["%s"] * len(ticket_numbers))
+        filters.append(f"t.ticket_number IN ({placeholders})")
+        params.extend(ticket_numbers)
+
+    where = " AND ".join(filters)
+    limit_clause = f"LIMIT {int(limit)}" if limit else ""
+
+    sql = f"""
+        SELECT
+            t.ticket_id,
+            t.ticket_number,
+            t.do_number,
+            t.status,
+            t.customer,
+            t.days_opened,
+            t.closed_at,
+            wi.state             AS do_state,
+            wi.title             AS do_title,
+            wi.assigned_to       AS do_assigned_to,
+            wi.state_change_date AS do_state_change_date,
+            r.latest_customer_text,
+            r.latest_inhance_text,
+            r.thread_hash,
+            da.input_hash        AS last_input_hash
+        FROM tickets t
+        JOIN work_items wi
+            ON wi.work_item_id = t.do_number::integer
+        LEFT JOIN ticket_thread_rollups r
+            ON r.ticket_id = t.ticket_id
+        LEFT JOIN vw_latest_ticket_do_alignment da
+            ON da.ticket_id = t.ticket_id
+        WHERE {where}
+        ORDER BY t.ticket_id
+        {limit_clause};
+    """
+    rows = fetch_all(sql, tuple(params))
+    return [
+        {
+            "ticket_id": row[0],
+            "ticket_number": row[1],
+            "do_number": row[2],
+            "status": row[3],
+            "customer": row[4],
+            "days_opened": row[5],
+            "closed_at": row[6],
+            "do_state": row[7],
+            "do_title": row[8],
+            "do_assigned_to": row[9],
+            "do_state_change_date": row[10],
+            "latest_customer_text": row[11],
+            "latest_inhance_text": row[12],
+            "thread_hash": row[13],
+            "last_input_hash": row[14],
+        }
+        for row in rows
+    ]
+
+
+def insert_do_alignment(
+    ticket_id: int,
+    *,
+    ticket_number: Optional[str] = None,
+    do_number: Optional[str] = None,
+    do_state: Optional[str] = None,
+    aligned: Optional[str] = None,
+    mismatch_label: Optional[str] = None,
+    explanation: Optional[str] = None,
+    model_name: Optional[str] = None,
+    prompt_name: Optional[str] = None,
+    prompt_version: Optional[str] = None,
+    input_hash: Optional[str] = None,
+    raw_response: Any = None,
+) -> None:
+    """Append a DO alignment scoring row (append-only)."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO ticket_do_alignment (
+                    ticket_id, ticket_number, do_number, do_state,
+                    aligned, mismatch_label, explanation,
+                    model_name, prompt_name, prompt_version,
+                    input_hash, raw_response
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+            """, (
+                ticket_id, ticket_number, do_number, do_state,
+                aligned, mismatch_label, explanation,
+                model_name, prompt_name, prompt_version,
+                input_hash,
+                psycopg2.extras.Json(raw_response) if raw_response is not None else None,
+            ))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
 # ── CLI entry point ──────────────────────────────────────────────────
 
 if __name__ == "__main__":

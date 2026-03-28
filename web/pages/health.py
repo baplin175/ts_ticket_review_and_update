@@ -30,8 +30,20 @@ _customer_chat_lock = threading.Lock()
 
 def _build_customer_context(customer_names: list[str], tickets: list[dict]) -> str:
     """Serialize open ticket summaries for one or more customers into Matcha context."""
+    from prompt_store import get_prompt
+
     label = ", ".join(customer_names)
-    lines = [
+
+    try:
+        system_prompt = get_prompt("customer_chat_system", allow_fallback=True)["content"].strip()
+    except Exception:
+        system_prompt = None
+
+    lines = []
+    if system_prompt:
+        lines += ["=== ANALYST INSTRUCTIONS ===", system_prompt, ""]
+
+    lines += [
         f"=== CUSTOMER CONTEXT: {label} ===",
         f"Open ticket count: {len(tickets)}",
     ]
@@ -43,13 +55,16 @@ def _build_customer_context(customer_names: list[str], tickets: list[dict]) -> s
         lines.append(f"High-priority tickets (score ≤ 2): {len(high_pri)}")
     lines.append("\n=== OPEN TICKETS ===")
     for t in tickets:
+        do_part = ""
+        if t.get("do_number"):
+            do_part = f" | DO #: {t['do_number']} (Status: {t.get('do_status') or '—'})"
         lines.append(
             f"  #{t.get('ticket_number', '?')} | {t.get('ticket_name', '—')} | "
             f"Status: {t.get('status', '—')} | Severity: {t.get('severity', '—')} | "
             f"Product: {t.get('product_name', '—')} | Assignee: {t.get('assignee', '—')} | "
             f"Age: {round(t['days_opened']) if t.get('days_opened') else '—'}d | "
             f"Priority: {t.get('priority', '—')} | Complexity: {t.get('overall_complexity', '—')} | "
-            f"Frustrated: {t.get('frustrated', '—')}"
+            f"Frustrated: {t.get('frustrated', '—')}{do_part}"
         )
     return "\n".join(lines)
 
