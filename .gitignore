@@ -12,6 +12,9 @@ output/
 # Environment
 .env
 .venv/
+
+# Graph API token cache
+.token_cache.bin
 venv/
 .pytest_cache/
 Activities.csv
