@@ -751,11 +751,14 @@ def _collect_grid_ids():
         "health-contributors-grid",
         "rc-fixes-drilldown-grid",
         "ops-swooper-grid",
+        "ops-actionable-detail-grid",
+        "ops-unassigned-detail-grid",
+        "key-account-grid",
     ])
     return ids
 
 
-_EXCLUDED_FROM_GENERIC_CLICK = {"ticket-grid", "health-drilldown-grid"}
+_EXCLUDED_FROM_GENERIC_CLICK = {"ticket-grid", "health-drilldown-grid", "ops-actionable-detail-grid", "ops-scorecard-grid"}
 _TICKET_NUMBER_CLICK_GRID_IDS = [
     grid_id for grid_id in sorted(_collect_grid_ids())
     if grid_id not in _EXCLUDED_FROM_GENERIC_CLICK

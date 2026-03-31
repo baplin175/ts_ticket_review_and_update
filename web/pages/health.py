@@ -12,6 +12,7 @@ from .. import data
 from ..health_explainer import generate_customer_health_explanation
 from ..health_planner import generate_customer_health_plan
 from ..renderer import grid_with_export, ticket_number_column
+from glossary import HEALTH_GLOSSARY
 
 
 _HEALTH_BAND_COLORS = {
@@ -20,6 +21,39 @@ _HEALTH_BAND_COLORS = {
     "at_risk": "orange",
     "critical": "red",
 }
+
+
+def _glossary_section(title, icon, color, items):
+    """Render a glossary section with a title and list of term→definition pairs."""
+    rows = []
+    for term, defn in items:
+        rows.append(
+            dmc.Group([
+                dmc.Badge(term, color=color, variant="light", size="lg",
+                          style={"minWidth": "200px", "textAlign": "left"}),
+                dmc.Text(defn, size="sm", style={"flex": 1}),
+            ], gap="sm", wrap="nowrap", align="flex-start")
+        )
+    return dmc.Paper([
+        dmc.Group([
+            dmc.ThemeIcon(DashIconify(icon=icon, width=20),
+                          variant="light", color=color, size=36, radius="md"),
+            dmc.Text(title, fw=700, size="md"),
+        ], gap="sm", mb="md"),
+        dmc.Stack(rows, gap="xs"),
+    ], withBorder=True, p="md", radius="md", shadow="sm")
+
+
+def _build_health_glossary_tab():
+    return dmc.Stack([
+        dmc.Text(
+            "Reference guide for the scoring columns and health metrics "
+            "used in the Customer Health dashboard.",
+            size="sm", c="dimmed",
+        ),
+        *[_glossary_section(s["title"], s["icon"], s["color"], s["items"])
+          for s in HEALTH_GLOSSARY],
+    ], gap="md")
 
 
 # ── Customer chat state ───────────────────────────────────────────────
@@ -177,12 +211,13 @@ CUSTOMER_COLS = [
     {"field": "friction_score", "headerName": "Friction", "minWidth": 75, "flex": 0.5, "type": "numericColumn",
      "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"},
      "cellStyle": {"function": "params.value != null && params.value > 5 ? {'color': '#c2255c', 'fontWeight': 'bold'} : {}"}},
-    {"field": "concentration_score", "headerName": "Concentr.", "minWidth": 85, "flex": 0.55, "type": "numericColumn",
+    # Concentration and Breadth columns hidden while excluded from scoring.
+    # {"field": "concentration_score", "headerName": "Concentr.", ...},
+    # {"field": "breadth_score", "headerName": "Breadth", ...},
+    {"field": "nops_score", "headerName": "NoPS", "minWidth": 70, "flex": 0.5, "type": "numericColumn",
      "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"},
-     "cellStyle": {"function": "params.value != null && params.value > 5 ? {'color': '#6741d9', 'fontWeight': 'bold'} : {}"}},
-    {"field": "breadth_score", "headerName": "Breadth", "minWidth": 75, "flex": 0.5, "type": "numericColumn",
-     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"},
-     "cellStyle": {"function": "params.value != null && params.value > 5 ? {'color': '#0b7285', 'fontWeight': 'bold'} : {}"}},
+     "cellStyle": {"function": "params.value != null && params.value >= 50 ? {'color': '#e03131', 'fontWeight': 'bold'} : params.value != null && params.value >= 30 ? {'color': '#f08c00', 'fontWeight': 'bold'} : {}"},
+     "headerTooltip": "Distress score excluding Professional Services tickets"},
     {"field": "as_of_date", "headerName": "As Of", "minWidth": 90, "flex": 0.55,
      "valueFormatter": {"function": "params.value ? new Date(params.value).toLocaleDateString() : ''"}},
 ]
@@ -256,10 +291,9 @@ CONTRIBUTOR_COL_DEFS = [
      "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
     {"field": "friction_contribution", "headerName": "Friction", "width": 100, "type": "numericColumn",
      "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
-    {"field": "concentration_contribution", "headerName": "Concentration", "width": 120, "type": "numericColumn",
-     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
-    {"field": "breadth_contribution", "headerName": "Breadth", "width": 95, "type": "numericColumn",
-     "valueFormatter": {"function": "params.value != null ? Math.round(params.value) : ''"}},
+    # Concentration and Breadth contribution columns hidden while excluded from scoring.
+    # {"field": "concentration_contribution", "headerName": "Concentration", ...},
+    # {"field": "breadth_contribution", "headerName": "Breadth", ...},
     {"field": "days_opened", "headerName": "Age (d)", "width": 90, "type": "numericColumn"},
     {"field": "date_modified", "headerName": "Last Modified", "width": 130,
      "valueFormatter": {"function": "params.value ? new Date(params.value).toLocaleDateString() : ''"}},
@@ -325,8 +359,9 @@ def _history_figure(history_rows):
         ("pressure_score", "Pressure", "#e03131", 2),
         ("aging_score", "Aging", "#f08c00", 2),
         ("friction_score", "Friction", "#c2255c", 2),
-        ("concentration_score", "Concentration", "#6741d9", 2),
-        ("breadth_score", "Breadth", "#0b7285", 2),
+        # Concentration and Breadth traces hidden while excluded from scoring.
+        # ("concentration_score", "Concentration", "#6741d9", 2),
+        # ("breadth_score", "Breadth", "#0b7285", 2),
     ]
     dates = [row["as_of_date"] for row in history_rows]
     for field, label, color, width in fields:
@@ -367,7 +402,8 @@ def _history_summary(latest_row):
             _history_stat("Pressure", f'{round(latest_row.get("pressure_score", 0))}', "red"),
             _history_stat("Aging", f'{round(latest_row.get("aging_score", 0))}', "orange"),
             _history_stat("Friction", f'{round(latest_row.get("friction_score", 0))}', "pink"),
-            _history_stat("Concentration", f'{round(latest_row.get("concentration_score", 0))}', "violet"),
+            # Concentration stat hidden while excluded from scoring.
+            # _history_stat("Concentration", f'{round(latest_row.get("concentration_score", 0))}', "violet"),
         ],
     )
 
@@ -788,6 +824,8 @@ def health_layout():
                     dmc.TabsList([
                         dmc.TabsTab("Customer Health", value="customer"),
                         dmc.TabsTab("Product Health", value="product"),
+                        dmc.TabsTab("Glossary", value="glossary",
+                                    leftSection=DashIconify(icon="tabler:book", width=16)),
                     ]),
                     dmc.TabsPanel(
                         dmc.Stack([
@@ -871,6 +909,7 @@ def health_layout():
                         value="customer", pt="md",
                     ),
                     dmc.TabsPanel(product_grid, value="product", pt="md"),
+                    dmc.TabsPanel(_build_health_glossary_tab(), value="glossary", pt="md"),
                 ],
                 value="customer",
             ),

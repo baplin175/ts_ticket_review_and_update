@@ -307,17 +307,19 @@ def get_open_by_status():
 def get_ticket_list():
     cust_sql, cust_params = _customer_exclusion_clause(column="customer")
     return query(f"""
-        SELECT ticket_id, ticket_number, ticket_name, status, severity,
-               product_name, assignee, customer, group_name,
-               date_created, date_modified, days_opened, days_since_modified,
-               action_count, customer_message_count, inhance_message_count,
-               priority, priority_explanation,
-               overall_complexity, frustrated,
-               do_number, do_status,
-               do_aligned, do_mismatch_label, do_alignment_explanation
-        FROM vw_ticket_analytics_core
+        SELECT t.ticket_id, t.ticket_number, t.ticket_name, t.status, t.severity,
+               t.product_name, t.assignee, t.customer, t.group_name,
+               t.date_created, t.date_modified, t.days_opened, t.days_since_modified,
+               t.action_count, t.customer_message_count, t.inhance_message_count,
+               t.priority, t.priority_explanation,
+               t.overall_complexity, t.frustrated,
+               t.do_number, t.do_status,
+               t.do_aligned, t.do_mismatch_label, t.do_alignment_explanation,
+               COALESCE(f.flag_review, FALSE) AS flag_review
+        FROM vw_ticket_analytics_core t
+        LEFT JOIN ticket_flags f ON f.ticket_id = t.ticket_id
         WHERE {cust_sql}
-        ORDER BY date_modified DESC NULLS LAST
+        ORDER BY t.date_modified DESC NULLS LAST
     """, tuple(cust_params))
 
 
@@ -408,6 +410,27 @@ def upsert_ticket_exclusions(ticket_id, *, exclude_priority: bool,
             exclude_complexity = EXCLUDED.exclude_complexity,
             reason             = EXCLUDED.reason
     """, (ticket_id, exclude_priority, exclude_sentiment, exclude_complexity, reason or None))
+
+
+# ── Ticket flags ─────────────────────────────────────────────────────
+
+def get_ticket_flag(ticket_id):
+    """Return the flag_review boolean for a ticket, or False if no row."""
+    row = query_one("SELECT flag_review FROM ticket_flags WHERE ticket_id = %s", (ticket_id,))
+    return bool(row["flag_review"]) if row else False
+
+
+def toggle_ticket_flag(ticket_id):
+    """Toggle the review flag for a ticket and return the new state."""
+    _execute("""
+        INSERT INTO ticket_flags (ticket_id, flag_review, flagged_at)
+        VALUES (%s, TRUE, now())
+        ON CONFLICT (ticket_id) DO UPDATE SET
+            flag_review = NOT ticket_flags.flag_review,
+            flagged_at  = CASE WHEN NOT ticket_flags.flag_review THEN now()
+                               ELSE ticket_flags.flagged_at END
+    """, (ticket_id,))
+    return get_ticket_flag(ticket_id)
 
 
 # ── Health ───────────────────────────────────────────────────────────
@@ -502,6 +525,7 @@ def get_customer_health():
                 COALESCE(ROUND(SUM(friction_contribution), 2), 0) AS friction_score,
                 COALESCE(ROUND(SUM(concentration_contribution), 2), 0) AS concentration_score,
                 COALESCE(ROUND(SUM(breadth_contribution), 2), 0) AS breadth_score,
+                COALESCE(ROUND(SUM(total_contribution) FILTER (WHERE COALESCE(group_name, '') != 'Professional Services (PS)'), 2), 0) AS nops_score,
                 NULL::jsonb AS factor_summary_json,
                 %s AS score_formula_version
             FROM latest_date
@@ -2619,3 +2643,175 @@ def get_ops_most_improved_customers(months=3, group_name="Customer Support (CS)"
         LIMIT %s
     """, (str(months), group_name, *cust_params, str(months),
           group_name, *cust_params, top_n))
+
+
+def get_ops_actionable_tickets():
+    """Return actionable ticket counts per CS analyst.
+
+    "Actionable" mirrors the TeamSupport report filter:
+    - Not closed, not Complete/Pending (Customer)/Survey/Confirm Resolution status
+    - Not in Marketing or Development groups
+    - Assigned to a support analyst (or unassigned)
+    """
+    support_analysts = _get_support_analysts()
+    support_ph = ", ".join(["%s"] * len(support_analysts))
+    cust_sql, cust_params = _customer_exclusion_clause(column="t.customer")
+
+    return query(f"""
+        SELECT
+            COALESCE(NULLIF(t.assignee, ''), '(Unassigned)') AS analyst,
+            COUNT(*) AS actionable_count
+        FROM tickets t
+        WHERE t.closed_at IS NULL
+          AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved', 'Open')
+          AND COALESCE(t.status, '') NOT LIKE '%%Complete%%'
+          AND COALESCE(t.status, '') NOT LIKE '%%Pending (Customer)%%'
+          AND COALESCE(t.status, '') NOT LIKE '%%Survey%%'
+          AND COALESCE(t.status, '') != 'Confirm Resolution'
+          AND COALESCE(t.group_name, '') NOT IN ('Marketing', 'Development (D)')
+          AND {cust_sql}
+          AND (t.assignee IN ({support_ph}) OR t.assignee IS NULL OR t.assignee = '')
+        GROUP BY analyst
+        ORDER BY actionable_count DESC
+    """, (*cust_params, *support_analysts))
+
+
+def get_ops_actionable_tickets_detail(analyst):
+    """Return the actual actionable ticket rows for a given analyst."""
+    support_analysts = _get_support_analysts()
+    support_ph = ", ".join(["%s"] * len(support_analysts))
+    cust_sql, cust_params = _customer_exclusion_clause(column="t.customer")
+
+    is_unassigned = analyst == "(Unassigned)"
+    if is_unassigned:
+        assignee_clause = "(t.assignee IS NULL OR t.assignee = '')"
+        assignee_params = ()
+    else:
+        assignee_clause = "t.assignee = %s"
+        assignee_params = (analyst,)
+
+    return query(f"""
+        SELECT
+            t.ticket_id, t.ticket_number, t.ticket_name, t.status, t.severity,
+            t.product_name, t.customer, t.group_name,
+            EXTRACT(DAY FROM NOW() - t.date_created)::int AS days_open,
+            t.date_created::date AS date_created
+        FROM tickets t
+        WHERE t.closed_at IS NULL
+          AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved', 'Open')
+          AND COALESCE(t.status, '') NOT LIKE '%%Complete%%'
+          AND COALESCE(t.status, '') NOT LIKE '%%Pending (Customer)%%'
+          AND COALESCE(t.status, '') NOT LIKE '%%Survey%%'
+          AND COALESCE(t.status, '') != 'Confirm Resolution'
+          AND COALESCE(t.group_name, '') NOT IN ('Marketing', 'Development (D)')
+          AND {cust_sql}
+          AND (t.assignee IN ({support_ph}) OR t.assignee IS NULL OR t.assignee = '')
+          AND {assignee_clause}
+        ORDER BY t.date_created
+    """, (*cust_params, *support_analysts, *assignee_params))
+
+
+def get_ops_unassigned_by_product():
+    """Return unassigned actionable ticket counts grouped by product."""
+    cust_sql, cust_params = _customer_exclusion_clause(column="t.customer")
+
+    return query(f"""
+        SELECT
+            COALESCE(NULLIF(t.product_name, ''), '(No Product)') AS product,
+            COUNT(*) AS ticket_count
+        FROM tickets t
+        WHERE t.closed_at IS NULL
+          AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved', 'Open')
+          AND COALESCE(t.status, '') NOT LIKE '%%Complete%%'
+          AND COALESCE(t.status, '') NOT LIKE '%%Pending (Customer)%%'
+          AND COALESCE(t.status, '') NOT LIKE '%%Survey%%'
+          AND COALESCE(t.status, '') != 'Confirm Resolution'
+          AND COALESCE(t.group_name, '') NOT IN ('Marketing', 'Development (D)')
+          AND {cust_sql}
+          AND (t.assignee IS NULL OR t.assignee = '')
+        GROUP BY product
+        ORDER BY ticket_count DESC
+    """, (*cust_params,))
+
+
+def get_ops_unassigned_by_product_detail(product):
+    """Return individual unassigned actionable tickets for a given product."""
+    cust_sql, cust_params = _customer_exclusion_clause(column="t.customer")
+
+    is_no_product = product == "(No Product)"
+    if is_no_product:
+        product_clause = "(t.product_name IS NULL OR t.product_name = '')"
+        product_params = ()
+    else:
+        product_clause = "t.product_name = %s"
+        product_params = (product,)
+
+    return query(f"""
+        SELECT
+            t.ticket_id, t.ticket_number, t.ticket_name, t.status, t.severity,
+            t.product_name, t.customer, t.group_name,
+            EXTRACT(DAY FROM NOW() - t.date_created)::int AS days_open,
+            t.date_created::date AS date_created
+        FROM tickets t
+        WHERE t.closed_at IS NULL
+          AND COALESCE(t.status, '') NOT IN ('Closed', 'Resolved', 'Open')
+          AND COALESCE(t.status, '') NOT LIKE '%%Complete%%'
+          AND COALESCE(t.status, '') NOT LIKE '%%Pending (Customer)%%'
+          AND COALESCE(t.status, '') NOT LIKE '%%Survey%%'
+          AND COALESCE(t.status, '') != 'Confirm Resolution'
+          AND COALESCE(t.group_name, '') NOT IN ('Marketing', 'Development (D)')
+          AND {cust_sql}
+          AND (t.assignee IS NULL OR t.assignee = '')
+          AND {product_clause}
+        ORDER BY t.date_created
+    """, (*cust_params, *product_params))
+
+
+# ── Key Account Tickets ─────────────────────────────────────────────
+
+def get_key_account_tickets():
+    """Return open tickets for key accounts with health score and DO info."""
+    exclusion_sql, exclusion_params = _default_group_exclusion_clause(column="group_name")
+    return query("""
+        WITH key_customers AS (
+            SELECT DISTINCT customer_name AS customer
+            FROM customer_attributes
+            WHERE COALESCE(key_acct, FALSE) = TRUE
+              AND COALESCE(is_active, FALSE) = TRUE
+        ),
+        latest_health AS (
+            SELECT customer,
+                   COALESCE(ROUND(SUM(total_contribution), 2), 0) AS customer_health_score,
+                   CASE
+                       WHEN COALESCE(ROUND(SUM(total_contribution), 2), 0) < 15 THEN 'healthy'
+                       WHEN COALESCE(ROUND(SUM(total_contribution), 2), 0) < 30 THEN 'watch'
+                       WHEN COALESCE(ROUND(SUM(total_contribution), 2), 0) < 50 THEN 'at_risk'
+                       ELSE 'critical'
+                   END AS customer_health_band
+            FROM customer_health_ticket_contributors
+            WHERE score_formula_version = %s
+              AND as_of_date = (
+                  SELECT MAX(as_of_date)
+                  FROM customer_health_ticket_contributors
+                  WHERE score_formula_version = %s
+              )
+              AND """ + exclusion_sql + """
+            GROUP BY customer
+        )
+        SELECT
+            t.ticket_id, t.ticket_number, t.ticket_name, t.status, t.severity,
+            t.product_name, t.assignee, t.customer, t.group_name,
+            t.days_opened,
+            t.date_created, t.date_modified,
+            t.priority, t.overall_complexity, t.frustrated,
+            t.do_number, t.do_status,
+            t.do_aligned, t.do_mismatch_label,
+            COALESCE(h.customer_health_score, 0) AS health_score,
+            COALESCE(h.customer_health_band, 'healthy') AS health_band
+        FROM vw_ticket_analytics_core t
+        JOIN key_customers kc ON kc.customer = t.customer
+        LEFT JOIN latest_health h ON h.customer = t.customer
+        WHERE COALESCE(t.status, '') NOT LIKE '%%Closed%%'
+          AND COALESCE(t.status, '') NOT IN ('Resolved', 'Open')
+        ORDER BY h.customer_health_score DESC NULLS LAST, t.customer, t.date_created
+    """, ("v1", "v1", *exclusion_params))

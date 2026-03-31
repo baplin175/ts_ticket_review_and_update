@@ -1,5 +1,30 @@
 var dagcomponentfuncs = (window.dashAgGridComponentFunctions = window.dashAgGridComponentFunctions || {});
 
+// Generic clickable cell — renders value as a link-styled span.
+// On click, pushes {action: "rowClick", ...rowData} via setData → cellRendererData.
+dagcomponentfuncs.ClickableCell = function (props) {
+    return React.createElement('span', {
+        style: {color: '#228be6', cursor: 'pointer', textDecoration: 'none', fontWeight: '500'},
+        onClick: function () {
+            props.setData(Object.assign({action: 'rowClick'}, props.data));
+        }
+    }, props.value);
+};
+
+// Clickable cell that writes to a dcc.Store via dash_clientside.set_props.
+// Use colDef.cellRendererParams.storeId to specify the target store component ID.
+dagcomponentfuncs.StoreLink = function (props) {
+    var storeId = (props.colDef.cellRendererParams || {}).storeId;
+    return React.createElement('span', {
+        style: {color: '#228be6', cursor: 'pointer', textDecoration: 'none', fontWeight: '500'},
+        onClick: function () {
+            if (storeId && window.dash_clientside && window.dash_clientside.set_props) {
+                window.dash_clientside.set_props(storeId, {data: props.value});
+            }
+        }
+    }, props.value);
+};
+
 dagcomponentfuncs.DOLink = function (props) {
     if (!props.value) return null;
     return React.createElement('a', {

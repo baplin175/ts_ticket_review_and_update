@@ -149,6 +149,54 @@ DASHBOARD_METRICS = {
     ],
 }
 
+# ── Health Scoring Dimensions ────────────────────────────────────────
+
+HEALTH_SCORING = {
+    "title": "Health Scoring Dimensions",
+    "icon": "tabler:heartbeat",
+    "color": "red",
+    "items": [
+        ("Distress Score",
+         "Overall customer distress — the sum of Pressure, Aging, Friction, "
+         "Concentration, and Breadth across all open tickets for the customer. "
+         "Higher is worse."),
+        ("Band",
+         "Health band derived from the Distress score: "
+         "Healthy (< 15), Watch (15–29), At Risk (30–49), Critical (≥ 50)."),
+        ("Key Acct",
+         "Whether the customer is flagged as a critical key account."),
+        ("Open",
+         "Count of non-closed tickets for the customer."),
+        ("High Pri",
+         "Count of open tickets with priority ≤ 3 (high priority)."),
+        ("Frustrated",
+         "Count of tickets in the last 90 days where customer frustration was detected."),
+        ("Pressure",
+         "Measures active workload intensity. Points: +1 per open ticket, "
+         "+2 if high priority, +1.5 if high complexity, +3 if frustrated."),
+        ("Aging",
+         "Measures how long tickets have been open and idle. Points: "
+         "+3 if open ≥ 90 days, +2 if ≥ 60, +1 if ≥ 30; "
+         "+1.5 if unmodified ≥ 30 days, +1 if ≥ 14, +0.5 if ≥ 7."),
+        ("Friction",
+         "Measures back-and-forth effort and frustration. Points: "
+         "+1.5 if frustrated, +1 if ≥ 10 customer messages (+0.5 if ≥ 5), "
+         "+1 if ≥ 6 handoffs (+0.5 if ≥ 3)."),
+        ("Concentration",
+         "Measures repeat issues in the same area. If a ticket's cluster "
+         "has multiple tickets for the same customer: min(2.0, (count − 1) × 0.5)."),
+        ("Breadth",
+         "Measures how many distinct products and components are affected. "
+         "Calculated as (distinct products − 1) × 0.75 + (distinct components − 1) × 0.25, "
+         "distributed evenly across the customer's tickets."),
+        ("NoPS",
+         "Distress score recalculated after excluding all Professional Services (PS) "
+         "group tickets. Shows the support-only health signal without project noise."),
+        ("As Of",
+         "The date when the health snapshot was last calculated."),
+    ],
+}
+
 # ── All sections (ordered) ───────────────────────────────────────────
 
 GLOSSARY = [
@@ -157,4 +205,8 @@ GLOSSARY = [
     MECHANISM_CLASSES,
     INTERVENTION_TYPES,
     DASHBOARD_METRICS,
+]
+
+HEALTH_GLOSSARY = [
+    HEALTH_SCORING,
 ]

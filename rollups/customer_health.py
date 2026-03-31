@@ -7,6 +7,11 @@ from typing import Any
 
 SCORE_FORMULA_VERSION = "v1"
 
+# Dimensions temporarily excluded from the distress score calculation.
+# Contributions are still computed and stored (for future re-enablement)
+# but zeroed out before aggregation.
+EXCLUDED_DIMENSIONS: set[str] = {"concentration", "breadth"}
+
 
 def build_customer_health_model(rows: list[dict[str, Any]], as_of_date) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Build customer snapshot rows and per-ticket contributor rows for one date."""
@@ -241,6 +246,13 @@ def _build_contributor_row(
         concentration = min(2.0, round((cluster_count - 1) * 0.5, 2))
 
     breadth = round(breadth_contribution, 2)
+
+    # Zero out excluded dimensions so they don't contribute to the total.
+    if "concentration" in EXCLUDED_DIMENSIONS:
+        concentration = 0.0
+    if "breadth" in EXCLUDED_DIMENSIONS:
+        breadth = 0.0
+
     total = round(pressure + aging + friction + concentration + breadth, 2)
 
     return {

@@ -1,8 +1,9 @@
 """Operations dashboard — analyst activity metrics and contribution patterns."""
 
+import dash
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
-from dash import callback, dcc, html, Input, Output, State, no_update
+from dash import callback, dcc, html, Input, Output, State, no_update, callback_context
 from dash_iconify import DashIconify
 from datetime import date, timedelta
 import plotly.graph_objects as go
@@ -38,6 +39,31 @@ SCORECARD_COLS = [
      "type": "numericColumn"},
     {"field": "frustrated_count", "headerName": "Frustrated", "minWidth": 80, "flex": 1,
      "type": "numericColumn"},
+]
+
+ACTIONABLE_SUMMARY_COLS = [
+    {"field": "analyst", "headerName": "Analyst", "flex": 1, "cellRenderer": "ClickableCell"},
+    {"field": "actionable_count", "headerName": "Actionable Tickets", "width": 160,
+     "type": "numericColumn"},
+]
+
+UNASSIGNED_BY_PRODUCT_COLS = [
+    {"field": "product", "headerName": "Product", "flex": 1},
+    {"field": "ticket_count", "headerName": "Tickets", "width": 100,
+     "type": "numericColumn"},
+]
+
+ACTIONABLE_DETAIL_COLS = [
+    ticket_number_column(width=100, pinned="left"),
+    {"field": "ticket_name", "headerName": "Name", "minWidth": 200, "flex": 1,
+     "tooltipField": "ticket_name"},
+    {"field": "status", "headerName": "Status", "width": 130},
+    {"field": "severity", "headerName": "Severity", "width": 110},
+    {"field": "product_name", "headerName": "Product", "width": 130},
+    {"field": "customer", "headerName": "Customer", "width": 150},
+    {"field": "group_name", "headerName": "Group", "width": 140},
+    {"field": "days_open", "headerName": "Age (d)", "width": 85, "type": "numericColumn"},
+    {"field": "date_created", "headerName": "Created", "width": 110},
 ]
 
 SWOOPER_DETAIL_COLS = [
@@ -478,6 +504,8 @@ def operations_layout():
     avg_close_rows = data.get_ops_avg_days_to_close(months=6)
     backlog_snap = data.get_ops_backlog_snapshot()
     most_improved = data.get_ops_most_improved_customers(months=3)
+    actionable = data.get_ops_actionable_tickets()
+    unassigned_by_product = data.get_ops_unassigned_by_product()
 
     # Current month avg
     cur_month_avg = avg_close_rows[-1]["avg_days_to_close"] if avg_close_rows else None
@@ -492,7 +520,7 @@ def operations_layout():
     else:
         overall_avg = None
 
-    return dmc.Stack(
+    result = dmc.Stack(
         [
             dmc.Title("CS Overview", order=2),
             dmc.Text(
@@ -556,6 +584,117 @@ def operations_layout():
                                     ),
                                 ],
                                 gap="xs",
+                            ),
+                        ],
+                        withBorder=True, p="md", radius="md", shadow="sm",
+                    ),
+                ],
+            ),
+
+            # ── Actionable Tickets + Unassigned by Product (side by side)
+            dmc.SimpleGrid(
+                cols={"base": 1, "md": 2},
+                spacing="md",
+                children=[
+                    dmc.Paper(
+                        [
+                            dmc.Group(
+                                [
+                                    DashIconify(icon="tabler:alert-circle", width=22, color="#e8590c"),
+                                    dmc.Text("Actionable Tickets by Analyst", fw=600, size="lg"),
+                                ],
+                                gap="xs", mb="xs",
+                            ),
+                            dmc.Text(
+                                "Open tickets requiring attention — excludes Pending (Customer), "
+                                "Complete, Survey, Confirm Resolution, and non-CS groups. "
+                                "Click an analyst name to view tickets.",
+                                c="dimmed", size="xs", mb="sm",
+                            ),
+                            dmc.Table(
+                                [
+                                    dmc.TableThead(
+                                        dmc.TableTr([
+                                            dmc.TableTh("Analyst"),
+                                            dmc.TableTh("Actionable Tickets", style={"textAlign": "right"}),
+                                        ])
+                                    ),
+                                    dmc.TableTbody(
+                                        [
+                                            dmc.TableTr([
+                                                dmc.TableTd(
+                                                    html.A(
+                                                        r["analyst"],
+                                                        id={"type": "actionable-analyst-link", "index": r["analyst"]},
+                                                        style={"color": "#228be6", "cursor": "pointer", "textDecoration": "none"},
+                                                    )
+                                                ),
+                                                dmc.TableTd(str(r["actionable_count"]), style={"textAlign": "right"}),
+                                            ])
+                                            for r in actionable
+                                        ] if actionable else [
+                                            dmc.TableTr([
+                                                dmc.TableTd("No actionable tickets", colSpan=2, style={"textAlign": "center"}),
+                                            ])
+                                        ]
+                                    ),
+                                ],
+                                striped=True, highlightOnHover=True, withTableBorder=True,
+                            ),
+                            dmc.Text(
+                                f"Total: {sum(r['actionable_count'] for r in actionable)}" if actionable else "",
+                                fw=600, size="sm", ta="right", mt="xs",
+                            ),
+                        ],
+                        withBorder=True, p="md", radius="md", shadow="sm",
+                    ),
+                    dmc.Paper(
+                        [
+                            dmc.Group(
+                                [
+                                    DashIconify(icon="tabler:box-off", width=22, color="#868e96"),
+                                    dmc.Text("Unassigned Tickets by Product", fw=600, size="lg"),
+                                ],
+                                gap="xs", mb="xs",
+                            ),
+                            dmc.Text(
+                                "Actionable tickets with no analyst assigned, by product. "
+                                "Click a product to view tickets.",
+                                c="dimmed", size="xs", mb="sm",
+                            ),
+                            dmc.Table(
+                                [
+                                    dmc.TableThead(
+                                        dmc.TableTr([
+                                            dmc.TableTh("Product"),
+                                            dmc.TableTh("Tickets", style={"textAlign": "right"}),
+                                        ])
+                                    ),
+                                    dmc.TableTbody(
+                                        [
+                                            dmc.TableTr([
+                                                dmc.TableTd(
+                                                    html.A(
+                                                        r["product"],
+                                                        id={"type": "unassigned-product-link", "index": r["product"]},
+                                                        style={"color": "#228be6", "cursor": "pointer", "textDecoration": "none"},
+                                                    )
+                                                ),
+                                                dmc.TableTd(str(r["ticket_count"]), style={"textAlign": "right"}),
+                                            ])
+                                            for r in unassigned_by_product
+                                        ] if unassigned_by_product else [
+                                            dmc.TableTr([
+                                                dmc.TableTd("No unassigned tickets", colSpan=2, style={"textAlign": "center"}),
+                                            ])
+                                        ]
+                                    ),
+                                ],
+                                striped=True, highlightOnHover=True, withTableBorder=True,
+                            ),
+                            dmc.Text(
+                                f"Total: {sum(r['ticket_count'] for r in unassigned_by_product)}" if unassigned_by_product else "",
+                                fw=600, size="sm", ta="right", mt="xs",
                             ),
                         ],
                         withBorder=True, p="md", radius="md", shadow="sm",
@@ -639,7 +778,6 @@ def operations_layout():
                             columnDefs=SCORECARD_COLS,
                             defaultColDef=DEFAULT_COL_DEF,
                             dashGridOptions={
-                                "rowSelection": "single",
                                 "animateRows": True,
                                 "domLayout": "autoHeight",
                                 "tooltipShowDelay": 200,
@@ -809,7 +947,7 @@ def operations_layout():
                             columnDefs=SWOOPER_DETAIL_COLS,
                             defaultColDef=DEFAULT_COL_DEF,
                             dashGridOptions={
-                                "rowSelection": "single",
+                                "rowSelection": {"mode": "singleRow", "checkboxes": False},
                                 "animateRows": True,
                                 "domLayout": "autoHeight",
                                 "tooltipShowDelay": 200,
@@ -820,9 +958,62 @@ def operations_layout():
                     ),
                 ],
             ),
+
+            # ── Actionable tickets drilldown (hidden until row click)
+            dmc.Modal(
+                id="actionable-modal",
+                title="Actionable Tickets",
+                size="90%",
+                opened=False,
+                children=[
+                    dmc.Text(id="actionable-modal-subtitle", c="dimmed", size="sm", mb="sm"),
+                    grid_with_export(
+                        dag.AgGrid(
+                            id="ops-actionable-detail-grid",
+                            rowData=[],
+                            columnDefs=ACTIONABLE_DETAIL_COLS,
+                            defaultColDef=DEFAULT_COL_DEF,
+                            dashGridOptions={
+                                "animateRows": True,
+                                "domLayout": "autoHeight",
+                                "tooltipShowDelay": 200,
+                            },
+                            style={"width": "100%"},
+                        ),
+                        "ops-actionable-detail-grid",
+                    ),
+                ],
+            ),
+
+            # ── Unassigned product drilldown (hidden until row click)
+            dmc.Modal(
+                id="unassigned-product-modal",
+                title="Unassigned Tickets",
+                size="90%",
+                opened=False,
+                children=[
+                    dmc.Text(id="unassigned-product-modal-subtitle", c="dimmed", size="sm", mb="sm"),
+                    grid_with_export(
+                        dag.AgGrid(
+                            id="ops-unassigned-detail-grid",
+                            rowData=[],
+                            columnDefs=ACTIONABLE_DETAIL_COLS,
+                            defaultColDef=DEFAULT_COL_DEF,
+                            dashGridOptions={
+                                "animateRows": True,
+                                "domLayout": "autoHeight",
+                                "tooltipShowDelay": 200,
+                            },
+                            style={"width": "100%"},
+                        ),
+                        "ops-unassigned-detail-grid",
+                    ),
+                ],
+            ),
         ],
         gap="md",
     )
+    return result
 
 
 # ── Callbacks ────────────────────────────────────────────────────────
@@ -830,26 +1021,67 @@ def operations_layout():
 def register_operations_callbacks(app):
 
     @app.callback(
-        Output("swooper-modal", "opened"),
-        Output("swooper-modal", "title"),
-        Output("swooper-modal-subtitle", "children"),
-        Output("ops-swooper-grid", "rowData"),
-        Input("ops-scorecard-grid", "selectedRows"),
+        Output("actionable-modal", "opened", allow_duplicate=True),
+        Output("actionable-modal", "title", allow_duplicate=True),
+        Output("actionable-modal-subtitle", "children", allow_duplicate=True),
+        Output("ops-actionable-detail-grid", "rowData", allow_duplicate=True),
+        Input({"type": "actionable-analyst-link", "index": dash.ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
-    def scorecard_row_click(selected_rows):
-        if not selected_rows:
+    def actionable_analyst_click(n_clicks_list):
+        if not callback_context.triggered_id:
             return False, no_update, no_update, no_update
-        row = selected_rows[0]
-        analyst = row.get("assignee")
-        if not analyst:
+        analyst = callback_context.triggered_id.get("index") if isinstance(callback_context.triggered_id, dict) else None
+        if not analyst or not any(c for c in n_clicks_list if c):
             return False, no_update, no_update, no_update
-        tickets = data.get_analyst_swooper_tickets(analyst, 6)
+        tickets = data.get_ops_actionable_tickets_detail(analyst)
         subtitle = (
-            f"{len(tickets)} ticket{'s' if len(tickets) != 1 else ''} "
-            f"closed by {analyst} with under 25% of InHance actions"
+            f"{len(tickets)} actionable ticket{'s' if len(tickets) != 1 else ''} "
+            f"assigned to {analyst}"
         )
-        return True, f"Ticket Details — {analyst}", subtitle, tickets
+        return True, f"Actionable Tickets — {analyst}", subtitle, tickets
+
+    @app.callback(
+        Output("url", "pathname", allow_duplicate=True),
+        Output("url", "search", allow_duplicate=True),
+        Output("actionable-modal", "opened", allow_duplicate=True),
+        Input("ops-actionable-detail-grid", "cellClicked"),
+        prevent_initial_call=True,
+    )
+    def actionable_detail_ticket_click(cell_event):
+        if not isinstance(cell_event, dict):
+            return no_update, no_update, no_update
+        col_id = cell_event.get("colId") or (
+            (cell_event.get("colDef") or {}).get("field")
+        )
+        if col_id != "ticket_number":
+            return no_update, no_update, no_update
+        row = cell_event.get("data") or {}
+        tid = row.get("ticket_id")
+        if tid is None:
+            return no_update, no_update, no_update
+        return f"/ticket/{tid}", "", False
+
+    @app.callback(
+        Output("unassigned-product-modal", "opened"),
+        Output("unassigned-product-modal", "title"),
+        Output("unassigned-product-modal-subtitle", "children"),
+        Output("ops-unassigned-detail-grid", "rowData"),
+        Input({"type": "unassigned-product-link", "index": dash.ALL}, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def unassigned_product_click(n_clicks_list):
+        if not callback_context.triggered_id:
+            return False, no_update, no_update, no_update
+        product = callback_context.triggered_id.get("index") if isinstance(callback_context.triggered_id, dict) else None
+        if not product or not any(c for c in n_clicks_list if c):
+            return False, no_update, no_update, no_update
+        tickets = data.get_ops_unassigned_by_product_detail(product)
+        subtitle = (
+            f"{len(tickets)} unassigned ticket{'s' if len(tickets) != 1 else ''} "
+            f"for {product}"
+        )
+        return True, f"Unassigned Tickets — {product}", subtitle, tickets
 
     @app.callback(
         Output("ops-monthly-closure-container", "children"),

@@ -69,6 +69,15 @@ def _run_sync_in_background():
 COLUMN_DEFS = [
     ticket_number_column(width=110, pinned="left"),
     {
+        "field": "flag_review",
+        "headerName": "🚩",
+        "width": 55,
+        "cellStyle": {
+            "function": "params.value ? {'color': '#e8590c', 'fontWeight': 'bold', 'textAlign': 'center'} : {'textAlign': 'center', 'color': '#ced4da'}"
+        },
+        "valueFormatter": {"function": "params.value ? '🚩' : ''"},
+    },
+    {
         "field": "ticket_name",
         "headerName": "Name",
         "minWidth": 200,

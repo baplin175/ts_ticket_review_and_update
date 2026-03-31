@@ -91,8 +91,17 @@ pages:
     children:
       - label: Customer Health
         route: /health
+      - label: Key Account Tickets
+        route: /health/key-accounts
       - label: Plans
         route: /health/plans
+
+  - label: Key Account Tickets
+    route: /health/key-accounts
+    icon: tabler:star
+    module: web.pages.key_accounts
+    layout_func: key_accounts_layout
+    hidden: true
 
   - label: Health Plans
     route: /health/plans

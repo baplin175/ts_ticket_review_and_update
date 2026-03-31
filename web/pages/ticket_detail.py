@@ -553,6 +553,8 @@ def _build_detail(ticket_id, back_href=None, back_label="Tickets", *, ctx="page"
     email_body = urllib.parse.quote(_build_email_body(ticket), safe="")
     email_url = f"mailto:?subject={email_subject}&body={email_body}"
 
+    flag_review = data.get_ticket_flag(ticket_id)
+
     # Header
     nav_row = dmc.Group(
         [c for c in [
@@ -562,6 +564,17 @@ def _build_detail(ticket_id, back_href=None, back_label="Tickets", *, ctx="page"
             ) if back_href else None,
             dmc.Group(
                 [
+                    dmc.Button(
+                        "Flagged" if flag_review else "Flag",
+                        id={"type": "ticket-flag-btn", "index": ctx},
+                        leftSection=DashIconify(
+                            icon="tabler:flag-filled" if flag_review else "tabler:flag",
+                            width=16,
+                        ),
+                        variant="filled" if flag_review else "light",
+                        color="orange",
+                        size="compact-sm",
+                    ),
                     dmc.Button(
                         "Share in Teams",
                         id={"type": "ticket-teams-btn", "index": ctx},
@@ -1154,6 +1167,24 @@ def register_callbacks(app):
         State({"type": "email-share-url", "index": MATCH}, "data"),
         prevent_initial_call=True,
     )
+
+    # Flag toggle: toggle review flag and rebuild to update button state
+    @app.callback(
+        Output({"type": "ticket-detail-content", "index": MATCH}, "children", allow_duplicate=True),
+        Input({"type": "ticket-flag-btn", "index": MATCH}, "n_clicks"),
+        State({"type": "ticket-detail-id", "index": MATCH}, "data"),
+        State({"type": "ticket-detail-back-href", "index": MATCH}, "data"),
+        State({"type": "ticket-detail-back-label", "index": MATCH}, "data"),
+        State({"type": "active-tab", "index": MATCH}, "data"),
+        prevent_initial_call=True,
+    )
+    def toggle_flag(n_clicks, ticket_id, back_href, back_label, active_tab):
+        if not n_clicks or not ticket_id:
+            return no_update
+        data.toggle_ticket_flag(ticket_id)
+        instance_ctx = ctx.triggered_id["index"] if isinstance(ctx.triggered_id, dict) else "page"
+        return _build_detail(ticket_id, back_href=back_href, back_label=back_label or "Tickets",
+                             ctx=instance_ctx, active_tab=active_tab or "thread")
 
     @app.callback(
         Output({"type": "ticket-detail-content", "index": MATCH}, "children", allow_duplicate=True),
