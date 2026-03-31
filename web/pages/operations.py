@@ -94,7 +94,7 @@ DEFAULT_COL_DEF = {
     "sortable": True,
     "filter": True,
     "resizable": True,
-    "filterParams": {"caseSensitive": False},
+    "filterParams": {"caseSensitive": False, "maxNumConditions": 10},
 }
 
 

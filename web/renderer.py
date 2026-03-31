@@ -258,7 +258,7 @@ def _render_grid(comp):
 
     default_col_def = comp.get("default_col_def", {
         "sortable": True, "filter": True, "resizable": True,
-        "filterParams": {"caseSensitive": False},
+        "filterParams": {"caseSensitive": False, "maxNumConditions": 10},
     })
     grid_options = comp.get("grid_options", {
         "pagination": True, "paginationPageSize": 25, "animateRows": True,

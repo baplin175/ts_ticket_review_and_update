@@ -2781,11 +2781,11 @@ def get_key_account_tickets():
         ),
         latest_health AS (
             SELECT customer,
-                   COALESCE(ROUND(SUM(total_contribution), 2), 0) AS customer_health_score,
+                   COALESCE(CEIL(SUM(total_contribution))::int, 0) AS customer_health_score,
                    CASE
-                       WHEN COALESCE(ROUND(SUM(total_contribution), 2), 0) < 15 THEN 'healthy'
-                       WHEN COALESCE(ROUND(SUM(total_contribution), 2), 0) < 30 THEN 'watch'
-                       WHEN COALESCE(ROUND(SUM(total_contribution), 2), 0) < 50 THEN 'at_risk'
+                       WHEN COALESCE(CEIL(SUM(total_contribution))::int, 0) < 15 THEN 'healthy'
+                       WHEN COALESCE(CEIL(SUM(total_contribution))::int, 0) < 30 THEN 'watch'
+                       WHEN COALESCE(CEIL(SUM(total_contribution))::int, 0) < 50 THEN 'at_risk'
                        ELSE 'critical'
                    END AS customer_health_band
             FROM customer_health_ticket_contributors

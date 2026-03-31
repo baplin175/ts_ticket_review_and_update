@@ -481,7 +481,7 @@ def _build_content(assignees, products, months):
         rowData=tickets,
         columnDefs=_TICKET_COLS,
         defaultColDef={"sortable": True, "filter": True, "resizable": True,
-                       "floatingFilter": True, "filterParams": {"caseSensitive": False}},
+                       "floatingFilter": True, "filterParams": {"caseSensitive": False, "maxNumConditions": 10}},
         dashGridOptions={
             "rowSelection": "single",
             "pagination": True,

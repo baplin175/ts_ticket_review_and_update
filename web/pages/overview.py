@@ -529,7 +529,7 @@ def overview_layout():
                             defaultColDef={
                                 "sortable": True, "filter": True,
                                 "resizable": True, "floatingFilter": True,
-                                "filterParams": {"caseSensitive": False},
+                                "filterParams": {"caseSensitive": False, "maxNumConditions": 10},
                             },
                             dashGridOptions={
                                 "rowSelection": "single",

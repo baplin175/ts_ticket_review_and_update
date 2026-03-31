@@ -245,7 +245,7 @@ DEFAULT_COL_DEF = {
     "sortable": True,
     "filter": True,
     "resizable": True,
-    "filterParams": {"caseSensitive": False},
+    "filterParams": {"caseSensitive": False, "maxNumConditions": 10},
 }
 
 # ── Drill-down column defs ───────────────────────────────────────────
@@ -970,7 +970,7 @@ def health_layout():
                                             defaultColDef={
                                                 "sortable": True, "filter": True,
                                                 "resizable": True, "floatingFilter": True,
-                                                "filterParams": {"caseSensitive": False},
+                                                "filterParams": {"caseSensitive": False, "maxNumConditions": 10},
                                             },
                                             dashGridOptions={
                                                 "rowSelection": "single",
@@ -1125,7 +1125,7 @@ def health_layout():
                             defaultColDef={
                                 "sortable": True, "filter": True,
                                 "resizable": True, "floatingFilter": True,
-                                "filterParams": {"caseSensitive": False},
+                                "filterParams": {"caseSensitive": False, "maxNumConditions": 10},
                             },
                             dashGridOptions={
                                 "rowSelection": "single",

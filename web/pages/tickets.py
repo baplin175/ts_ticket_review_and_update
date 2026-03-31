@@ -189,7 +189,7 @@ DEFAULT_COL_DEF = {
     "filter": True,
     "resizable": True,
     "floatingFilter": True,
-    "filterParams": {"caseSensitive": False},
+    "filterParams": {"caseSensitive": False, "maxNumConditions": 10},
 }
 
 
